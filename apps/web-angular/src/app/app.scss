@@ -1,0 +1,50 @@
+.shell {
+  display: flex;
+  min-height: 100vh;
+}
+
+.sidebar {
+  width: 220px;
+  flex-shrink: 0;
+  background: #111827;
+  color: #e5e7eb;
+  display: flex;
+  flex-direction: column;
+
+  &__brand {
+    padding: 1.25rem 1rem;
+    font-weight: 700;
+    font-size: 1.05rem;
+    border-bottom: 1px solid #1f2937;
+  }
+
+  &__nav {
+    display: flex;
+    flex-direction: column;
+    padding: 0.5rem;
+    gap: 0.15rem;
+  }
+
+  &__link {
+    padding: 0.6rem 0.75rem;
+    border-radius: 6px;
+    color: inherit;
+    text-decoration: none;
+    font-size: 0.925rem;
+
+    &:hover {
+      background: #1f2937;
+    }
+
+    &--active {
+      background: #2563eb;
+      color: #fff;
+    }
+  }
+}
+
+.content {
+  flex: 1;
+  padding: 2rem;
+  background: #f9fafb;
+}

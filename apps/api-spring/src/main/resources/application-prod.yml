@@ -1,0 +1,20 @@
+# Production profile placeholder.
+#
+# Phase 1 does not define production infrastructure or secrets management.
+# When production deployment is designed, this file should configure:
+#   - stricter logging (no SQL logging, no framework DEBUG output)
+#   - a real secrets source for DB_*/RABBITMQ_* (not a committed .env file)
+#   - management.endpoint.health.show-details restricted to authorized callers
+#
+# All connection settings still come from environment variables defined in
+# application.yml; nothing below overrides credentials.
+
+management:
+  endpoint:
+    health:
+      show-details: when-authorized
+
+logging:
+  level:
+    root: INFO
+    org.hibernate.SQL: OFF

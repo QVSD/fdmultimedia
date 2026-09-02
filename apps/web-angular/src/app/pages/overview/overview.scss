@@ -1,0 +1,25 @@
+.overview {
+  .lead {
+    color: var(--color-text-muted);
+  }
+
+  .status-card {
+    display: inline-block;
+    margin-top: 1rem;
+    padding: 0.75rem 1.25rem;
+    border-radius: 6px;
+    font-weight: 600;
+    background: #e5e7eb;
+    color: #374151;
+
+    &--online {
+      background: #dcfce7;
+      color: #166534;
+    }
+
+    &--offline {
+      background: #fee2e2;
+      color: #991b1b;
+    }
+  }
+}

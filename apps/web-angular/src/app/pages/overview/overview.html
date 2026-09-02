@@ -1,0 +1,19 @@
+<section class="overview">
+  <h1>Overview</h1>
+  <p class="lead">Media automation platform &mdash; Phase 1 foundation.</p>
+
+  <div class="status-card" [class.status-card--online]="backendStatus() === 'online'"
+                            [class.status-card--offline]="backendStatus() === 'offline'">
+    @switch (backendStatus()) {
+      @case ('checking') {
+        <span>Checking backend&hellip;</span>
+      }
+      @case ('online') {
+        <span>Backend: Online</span>
+      }
+      @case ('offline') {
+        <span>Backend: Offline</span>
+      }
+    }
+  </div>
+</section>

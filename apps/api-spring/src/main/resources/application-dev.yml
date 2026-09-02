@@ -1,0 +1,16 @@
+# Local / Docker Compose development profile.
+# All values are still sourced from environment variables (see /.env.example
+# at the repo root); this profile only turns on developer-friendly logging
+# and diagnostics. It must never be activated in production.
+
+logging:
+  level:
+    root: INFO
+    com.fdmultimedia.api: DEBUG
+    org.hibernate.SQL: WARN
+
+spring:
+  jpa:
+    properties:
+      hibernate:
+        format_sql: true
