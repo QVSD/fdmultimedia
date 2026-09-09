@@ -16,7 +16,8 @@ will exercise and what the acceptance criteria are based on.
 For a fresh development database, `.env` can provide bootstrap values for the
 initial owner, workspace, and optional second user. The bootstrap runs only
 with `SPRING_PROFILES_ACTIVE=dev`, hashes passwords with BCrypt, and is
-idempotent.
+idempotent. It can also create one development worker credential; only the
+BCrypt secret hash is stored.
 
 ## Working on the backend alone
 
@@ -61,7 +62,7 @@ or on Windows:
 mvnw.cmd test
 ```
 
-The current backend tests cover web/controller behavior only — they don't
+The current backend tests are lightweight unit and web-slice tests; they don't
 need Postgres or RabbitMQ running.
 
 ## Working on the frontend alone
@@ -103,3 +104,31 @@ same-origin API requests to `/api/*`; Nginx forwards them to Spring Boot.
 Spring Security issues an `HttpOnly` session cookie and a readable
 `XSRF-TOKEN` cookie. Angular mirrors that CSRF token in the `X-XSRF-TOKEN`
 header for protected mutating requests such as logout.
+
+Worker agent endpoints under `/api/worker-agent/**` use `Authorization:
+WorkerToken <credential-id>.<secret>` instead of browser sessions. CSRF is
+ignored only for those machine endpoints and remains enabled for session APIs.
+
+## Working on the worker agent
+
+```bash
+cd workers/java-agent
+../../apps/api-spring/mvnw -f pom.xml test
+../../apps/api-spring/mvnw -f pom.xml package
+```
+
+On Windows PowerShell:
+
+```powershell
+..\..\apps\api-spring\mvnw.cmd -f pom.xml test
+..\..\apps\api-spring\mvnw.cmd -f pom.xml package
+```
+
+Run it against the Docker stack with the development worker credential from
+`.env`:
+
+```powershell
+$env:FDM_API_BASE_URL = "http://localhost:8080/api"
+$env:FDM_WORKER_TOKEN = "$env:BOOTSTRAP_WORKER_CREDENTIAL_ID.$env:BOOTSTRAP_WORKER_CREDENTIAL_SECRET"
+java -jar target\worker-agent-0.1.0-SNAPSHOT.jar
+```

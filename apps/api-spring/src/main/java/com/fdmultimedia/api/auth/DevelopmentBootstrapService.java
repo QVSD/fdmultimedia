@@ -8,6 +8,9 @@ import com.fdmultimedia.api.workspaces.WorkspaceMembership;
 import com.fdmultimedia.api.workspaces.WorkspaceMembershipRepository;
 import com.fdmultimedia.api.workspaces.WorkspaceRepository;
 import com.fdmultimedia.api.workspaces.WorkspaceRole;
+import com.fdmultimedia.api.workers.WorkerCredential;
+import com.fdmultimedia.api.workers.WorkerCredentialRepository;
+import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Profile;
@@ -26,6 +29,7 @@ public class DevelopmentBootstrapService {
     private final AppUserRepository users;
     private final WorkspaceRepository workspaces;
     private final WorkspaceMembershipRepository memberships;
+    private final WorkerCredentialRepository workerCredentials;
     private final PasswordEncoder passwordEncoder;
     private final EmailNormalizer emailNormalizer;
 
@@ -34,12 +38,14 @@ public class DevelopmentBootstrapService {
             AppUserRepository users,
             WorkspaceRepository workspaces,
             WorkspaceMembershipRepository memberships,
+            WorkerCredentialRepository workerCredentials,
             PasswordEncoder passwordEncoder,
             EmailNormalizer emailNormalizer) {
         this.properties = properties;
         this.users = users;
         this.workspaces = workspaces;
         this.memberships = memberships;
+        this.workerCredentials = workerCredentials;
         this.passwordEncoder = passwordEncoder;
         this.emailNormalizer = emailNormalizer;
     }
@@ -70,6 +76,8 @@ public class DevelopmentBootstrapService {
             ensureMembership(workspace, secondUser, properties.getSecondUser().getRole());
         }
 
+        ensureWorkerCredential(workspace);
+
         log.info("Development bootstrap ensured workspace {} and configured memberships", workspace.getSlug());
     }
 
@@ -88,6 +96,23 @@ public class DevelopmentBootstrapService {
         }
     }
 
+    private void ensureWorkerCredential(Workspace workspace) {
+        if (!hasRequiredWorkerCredentialConfig()) {
+            return;
+        }
+
+        UUID credentialId = UUID.fromString(properties.getWorkerCredential().getId().trim());
+        if (workerCredentials.existsById(credentialId)) {
+            return;
+        }
+
+        workerCredentials.save(new WorkerCredential(
+                credentialId,
+                workspace,
+                properties.getWorkerCredential().getName().trim(),
+                passwordEncoder.encode(properties.getWorkerCredential().getSecret())));
+    }
+
     private boolean hasRequiredAdminConfig() {
         return hasText(properties.getAdmin().getEmail())
                 && hasText(properties.getAdmin().getPassword())
@@ -100,6 +125,12 @@ public class DevelopmentBootstrapService {
         return hasText(properties.getSecondUser().getEmail())
                 && hasText(properties.getSecondUser().getPassword())
                 && hasText(properties.getSecondUser().getDisplayName());
+    }
+
+    private boolean hasRequiredWorkerCredentialConfig() {
+        return hasText(properties.getWorkerCredential().getId())
+                && hasText(properties.getWorkerCredential().getName())
+                && hasText(properties.getWorkerCredential().getSecret());
     }
 
     private boolean hasText(String value) {

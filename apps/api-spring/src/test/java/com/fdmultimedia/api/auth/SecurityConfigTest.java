@@ -9,6 +9,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.fdmultimedia.api.auth.security.CsrfCookieFilter;
 import com.fdmultimedia.api.auth.security.SecurityConfig;
 import com.fdmultimedia.api.shared.health.HealthController;
+import com.fdmultimedia.api.workers.security.WorkerAuthenticationFilter;
+import com.fdmultimedia.api.workers.security.WorkerAuthenticationService;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -42,6 +44,12 @@ class SecurityConfigTest {
     }
 
     @Test
+    void workerAgentApiRejectsMissingMachineToken() throws Exception {
+        mockMvc.perform(post("/api/worker-agent/register"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
     void protectedPostRequiresCsrfToken() throws Exception {
         mockMvc.perform(post("/api/protected-post").with(user("owner@example.com")))
                 .andExpect(status().isForbidden());
@@ -68,6 +76,11 @@ class SecurityConfigTest {
         @Bean
         ProtectedPostController protectedPostController() {
             return new ProtectedPostController();
+        }
+
+        @Bean
+        WorkerAuthenticationFilter workerAuthenticationFilter() {
+            return new WorkerAuthenticationFilter(org.mockito.Mockito.mock(WorkerAuthenticationService.class));
         }
     }
 

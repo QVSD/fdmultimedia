@@ -1,18 +1,18 @@
 # Roadmap
 
-Phase 1 (this repository, today) establishes the project foundation only.
-The phases below are the planned high-level direction — none of them are
-implemented yet, and this file intentionally does not go into
-implementation detail for anything beyond the current phase.
+The repository is currently at Phase 3. Completed phases are marked below;
+later phases are planned high-level direction and intentionally do not go into
+implementation detail before they are started.
 
 1. **Foundation** — Angular + Spring Boot + PostgreSQL + RabbitMQ +
    Nginx + Docker Compose, modular monolith skeleton, health checks.
-   *(this phase)*
+   *(complete)*
 2. **Users / workspaces** — accounts, workspaces/tenancy, authentication.
+   *(complete)*
 3. **Worker registration** — workers can register themselves with the
-   control plane.
-4. **Heartbeats / capabilities** — workers report liveness and what kinds
-   of jobs they can run.
+   control plane. *(current phase: registration, heartbeat liveness, and
+   Compute page visibility are implemented; job capabilities remain later)*
+4. **Capabilities** — workers report what kinds of jobs they can run.
 5. **Distributed jobs** — the control plane can enqueue jobs onto RabbitMQ
    and workers can claim and complete them.
 6. **Video import** — bringing source video into the platform.

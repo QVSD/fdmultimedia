@@ -47,6 +47,9 @@ server:
         same-site: lax
 
 app:
+  workers:
+    heartbeat-interval: ${WORKER_HEARTBEAT_INTERVAL:10s}
+    offline-threshold: ${WORKER_OFFLINE_THRESHOLD:30s}
   bootstrap:
     admin:
       email: ${BOOTSTRAP_ADMIN_EMAIL:}
@@ -60,6 +63,10 @@ app:
       password: ${BOOTSTRAP_SECOND_USER_PASSWORD:}
       display-name: ${BOOTSTRAP_SECOND_USER_DISPLAY_NAME:}
       role: ${BOOTSTRAP_SECOND_USER_ROLE:ADMIN}
+    worker-credential:
+      id: ${BOOTSTRAP_WORKER_CREDENTIAL_ID:}
+      name: ${BOOTSTRAP_WORKER_CREDENTIAL_NAME:}
+      secret: ${BOOTSTRAP_WORKER_CREDENTIAL_SECRET:}
 
 management:
   endpoints:

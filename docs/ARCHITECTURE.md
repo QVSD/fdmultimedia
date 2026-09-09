@@ -1,10 +1,11 @@
 # Architecture
 
-## Phase 2 scope
+## Phase 3 scope
 
-Phase 2 establishes authentication, users, workspaces, and membership on top
-of the Phase 1 foundation. Workers, jobs, publishing, analytics, AI, and
-social integrations remain out of scope — see [ROADMAP.md](ROADMAP.md).
+Phase 3 adds worker registration, heartbeat tracking, machine authentication,
+and Compute page visibility on top of authentication, users, workspaces, and
+membership. Jobs, publishing, analytics, AI, media processing, and social
+integrations remain out of scope — see [ROADMAP.md](ROADMAP.md).
 
 ## High-level architecture
 
@@ -19,7 +20,7 @@ Spring Boot Control Plane + Session Auth
 Postgres   RabbitMQ
               |
               v
-        Future Workers
+         Workers
        /              \
 Local Laptop       Cloud Worker
 ```
@@ -34,10 +35,11 @@ Local Laptop       Cloud Worker
   Phase 1 the backend is only wired up to connect to it; no queues,
   exchanges, or consumers are defined yet.
 - **Workers** — interchangeable compute resources (a laptop, a cloud VM,
-  anything that can run the worker process) that will eventually pull jobs
-  from RabbitMQ and report back to the control plane. Not implemented yet.
+  anything that can run the worker process). In Phase 3 they register, send
+  heartbeats, and appear in the Compute page; later phases will let them pull
+  jobs from RabbitMQ.
 
-## Request flow (Phase 2)
+## Request flow (Phase 3)
 
 ```
 Browser
@@ -73,6 +75,13 @@ workspace IDs are never trusted without validating membership. Phase 2 chooses
 the first membership as the current workspace, leaving explicit workspace
 switching for a later phase.
 
+Worker agents use a separate machine-token path under `/api/worker-agent/**`.
+Those endpoints do not use browser sessions or CSRF cookies, and CSRF remains
+enabled for browser APIs. Worker credentials belong to one workspace, are
+stored as BCrypt hashes, and authorize only worker registration/heartbeat.
+Human APIs such as `GET /api/workers` remain session-protected and scoped to
+the user's current workspace membership.
+
 ## Modular monolith
 
 The backend (`apps/api-spring`) is a single Spring Boot application,
@@ -95,9 +104,9 @@ com.fdmultimedia.api
 └── shared        — cross-cutting concerns (web, config, health)
 ```
 
-Packages outside `auth`, `users`, `workspaces`, and `shared` are still
-placeholders today. The intent is that as each capability is built, its code
-lands in the matching package with a clear boundary.
+Packages outside `auth`, `users`, `workspaces`, `workers`, and `shared` are
+still placeholders today. The intent is that as each capability is built, its
+code lands in the matching package with a clear boundary.
 
 ## An important architectural rule: Robots are not workers
 
@@ -114,5 +123,6 @@ machine happened to run its jobs. This separation is what allows workers to
 be added, removed, or replaced (a laptop goes offline, a cloud instance is
 scaled up) without affecting the robots whose jobs they process.
 
-This rule has no code to enforce it yet (workers and jobs aren't
-implemented), but it must shape the schema and APIs when they are designed.
+Phase 3 implements workers only as compute nodes. It still does not implement
+jobs, queues, robot assignment, or media execution, preserving this separation
+for later phases.

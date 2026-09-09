@@ -11,6 +11,7 @@ public class BootstrapProperties {
     private final Admin admin = new Admin();
     private final Workspace workspace = new Workspace();
     private final SecondUser secondUser = new SecondUser();
+    private final WorkerCredential workerCredential = new WorkerCredential();
 
     public Admin getAdmin() {
         return admin;
@@ -22,6 +23,10 @@ public class BootstrapProperties {
 
     public SecondUser getSecondUser() {
         return secondUser;
+    }
+
+    public WorkerCredential getWorkerCredential() {
+        return workerCredential;
     }
 
     public static class Admin {
@@ -84,6 +89,36 @@ public class BootstrapProperties {
 
         public void setRole(WorkspaceRole role) {
             this.role = role;
+        }
+    }
+
+    public static class WorkerCredential {
+        private String id = "";
+        private String name = "";
+        private String secret = "";
+
+        public String getId() {
+            return id;
+        }
+
+        public void setId(String id) {
+            this.id = id;
+        }
+
+        public String getName() {
+            return name;
+        }
+
+        public void setName(String name) {
+            this.name = name;
+        }
+
+        public String getSecret() {
+            return secret;
+        }
+
+        public void setSecret(String secret) {
+            this.secret = secret;
         }
     }
 }

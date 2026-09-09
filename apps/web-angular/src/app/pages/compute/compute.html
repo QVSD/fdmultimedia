@@ -1,4 +1,72 @@
-<section>
-  <h1>Compute</h1>
-  <p>Worker registration, heartbeats, and capacity will be managed here.</p>
+<section class="compute">
+  <header class="compute__header">
+    <div>
+      <h1>Compute</h1>
+      <p class="compute__lead">Registered worker nodes for the current workspace.</p>
+    </div>
+
+    <div class="compute__summary" aria-label="Worker status summary">
+      <span>{{ onlineCount() }} online</span>
+      <span>{{ workers().length }} total</span>
+    </div>
+  </header>
+
+  @switch (loadState()) {
+    @case ('loading') {
+      <p class="compute__state">Loading compute nodes...</p>
+    }
+    @case ('error') {
+      <p class="compute__state compute__state--error">Compute nodes could not be loaded.</p>
+    }
+    @case ('ready') {
+      @if (workers().length === 0) {
+        <p class="compute__state">No worker nodes are registered yet.</p>
+      } @else {
+        <div class="compute__table-wrap">
+          <table class="compute__table">
+            <thead>
+              <tr>
+                <th scope="col">Node</th>
+                <th scope="col">Status</th>
+                <th scope="col">System</th>
+                <th scope="col">CPU</th>
+                <th scope="col">Memory</th>
+                <th scope="col">GPU</th>
+                <th scope="col">Last seen</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (worker of workers(); track worker.id) {
+                <tr>
+                  <td>
+                    <strong>{{ worker.name }}</strong>
+                    <span>{{ worker.machineIdentifier }}</span>
+                  </td>
+                  <td>
+                    <span class="compute__badge" [class.compute__badge--offline]="worker.status === 'OFFLINE'">
+                      {{ worker.status }}
+                    </span>
+                  </td>
+                  <td>{{ worker.operatingSystem }} / {{ worker.architecture }}</td>
+                  <td>{{ worker.cpuModel }} ({{ worker.cpuLogicalCores }} cores)</td>
+                  <td>{{ formatBytes(worker.totalMemoryBytes) }}</td>
+                  <td>
+                    @if (worker.gpuModel) {
+                      {{ worker.gpuModel }}
+                      @if (worker.gpuMemoryBytes) {
+                        <span>{{ formatBytes(worker.gpuMemoryBytes) }}</span>
+                      }
+                    } @else {
+                      None reported
+                    }
+                  </td>
+                  <td>{{ worker.lastSeenAt | date:'medium' }}</td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      }
+    }
+  }
 </section>

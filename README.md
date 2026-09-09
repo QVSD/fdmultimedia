@@ -5,10 +5,10 @@ social-media content workflows, video processing workers running across
 multiple laptops/cloud machines, scheduling, AI-assisted content creation,
 publishing, analytics, and revenue tracking.
 
-## Phase 2 scope
+## Phase 3 scope
 
-This repository is currently at **Phase 2: authentication, users,
-workspaces, and membership**. That
+This repository is currently at **Phase 3: worker registration and compute
+node visibility**. That
 means:
 
 - A clean monorepo layout (`apps/`, `workers/`, `infra/`, `docs/`).
@@ -17,17 +17,21 @@ means:
   RabbitMQ connectivity, and secure session-based authentication.
 - Users, workspaces, and workspace memberships with OWNER/ADMIN/MEMBER
   roles. Future business resources can be scoped to `workspace_id`.
+- Worker credentials, worker registration, heartbeat tracking, and a
+  workspace-scoped Compute page. Worker status is derived from heartbeat age.
+- A standalone Java 21 worker agent in `workers/java-agent` that persists a
+  random installation identifier locally and reports basic machine metadata.
 - An Angular application (`apps/web-angular`) with a login page, protected
-  dashboard routes, a sidebar shell, and placeholder pages for every planned
-  section.
+  dashboard routes, a sidebar shell, a Compute page, and placeholder pages for
+  later product sections.
 - Nginx as the single entry point, routing `/api/*` to the backend and
   everything else to the frontend.
 - Docker Compose to run the whole stack locally.
 
-No workers, jobs, publishing, AI, social integrations, analytics, or billing
-are implemented yet — see [docs/ROADMAP.md](docs/ROADMAP.md) for what comes
-next and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how the pieces fit
-together.
+No distributed jobs, media processing, publishing, AI, social integrations,
+analytics, or billing are implemented yet — see [docs/ROADMAP.md](docs/ROADMAP.md)
+for what comes next and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how
+the pieces fit together.
 
 ## Prerequisites
 
@@ -98,11 +102,12 @@ next `docker compose up` starts from a clean database and message broker.
 
 - Application health endpoint: `GET http://localhost:8080/api/health`
   → `{"status":"UP","service":"media-platform-api"}`
-- Spring Boot Actuator health endpoint (more detail on Postgres/RabbitMQ
-  connectivity): `GET http://localhost:8080/api/actuator/health`
+- Spring Boot Actuator health endpoint:
+  `GET http://localhost:8080/api/actuator/health`
 
 (Both are reached through Nginx at the port above; the backend itself is
-not exposed directly to the host.)
+not exposed directly to the host.) Actuator dependency details are hidden by
+default and in `prod`; the `dev` profile exposes them for local diagnostics.
 
 ## Authentication
 
@@ -115,6 +120,30 @@ not exposed directly to the host.)
 The development profile can bootstrap one OWNER and one optional ADMIN in the
 same workspace from `.env`. Restarting the stack is idempotent and does not
 create duplicates.
+
+## Worker registration
+
+The development profile can also bootstrap one worker credential from `.env`.
+The API stores only a BCrypt hash of the worker secret. A worker agent uses a
+machine token in this format:
+
+```text
+FDM_WORKER_TOKEN=<BOOTSTRAP_WORKER_CREDENTIAL_ID>.<BOOTSTRAP_WORKER_CREDENTIAL_SECRET>
+```
+
+Build and run the local Java worker agent:
+
+```bash
+cd workers/java-agent
+../../apps/api-spring/mvnw -f pom.xml package
+FDM_API_BASE_URL=http://localhost:8080/api \
+FDM_WORKER_TOKEN=11111111-1111-4111-8111-111111111111.dev_worker_secret_change_me \
+java -jar target/worker-agent-0.1.0-SNAPSHOT.jar
+```
+
+On Windows PowerShell, run Maven through `apps\api-spring\mvnw.cmd` and set
+the same environment variables with `$env:FDM_API_BASE_URL` and
+`$env:FDM_WORKER_TOKEN`.
 
 ## RabbitMQ management UI
 
@@ -149,7 +178,7 @@ Exposed for local development at **http://localhost:15672** (or whatever
 apps/
 ├── web-angular/   Angular frontend
 └── api-spring/    Spring Boot backend (modular monolith)
-workers/           Future distributed worker implementation (not yet built)
+workers/           Standalone worker agent implementation
 infra/
 ├── nginx/         Reverse proxy configuration
 └── docker/        Shared Docker resources

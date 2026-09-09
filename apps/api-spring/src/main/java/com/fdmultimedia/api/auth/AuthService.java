@@ -51,6 +51,18 @@ public class AuthService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED));
     }
 
+    @Transactional(readOnly = true)
+    public WorkspaceMembership currentMembershipFor(AuthenticatedUser principal) {
+        if (principal == null) {
+            throw new AuthenticationCredentialsNotFoundException("Authentication required");
+        }
+
+        AppUser user = requireUser(principal.id());
+        return memberships.findByUserOrderByCreatedAtAsc(user).stream()
+                .findFirst()
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.FORBIDDEN, "No workspace membership"));
+    }
+
     public WorkspaceSummary toWorkspaceSummary(WorkspaceMembership membership) {
         return new WorkspaceSummary(
                 membership.getWorkspace().getId(),
