@@ -3,7 +3,8 @@
 ## Prerequisites
 
 - Docker + Docker Compose (v2) — for the full stack.
-- Java 21 — for working on `apps/api-spring` outside Docker.
+- Java 21 — for working on `apps/api-spring` outside Docker. Set
+  `JAVA_HOME` to the JDK directory when running the Maven Wrapper on Windows.
 - Node.js 22+ and npm — for working on `apps/web-angular` outside Docker.
 
 ## Running everything
@@ -37,14 +38,26 @@ run:
 ./mvnw spring-boot:run
 ```
 
+On Windows shells, use `mvnw.cmd` instead of `./mvnw`:
+
+```powershell
+mvnw.cmd spring-boot:run
+```
+
 Run the backend tests with:
 
 ```bash
 ./mvnw test
 ```
 
-The tests are web-slice tests (`@WebMvcTest`) — they don't need Postgres or
-RabbitMQ running.
+or on Windows:
+
+```powershell
+mvnw.cmd test
+```
+
+The current backend tests cover web/controller behavior only — they don't
+need Postgres or RabbitMQ running.
 
 ## Working on the frontend alone
 
