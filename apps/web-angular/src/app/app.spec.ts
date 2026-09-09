@@ -1,12 +1,27 @@
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
+import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
+import { of } from 'rxjs';
 
 import { App } from './app';
+import { AuthService } from './core/auth/auth.service';
 import { routes } from './app.routes';
 
 describe('App', () => {
+  const currentUser = signal({
+    id: 'user-id',
+    email: 'owner@example.com',
+    displayName: 'Owner',
+  });
+  const currentWorkspace = signal({
+    id: 'workspace-id',
+    name: 'FD Multimedia',
+    slug: 'fd-multimedia',
+    role: 'OWNER' as const,
+  });
+
   beforeEach(async () => {
     await TestBed.configureTestingModule({
       imports: [App],
@@ -21,10 +36,21 @@ describe('App', () => {
   });
 
   it('should render the sidebar navigation', async () => {
+    TestBed.overrideProvider(AuthService, {
+      useValue: {
+        currentUser,
+        currentWorkspace,
+        logout: () => of(undefined),
+      },
+    });
     const fixture = TestBed.createComponent(App);
+    fixture.detectChanges();
     await fixture.whenStable();
     const compiled = fixture.nativeElement as HTMLElement;
-    expect(compiled.querySelector('.sidebar__brand')?.textContent).toContain('Media Platform');
+    expect(compiled.querySelector('.sidebar__brand')?.textContent).toContain('FD Multimedia');
     expect(compiled.querySelectorAll('.sidebar__link').length).toBe(8);
+    expect(compiled.textContent).toContain('Owner');
+    expect(compiled.textContent).toContain('FD Multimedia');
+    expect(compiled.textContent).toContain('OWNER');
   });
 });

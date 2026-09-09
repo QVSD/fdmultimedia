@@ -6,6 +6,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -14,6 +15,7 @@ import org.springframework.test.web.servlet.MockMvc;
  * autoconfiguration, so it runs without any live infrastructure.
  */
 @WebMvcTest(HealthController.class)
+@AutoConfigureMockMvc(addFilters = false)
 class HealthControllerTest {
 
     @Autowired

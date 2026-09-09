@@ -13,6 +13,11 @@ See the root [README.md](../README.md) for the `docker compose up` workflow.
 This is the recommended way to run the full stack — it's what CI/reviewers
 will exercise and what the acceptance criteria are based on.
 
+For a fresh development database, `.env` can provide bootstrap values for the
+initial owner, workspace, and optional second user. The bootstrap runs only
+with `SPRING_PROFILES_ACTIVE=dev`, hashes passwords with BCrypt, and is
+idempotent.
+
 ## Working on the backend alone
 
 ```bash
@@ -90,3 +95,11 @@ Migrations live in `apps/api-spring/src/main/resources/db/migration` and
 run automatically on startup via Flyway. Add a new
 `V<next-number>__description.sql` file — never edit a migration that has
 already shipped.
+
+## Authentication and CSRF
+
+The browser uses secure server-side session authentication. Angular sends
+same-origin API requests to `/api/*`; Nginx forwards them to Spring Boot.
+Spring Security issues an `HttpOnly` session cookie and a readable
+`XSRF-TOKEN` cookie. Angular mirrors that CSRF token in the `X-XSRF-TOKEN`
+header for protected mutating requests such as logout.

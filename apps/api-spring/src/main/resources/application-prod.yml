@@ -4,7 +4,8 @@
 # When production deployment is designed, this file should configure:
 #   - stricter logging (no SQL logging, no framework DEBUG output)
 #   - a real secrets source for DB_*/RABBITMQ_* (not a committed .env file)
-#   - management.endpoint.health.show-details restricted to authorized callers
+#   - management.endpoint.health.show-details kept at never unless a separate
+#     authenticated operational surface is introduced
 #
 # All connection settings still come from environment variables defined in
 # application.yml; nothing below overrides credentials.
@@ -13,6 +14,12 @@ management:
   endpoint:
     health:
       show-details: never
+
+server:
+  servlet:
+    session:
+      cookie:
+        secure: true
 
 logging:
   level:

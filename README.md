@@ -5,26 +5,29 @@ social-media content workflows, video processing workers running across
 multiple laptops/cloud machines, scheduling, AI-assisted content creation,
 publishing, analytics, and revenue tracking.
 
-## Phase 1 scope
+## Phase 2 scope
 
-This repository is currently at **Phase 1: project foundation**. That
+This repository is currently at **Phase 2: authentication, users,
+workspaces, and membership**. That
 means:
 
 - A clean monorepo layout (`apps/`, `workers/`, `infra/`, `docs/`).
 - A Spring Boot 21 modular monolith (`apps/api-spring`) with the package
   structure for future modules, a health endpoint, PostgreSQL + Flyway,
-  and RabbitMQ connectivity wired up — but no domain logic yet.
-- An Angular application (`apps/web-angular`) with a sidebar shell and
-  placeholder pages for every planned section, which shows whether the
-  backend is reachable.
+  RabbitMQ connectivity, and secure session-based authentication.
+- Users, workspaces, and workspace memberships with OWNER/ADMIN/MEMBER
+  roles. Future business resources can be scoped to `workspace_id`.
+- An Angular application (`apps/web-angular`) with a login page, protected
+  dashboard routes, a sidebar shell, and placeholder pages for every planned
+  section.
 - Nginx as the single entry point, routing `/api/*` to the backend and
   everything else to the frontend.
 - Docker Compose to run the whole stack locally.
 
-No workers, jobs, publishing, AI, or authentication are implemented yet —
-see [docs/ROADMAP.md](docs/ROADMAP.md) for what comes next and
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how the pieces fit
-together (and why a "Robot" is never the same thing as a physical worker).
+No workers, jobs, publishing, AI, social integrations, analytics, or billing
+are implemented yet — see [docs/ROADMAP.md](docs/ROADMAP.md) for what comes
+next and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how the pieces fit
+together.
 
 ## Prerequisites
 
@@ -38,6 +41,12 @@ together (and why a "Robot" is never the same thing as a physical worker).
 
 ```bash
 cp .env.example .env
+```
+
+On Windows PowerShell:
+
+```powershell
+Copy-Item .env.example .env
 ```
 
 Edit `.env` if you want different local ports or credentials — the
@@ -63,7 +72,9 @@ Once everything is healthy, open:
 
 **http://localhost:8080** (or whatever `NGINX_PORT` you set in `.env`)
 
-You should see the dashboard with **Backend: Online**.
+You should be redirected to `/login`. Sign in with the bootstrap credentials
+from your local `.env`, then you should see the dashboard with **Backend:
+Online**, your user, workspace, and role.
 
 Run it in the background instead with `docker compose up --build -d`, and
 follow logs with `docker compose logs -f`.
@@ -92,6 +103,18 @@ next `docker compose up` starts from a clean database and message broker.
 
 (Both are reached through Nginx at the port above; the backend itself is
 not exposed directly to the host.)
+
+## Authentication
+
+- `POST /api/auth/login` starts a secure server-side session.
+- `GET /api/auth/me` returns the current safe user/workspace context.
+- `POST /api/auth/logout` invalidates the session and requires CSRF.
+- `GET /api/workspaces` and `GET /api/workspaces/{workspaceId}` require an
+  authenticated workspace member.
+
+The development profile can bootstrap one OWNER and one optional ADMIN in the
+same workspace from `.env`. Restarting the stack is idempotent and does not
+create duplicates.
 
 ## RabbitMQ management UI
 

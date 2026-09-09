@@ -1,21 +1,45 @@
-<div class="shell">
-  <aside class="sidebar">
-    <div class="sidebar__brand">Media Platform</div>
-    <nav class="sidebar__nav">
-      @for (item of navItems; track item.path) {
-        <a
-          class="sidebar__link"
-          [routerLink]="item.path"
-          routerLinkActive="sidebar__link--active"
-          [routerLinkActiveOptions]="{ exact: item.path === '/' }"
-        >
-          {{ item.label }}
-        </a>
-      }
-    </nav>
-  </aside>
+@if (user(); as currentUser) {
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="sidebar__brand">FD Multimedia</div>
 
-  <main class="content">
-    <router-outlet />
-  </main>
-</div>
+      @if (workspace(); as currentWorkspace) {
+        <dl class="sidebar__context">
+          <div>
+            <dt>Workspace</dt>
+            <dd>{{ currentWorkspace.name }}</dd>
+          </div>
+          <div>
+            <dt>User</dt>
+            <dd>{{ currentUser.displayName }}</dd>
+          </div>
+          <div>
+            <dt>Role</dt>
+            <dd>{{ currentWorkspace.role }}</dd>
+          </div>
+        </dl>
+      }
+
+      <nav class="sidebar__nav">
+        @for (item of navItems; track item.path) {
+          <a
+            class="sidebar__link"
+            [routerLink]="item.path"
+            routerLinkActive="sidebar__link--active"
+            [routerLinkActiveOptions]="{ exact: item.path === '/' }"
+          >
+            {{ item.label }}
+          </a>
+        }
+      </nav>
+
+      <button class="sidebar__logout" type="button" (click)="logout()">Logout</button>
+    </aside>
+
+    <main class="content">
+      <router-outlet />
+    </main>
+  </div>
+} @else {
+  <router-outlet />
+}

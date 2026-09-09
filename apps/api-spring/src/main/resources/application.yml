@@ -39,6 +39,27 @@ spring:
 
 server:
   port: ${SERVER_PORT:8080}
+  servlet:
+    session:
+      cookie:
+        http-only: true
+        secure: ${SESSION_COOKIE_SECURE:false}
+        same-site: lax
+
+app:
+  bootstrap:
+    admin:
+      email: ${BOOTSTRAP_ADMIN_EMAIL:}
+      password: ${BOOTSTRAP_ADMIN_PASSWORD:}
+      display-name: ${BOOTSTRAP_ADMIN_DISPLAY_NAME:}
+    workspace:
+      name: ${BOOTSTRAP_WORKSPACE_NAME:}
+      slug: ${BOOTSTRAP_WORKSPACE_SLUG:}
+    second-user:
+      email: ${BOOTSTRAP_SECOND_USER_EMAIL:}
+      password: ${BOOTSTRAP_SECOND_USER_PASSWORD:}
+      display-name: ${BOOTSTRAP_SECOND_USER_DISPLAY_NAME:}
+      role: ${BOOTSTRAP_SECOND_USER_ROLE:ADMIN}
 
 management:
   endpoints:

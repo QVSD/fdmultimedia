@@ -8,15 +8,18 @@ import { Jobs } from './pages/jobs/jobs';
 import { Analytics } from './pages/analytics/analytics';
 import { Revenue } from './pages/revenue/revenue';
 import { Settings } from './pages/settings/settings';
+import { Login } from './pages/login/login';
+import { authGuard, loginGuard } from './core/auth/auth.guard';
 
 export const routes: Routes = [
-  { path: '', component: Overview, title: 'Overview' },
-  { path: 'compute', component: Compute, title: 'Compute' },
-  { path: 'content', component: Content, title: 'Content' },
-  { path: 'robots', component: Robots, title: 'Robots' },
-  { path: 'jobs', component: Jobs, title: 'Jobs' },
-  { path: 'analytics', component: Analytics, title: 'Analytics' },
-  { path: 'revenue', component: Revenue, title: 'Revenue' },
-  { path: 'settings', component: Settings, title: 'Settings' },
+  { path: 'login', component: Login, canActivate: [loginGuard], title: 'Sign in' },
+  { path: '', component: Overview, canActivate: [authGuard], title: 'Overview' },
+  { path: 'compute', component: Compute, canActivate: [authGuard], title: 'Compute' },
+  { path: 'content', component: Content, canActivate: [authGuard], title: 'Content' },
+  { path: 'robots', component: Robots, canActivate: [authGuard], title: 'Robots' },
+  { path: 'jobs', component: Jobs, canActivate: [authGuard], title: 'Jobs' },
+  { path: 'analytics', component: Analytics, canActivate: [authGuard], title: 'Analytics' },
+  { path: 'revenue', component: Revenue, canActivate: [authGuard], title: 'Revenue' },
+  { path: 'settings', component: Settings, canActivate: [authGuard], title: 'Settings' },
   { path: '**', redirectTo: '' },
 ];
