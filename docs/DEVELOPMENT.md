@@ -109,6 +109,10 @@ Worker agent endpoints under `/api/worker-agent/**` use `Authorization:
 WorkerToken <credential-id>.<secret>` instead of browser sessions. CSRF is
 ignored only for those machine endpoints and remains enabled for session APIs.
 
+Job creation/list/detail endpoints under `/api/jobs` are normal browser
+session APIs. Keep CSRF enabled for mutating human requests and always derive
+workspace scope from the authenticated membership.
+
 ## Working on the worker agent
 
 ```bash
@@ -132,3 +136,25 @@ $env:FDM_API_BASE_URL = "http://localhost:8080/api"
 $env:FDM_WORKER_TOKEN = "$env:BOOTSTRAP_WORKER_CREDENTIAL_ID.$env:BOOTSTRAP_WORKER_CREDENTIAL_SECRET"
 java -jar target\worker-agent-0.1.0-SNAPSHOT.jar
 ```
+
+Useful worker environment variables:
+
+- `FDM_WORKER_NAME` — friendly name reported to the Compute and Jobs pages.
+- `FDM_WORKER_ID_FILE` — local file that stores the generated installation ID.
+- `FDM_WORKER_HEARTBEAT_SECONDS` — heartbeat interval, default 10 seconds.
+- `FDM_WORKER_JOB_POLL_SECONDS` — job polling interval, default 3 seconds.
+
+The Phase 4 worker registers, heartbeats, polls for a job, starts it, executes
+only `SYSTEM_TEST`, and reports success or failure. `SYSTEM_TEST` is limited to
+a bounded message and sleep duration; it is not a generic command runner.
+
+Manual distributed execution check:
+
+1. Start the Docker stack and log in through `http://localhost:8080`.
+2. Leave the worker stopped and create a `SYSTEM_TEST` job from Jobs; it should
+   stay `QUEUED`.
+3. Start the worker agent; the job should move through `ASSIGNED`, `RUNNING`,
+   and `SUCCEEDED`.
+4. Create several jobs; each should complete once with the same workspace.
+5. Stop the worker during a longer job and restart it after the lease expires;
+   the job should retry until `maxAttempts`, then either succeed or fail.

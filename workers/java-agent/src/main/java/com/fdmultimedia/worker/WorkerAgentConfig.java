@@ -10,7 +10,8 @@ record WorkerAgentConfig(
         String workerToken,
         String workerName,
         Path identityFile,
-        Duration heartbeatInterval) {
+        Duration heartbeatInterval,
+        Duration jobPollInterval) {
 
     static WorkerAgentConfig fromEnvironment() {
         return from(System.getenv());
@@ -28,7 +29,18 @@ record WorkerAgentConfig(
         if (heartbeatInterval.isNegative() || heartbeatInterval.isZero()) {
             throw new IllegalArgumentException("FDM_WORKER_HEARTBEAT_SECONDS must be greater than zero");
         }
-        return new WorkerAgentConfig(apiBaseUrl, normalizeToken(token), workerName, identityFile, heartbeatInterval);
+        Duration jobPollInterval = Duration.ofSeconds(
+                Long.parseLong(environment.getOrDefault("FDM_WORKER_JOB_POLL_SECONDS", "3")));
+        if (jobPollInterval.isNegative() || jobPollInterval.isZero()) {
+            throw new IllegalArgumentException("FDM_WORKER_JOB_POLL_SECONDS must be greater than zero");
+        }
+        return new WorkerAgentConfig(
+                apiBaseUrl,
+                normalizeToken(token),
+                workerName,
+                identityFile,
+                heartbeatInterval,
+                jobPollInterval);
     }
 
     private static String required(Map<String, String> environment, String key) {

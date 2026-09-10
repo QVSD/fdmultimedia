@@ -17,13 +17,15 @@ class WorkerAgentConfigTest {
                 "FDM_WORKER_TOKEN", "credential.secret",
                 "FDM_WORKER_NAME", "Local Node",
                 "FDM_WORKER_ID_FILE", "worker-id.txt",
-                "FDM_WORKER_HEARTBEAT_SECONDS", "5"));
+                "FDM_WORKER_HEARTBEAT_SECONDS", "5",
+                "FDM_WORKER_JOB_POLL_SECONDS", "2"));
 
         assertEquals("http://localhost:8080/api/", config.apiBaseUrl().toString());
         assertEquals("WorkerToken credential.secret", config.workerToken());
         assertEquals("Local Node", config.workerName());
         assertEquals(Path.of("worker-id.txt"), config.identityFile());
         assertEquals(Duration.ofSeconds(5), config.heartbeatInterval());
+        assertEquals(Duration.ofSeconds(2), config.jobPollInterval());
     }
 
     @Test
@@ -36,5 +38,12 @@ class WorkerAgentConfigTest {
         assertThrows(IllegalArgumentException.class, () -> WorkerAgentConfig.from(Map.of(
                 "FDM_WORKER_TOKEN", "credential.secret",
                 "FDM_WORKER_HEARTBEAT_SECONDS", "0")));
+    }
+
+    @Test
+    void rejectsZeroJobPollInterval() {
+        assertThrows(IllegalArgumentException.class, () -> WorkerAgentConfig.from(Map.of(
+                "FDM_WORKER_TOKEN", "credential.secret",
+                "FDM_WORKER_JOB_POLL_SECONDS", "0")));
     }
 }

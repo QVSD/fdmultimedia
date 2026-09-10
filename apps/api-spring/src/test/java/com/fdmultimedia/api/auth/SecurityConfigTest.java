@@ -44,6 +44,18 @@ class SecurityConfigTest {
     }
 
     @Test
+    void jobApiRejectsUnauthenticatedUsers() throws Exception {
+        mockMvc.perform(get("/api/jobs"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void jobCreationRequiresCsrfToken() throws Exception {
+        mockMvc.perform(post("/api/jobs").with(user("owner@example.com")))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
     void workerAgentApiRejectsMissingMachineToken() throws Exception {
         mockMvc.perform(post("/api/worker-agent/register"))
                 .andExpect(status().isUnauthorized());

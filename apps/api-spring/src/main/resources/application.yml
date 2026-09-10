@@ -50,6 +50,11 @@ app:
   workers:
     heartbeat-interval: ${WORKER_HEARTBEAT_INTERVAL:10s}
     offline-threshold: ${WORKER_OFFLINE_THRESHOLD:30s}
+  jobs:
+    lease-duration: ${JOB_LEASE_DURATION:30s}
+    default-max-attempts: ${JOB_DEFAULT_MAX_ATTEMPTS:3}
+    max-system-test-duration-ms: ${JOB_MAX_SYSTEM_TEST_DURATION_MS:10000}
+    max-system-test-message-length: ${JOB_MAX_SYSTEM_TEST_MESSAGE_LENGTH:200}
   bootstrap:
     admin:
       email: ${BOOTSTRAP_ADMIN_EMAIL:}

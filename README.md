@@ -5,10 +5,9 @@ social-media content workflows, video processing workers running across
 multiple laptops/cloud machines, scheduling, AI-assisted content creation,
 publishing, analytics, and revenue tracking.
 
-## Phase 3 scope
+## Phase 4 scope
 
-This repository is currently at **Phase 3: worker registration and compute
-node visibility**. That
+This repository is currently at **Phase 4: jobs and distributed execution**. That
 means:
 
 - A clean monorepo layout (`apps/`, `workers/`, `infra/`, `docs/`).
@@ -19,19 +18,22 @@ means:
   roles. Future business resources can be scoped to `workspace_id`.
 - Worker credentials, worker registration, heartbeat tracking, and a
   workspace-scoped Compute page. Worker status is derived from heartbeat age.
+- Centrally-created `SYSTEM_TEST` jobs with PostgreSQL-backed durable state,
+  atomic worker claiming, leases, bounded retry, and result/error tracking.
 - A standalone Java 21 worker agent in `workers/java-agent` that persists a
-  random installation identifier locally and reports basic machine metadata.
+  random installation identifier locally, reports basic machine metadata,
+  heartbeats, polls for work, and executes only the safe `SYSTEM_TEST` job.
 - An Angular application (`apps/web-angular`) with a login page, protected
-  dashboard routes, a sidebar shell, a Compute page, and placeholder pages for
-  later product sections.
+  dashboard routes, a sidebar shell, a Compute page, a Jobs page, and
+  placeholder pages for later product sections.
 - Nginx as the single entry point, routing `/api/*` to the backend and
   everything else to the frontend.
 - Docker Compose to run the whole stack locally.
 
-No distributed jobs, media processing, publishing, AI, social integrations,
-analytics, or billing are implemented yet — see [docs/ROADMAP.md](docs/ROADMAP.md)
-for what comes next and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how
-the pieces fit together.
+No media processing, publishing, AI, social integrations, analytics, or
+billing are implemented yet — see [docs/ROADMAP.md](docs/ROADMAP.md) for what
+comes next and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how the pieces
+fit together.
 
 ## Prerequisites
 
@@ -144,6 +146,40 @@ java -jar target/worker-agent-0.1.0-SNAPSHOT.jar
 On Windows PowerShell, run Maven through `apps\api-spring\mvnw.cmd` and set
 the same environment variables with `$env:FDM_API_BASE_URL` and
 `$env:FDM_WORKER_TOKEN`.
+
+## Jobs and distributed execution
+
+Phase 4 uses PostgreSQL as the durable job queue. Workers poll the control
+plane and claim jobs with a transactional `FOR UPDATE SKIP LOCKED` query, so
+one queued job is assigned to exactly one worker. RabbitMQ remains available
+in the stack but is reserved for a later event-driven dispatch optimization.
+
+The first executable job type is `SYSTEM_TEST`. It accepts:
+
+```json
+{
+  "message": "hello worker",
+  "durationMs": 2000
+}
+```
+
+The worker validates this payload, optionally waits for `durationMs`, and
+returns a JSON result with the message, worker name, and execution duration.
+It never executes shell commands or arbitrary code.
+
+Job states are:
+
+```text
+QUEUED -> ASSIGNED -> RUNNING -> SUCCEEDED
+QUEUED -> CANCELLED
+ASSIGNED/RUNNING -> QUEUED     (retry after failure or expired lease)
+ASSIGNED/RUNNING -> FAILED     (max attempts exhausted)
+```
+
+`SUCCEEDED`, `FAILED`, and `CANCELLED` are terminal. Active jobs have a
+lease; if a worker disappears, the next claim operation recovers expired
+leases and either requeues the job or marks it `FAILED` when attempts are
+exhausted.
 
 ## RabbitMQ management UI
 
