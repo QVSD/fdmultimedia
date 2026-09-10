@@ -1,6 +1,6 @@
 # Roadmap
 
-The repository is currently at Phase 4. Completed phases are marked below;
+The repository is currently at Phase 5. Completed phases are marked below;
 later phases are planned high-level direction and intentionally do not go into
 implementation detail before they are started.
 
@@ -13,9 +13,13 @@ implementation detail before they are started.
    control plane. *(complete)*
 4. **Distributed jobs** — users can create safe `SYSTEM_TEST` jobs, workers
    claim them atomically through PostgreSQL, execute them once, and report
-   durable results with leases and bounded retries. *(current phase)*
-5. **Capabilities** — workers report what kinds of jobs they can run.
-6. **Video import** — bringing source video into the platform.
+   durable results with leases and bounded retries. *(complete)*
+5. **Media assets / direct video import** — users can submit direct HTTP/HTTPS
+   media file URLs, the API creates `MediaAsset` + `IMPORT_MEDIA`, workers
+   stream bounded downloads, enforce SSRF protections, checksum content, upload
+   through presigned object-storage URLs, and mark assets READY. *(current
+   phase)*
+6. **Capabilities** — workers report what kinds of jobs they can run.
 7. **FFmpeg processing** — automated video processing pipelines.
 8. **Scheduler / load balancing** — deciding which worker runs which job.
 9. **Social account integrations** — connecting and publishing to external

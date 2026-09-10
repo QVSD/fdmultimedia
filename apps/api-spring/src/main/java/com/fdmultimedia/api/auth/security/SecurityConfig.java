@@ -39,6 +39,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/auth/login").permitAll()
                         .requestMatchers("/", "/login", "/index.html", "/favicon.ico", "/*.js", "/*.css").permitAll()
                         .requestMatchers("/api/worker-agent/**").hasRole("WORKER")
+                        .requestMatchers("/api/assets/**").hasRole("USER")
                         .requestMatchers("/api/jobs/**").hasRole("USER")
                         .requestMatchers("/api/workers/**").hasRole("USER")
                         .anyRequest().authenticated())

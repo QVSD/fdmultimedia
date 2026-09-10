@@ -50,4 +50,12 @@ public class WorkerJobController {
             @Valid @RequestBody WorkerJobUpdateRequest request) {
         return jobService.fail((WorkerPrincipal) authentication.getPrincipal(), jobId, request);
     }
+
+    @PostMapping("/{jobId}/renew")
+    public JobSummary renew(
+            Authentication authentication,
+            @PathVariable UUID jobId,
+            @Valid @RequestBody WorkerJobUpdateRequest request) {
+        return jobService.renew((WorkerPrincipal) authentication.getPrincipal(), jobId, request);
+    }
 }

@@ -7,6 +7,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -38,7 +39,9 @@ final class WorkerAgentClient {
     ClaimedJob claim(String machineIdentifier) throws IOException, InterruptedException {
         return send(
                 "/worker-agent/jobs/claim",
-                Map.of("machineIdentifier", machineIdentifier),
+                Map.of(
+                        "machineIdentifier", machineIdentifier,
+                        "supportedJobTypes", java.util.List.of("SYSTEM_TEST", "IMPORT_MEDIA")),
                 new TypeReference<ClaimedJob>() {});
     }
 
@@ -56,11 +59,66 @@ final class WorkerAgentClient {
 
     void fail(UUID jobId, String machineIdentifier, String errorCode, String errorMessage)
             throws IOException, InterruptedException {
+        fail(jobId, machineIdentifier, errorCode, errorMessage, false);
+    }
+
+    void fail(UUID jobId, String machineIdentifier, String errorCode, String errorMessage, boolean terminal)
+            throws IOException, InterruptedException {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("machineIdentifier", machineIdentifier);
         body.put("errorCode", errorCode);
         body.put("errorMessage", errorMessage);
+        body.put("terminal", terminal);
         send(jobPath(jobId, "fail"), body, new TypeReference<Map<String, Object>>() {});
+    }
+
+    void renew(UUID jobId, String machineIdentifier) throws IOException, InterruptedException {
+        send(jobPath(jobId, "renew"), Map.of("machineIdentifier", machineIdentifier), new TypeReference<Map<String, Object>>() {});
+    }
+
+    ImportMediaAuthorization authorizeImport(UUID jobId, String machineIdentifier)
+            throws IOException, InterruptedException {
+        return send(
+                "/worker-agent/assets/imports/" + jobId + "/authorization",
+                Map.of("machineIdentifier", machineIdentifier),
+                new TypeReference<ImportMediaAuthorization>() {});
+    }
+
+    void completeImport(UUID jobId, String machineIdentifier, ImportMediaAuthorization authorization, DownloadedMedia media)
+            throws IOException, InterruptedException {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("machineIdentifier", machineIdentifier);
+        body.put("assetId", authorization.assetId());
+        body.put("storageBucket", authorization.storageBucket());
+        body.put("storageKey", authorization.storageKey());
+        body.put("originalFilename", media.originalFilename());
+        body.put("contentType", media.contentType());
+        body.put("fileSizeBytes", media.fileSizeBytes());
+        body.put("checksumSha256", media.checksumSha256());
+        body.put("containerFormat", media.containerFormat());
+        send("/worker-agent/assets/imports/" + jobId + "/complete", body, new TypeReference<Map<String, Object>>() {});
+    }
+
+    void failImport(UUID jobId, String machineIdentifier, UUID assetId, String errorCode, String errorMessage, boolean terminal)
+            throws IOException, InterruptedException {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("machineIdentifier", machineIdentifier);
+        body.put("assetId", assetId);
+        body.put("errorCode", errorCode);
+        body.put("errorMessage", errorMessage);
+        body.put("terminal", terminal);
+        send("/worker-agent/assets/imports/" + jobId + "/fail", body, new TypeReference<Map<String, Object>>() {});
+    }
+
+    void upload(URI uploadUrl, Path path, String contentType) throws IOException, InterruptedException {
+        HttpRequest request = HttpRequest.newBuilder(uploadUrl)
+                .timeout(Duration.ofMinutes(30))
+                .PUT(HttpRequest.BodyPublishers.ofFile(path))
+                .build();
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            throw new IOException("Object upload returned HTTP " + response.statusCode());
+        }
     }
 
     private <T> T send(String path, Object body, TypeReference<T> responseType) throws IOException, InterruptedException {

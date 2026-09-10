@@ -1,5 +1,6 @@
 package com.fdmultimedia.api.jobs;
 
 public enum JobType {
-    SYSTEM_TEST
+    SYSTEM_TEST,
+    IMPORT_MEDIA
 }

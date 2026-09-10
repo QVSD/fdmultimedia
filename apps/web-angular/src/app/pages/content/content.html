@@ -1,4 +1,80 @@
-<section>
-  <h1>Content</h1>
-  <p>Media assets and content workflows will be managed here.</p>
+<section class="content">
+  <header>
+    <h1>Content</h1>
+    <p class="content__lead">Import direct media files into private object storage.</p>
+  </header>
+
+  <form class="content__form" (ngSubmit)="importMedia()">
+    <label>
+      <span>Direct media URL</span>
+      <input
+        name="url"
+        type="url"
+        placeholder="https://example.com/video.mp4"
+        [ngModel]="url()"
+        (ngModelChange)="url.set($event)"
+        required
+      />
+    </label>
+    <button type="submit" [disabled]="importing()">
+      {{ importing() ? 'Importing...' : 'Import Media' }}
+    </button>
+  </form>
+
+  @if (importError()) {
+    <p class="content__state content__state--error">{{ importError() }}</p>
+  }
+
+  @switch (loadState()) {
+    @case ('loading') {
+      <p class="content__state">Loading assets...</p>
+    }
+    @case ('error') {
+      <p class="content__state content__state--error">Assets could not be loaded.</p>
+    }
+    @case ('ready') {
+      @if (assets().length === 0) {
+        <p class="content__state">No media assets have been imported yet.</p>
+      } @else {
+        <div class="content__table-wrap">
+          <table class="content__table">
+            <thead>
+              <tr>
+                <th scope="col">Asset</th>
+                <th scope="col">Status</th>
+                <th scope="col">Size</th>
+                <th scope="col">Type</th>
+                <th scope="col">Duration</th>
+                <th scope="col">Resolution</th>
+                <th scope="col">Created</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (asset of assets(); track asset.id) {
+                <tr>
+                  <td>
+                    <strong>{{ asset.originalFilename || 'Direct URL media' }}</strong>
+                    <span>{{ shortUrl(asset) }}</span>
+                  </td>
+                  <td>
+                    <span [class]="'content__badge content__badge--' + asset.status.toLowerCase()">
+                      {{ asset.status }}
+                    </span>
+                    @if (asset.errorMessage) {
+                      <span class="content__error">{{ asset.errorCode }}: {{ asset.errorMessage }}</span>
+                    }
+                  </td>
+                  <td>{{ size(asset) }}</td>
+                  <td>{{ asset.contentType || '-' }}</td>
+                  <td>{{ duration(asset) }}</td>
+                  <td>{{ resolution(asset) }}</td>
+                  <td>{{ asset.createdAt | date:'medium' }}</td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      }
+    }
+  }
 </section>

@@ -21,12 +21,15 @@ public interface JobRepository extends JpaRepository<Job, UUID> {
                     FROM jobs
                     WHERE workspace_id = :workspaceId
                       AND status = 'QUEUED'
+                      AND type IN (:types)
                     ORDER BY queued_at ASC
                     LIMIT 1
                     FOR UPDATE SKIP LOCKED
                     """,
             nativeQuery = true)
-    Optional<Job> findNextQueuedForUpdate(@Param("workspaceId") UUID workspaceId);
+    Optional<Job> findNextQueuedForUpdate(
+            @Param("workspaceId") UUID workspaceId,
+            @Param("types") List<String> types);
 
     @Query(
             value = """

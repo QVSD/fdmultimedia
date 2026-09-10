@@ -7,5 +7,6 @@ public record WorkerJobUpdateRequest(
         @NotBlank String machineIdentifier,
         Map<String, Object> result,
         String errorCode,
-        String errorMessage) {
+        String errorMessage,
+        Boolean terminal) {
 }

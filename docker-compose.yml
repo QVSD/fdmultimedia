@@ -32,6 +32,23 @@ services:
       timeout: 5s
       retries: 10
 
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-media_platform}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-dev_minio_password_change_me}
+    ports:
+      - "${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:9000/minio/health/ready"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
   api:
     build:
       context: ./apps/api-spring
@@ -48,6 +65,14 @@ services:
       RABBITMQ_USER: ${RABBITMQ_USER}
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
       RABBITMQ_VHOST: ${RABBITMQ_VHOST}
+      STORAGE_ENDPOINT: ${STORAGE_ENDPOINT:-http://minio:9000}
+      STORAGE_PUBLIC_ENDPOINT: ${STORAGE_PUBLIC_ENDPOINT:-http://localhost:9000}
+      STORAGE_REGION: ${STORAGE_REGION:-us-east-1}
+      STORAGE_BUCKET: ${STORAGE_BUCKET:-media-assets}
+      STORAGE_ACCESS_KEY: ${STORAGE_ACCESS_KEY:-media_platform}
+      STORAGE_SECRET_KEY: ${STORAGE_SECRET_KEY:-dev_minio_password_change_me}
+      STORAGE_PRESIGNED_UPLOAD_TTL: ${STORAGE_PRESIGNED_UPLOAD_TTL:-15m}
+      STORAGE_PRESIGNED_DOWNLOAD_TTL: ${STORAGE_PRESIGNED_DOWNLOAD_TTL:-5m}
       SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
       BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-}
       BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-}
@@ -67,10 +92,16 @@ services:
       JOB_DEFAULT_MAX_ATTEMPTS: ${JOB_DEFAULT_MAX_ATTEMPTS:-3}
       JOB_MAX_SYSTEM_TEST_DURATION_MS: ${JOB_MAX_SYSTEM_TEST_DURATION_MS:-10000}
       JOB_MAX_SYSTEM_TEST_MESSAGE_LENGTH: ${JOB_MAX_SYSTEM_TEST_MESSAGE_LENGTH:-200}
+      MEDIA_MAX_DOWNLOAD_SIZE_BYTES: ${MEDIA_MAX_DOWNLOAD_SIZE_BYTES:-524288000}
+      MEDIA_CONNECT_TIMEOUT: ${MEDIA_CONNECT_TIMEOUT:-10s}
+      MEDIA_READ_TIMEOUT: ${MEDIA_READ_TIMEOUT:-30s}
+      MEDIA_MAX_REDIRECTS: ${MEDIA_MAX_REDIRECTS:-3}
     depends_on:
       postgres:
         condition: service_healthy
       rabbitmq:
+        condition: service_healthy
+      minio:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:8080/api/actuator/health"]
@@ -111,3 +142,4 @@ services:
 volumes:
   postgres_data:
   rabbitmq_data:
+  minio_data:

@@ -55,6 +55,20 @@ app:
     default-max-attempts: ${JOB_DEFAULT_MAX_ATTEMPTS:3}
     max-system-test-duration-ms: ${JOB_MAX_SYSTEM_TEST_DURATION_MS:10000}
     max-system-test-message-length: ${JOB_MAX_SYSTEM_TEST_MESSAGE_LENGTH:200}
+  media:
+    max-download-size-bytes: ${MEDIA_MAX_DOWNLOAD_SIZE_BYTES:524288000}
+    connect-timeout: ${MEDIA_CONNECT_TIMEOUT:10s}
+    read-timeout: ${MEDIA_READ_TIMEOUT:30s}
+    max-redirects: ${MEDIA_MAX_REDIRECTS:3}
+  storage:
+    endpoint: ${STORAGE_ENDPOINT:http://localhost:9000}
+    public-endpoint: ${STORAGE_PUBLIC_ENDPOINT:${STORAGE_ENDPOINT:http://localhost:9000}}
+    region: ${STORAGE_REGION:us-east-1}
+    bucket: ${STORAGE_BUCKET:media-assets}
+    access-key: ${STORAGE_ACCESS_KEY:}
+    secret-key: ${STORAGE_SECRET_KEY:}
+    presigned-upload-ttl: ${STORAGE_PRESIGNED_UPLOAD_TTL:15m}
+    presigned-download-ttl: ${STORAGE_PRESIGNED_DOWNLOAD_TTL:5m}
   bootstrap:
     admin:
       email: ${BOOTSTRAP_ADMIN_EMAIL:}

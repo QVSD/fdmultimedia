@@ -5,6 +5,7 @@ import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public final class WorkerAgent {
 
@@ -17,6 +18,7 @@ public final class WorkerAgent {
         MachineInfo machineInfo = new MachineInfoCollector().collect(machineIdentifier, config.workerName());
         WorkerAgentClient client = new WorkerAgentClient(config.apiBaseUrl(), config.workerToken());
         SystemTestExecutor systemTestExecutor = new SystemTestExecutor();
+        ImportMediaExecutor importMediaExecutor = new ImportMediaExecutor();
 
         while (!Thread.currentThread().isInterrupted()) {
             try {
@@ -35,7 +37,7 @@ public final class WorkerAgent {
             shutdown.countDown();
         }));
         executor.submit(() -> heartbeatLoop(client, machineIdentifier, config));
-        executor.submit(() -> jobLoop(client, machineIdentifier, config, systemTestExecutor));
+        executor.submit(() -> jobLoop(client, machineIdentifier, config, systemTestExecutor, importMediaExecutor));
         shutdown.await();
     }
 
@@ -55,7 +57,8 @@ public final class WorkerAgent {
             WorkerAgentClient client,
             String machineIdentifier,
             WorkerAgentConfig config,
-            SystemTestExecutor systemTestExecutor) {
+            SystemTestExecutor systemTestExecutor,
+            ImportMediaExecutor importMediaExecutor) {
         while (!Thread.currentThread().isInterrupted()) {
             try {
                 ClaimedJob job = client.claim(machineIdentifier);
@@ -63,7 +66,7 @@ public final class WorkerAgent {
                     sleep(config.jobPollInterval());
                     continue;
                 }
-                executeClaimedJob(client, machineIdentifier, config.workerName(), systemTestExecutor, job);
+                executeClaimedJob(client, machineIdentifier, config.workerName(), systemTestExecutor, importMediaExecutor, job);
             } catch (Exception ex) {
                 System.err.println("Worker job polling failed: " + ex.getMessage());
                 sleep(backoff(config.jobPollInterval()));
@@ -76,20 +79,84 @@ public final class WorkerAgent {
             String machineIdentifier,
             String workerName,
             SystemTestExecutor systemTestExecutor,
+            ImportMediaExecutor importMediaExecutor,
             ClaimedJob job) throws InterruptedException {
         try {
             client.started(job.jobId(), machineIdentifier);
-            Map<String, Object> result = systemTestExecutor.execute(job, workerName);
-            client.complete(job.jobId(), machineIdentifier, result);
+            if ("IMPORT_MEDIA".equals(job.type())) {
+                executeImportMediaJob(client, machineIdentifier, importMediaExecutor, job);
+            } else {
+                Map<String, Object> result = systemTestExecutor.execute(job, workerName);
+                client.complete(job.jobId(), machineIdentifier, result);
+            }
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
             throw ex;
         } catch (Exception ex) {
             try {
-                client.fail(job.jobId(), machineIdentifier, "SYSTEM_TEST_FAILED", ex.getMessage());
+                client.fail(job.jobId(), machineIdentifier, "JOB_FAILED", ex.getMessage(), false);
             } catch (Exception reportFailure) {
                 System.err.println("Worker failed to report job failure: " + reportFailure.getMessage());
             }
+        }
+    }
+
+    private static void executeImportMediaJob(
+            WorkerAgentClient client,
+            String machineIdentifier,
+            ImportMediaExecutor importMediaExecutor,
+            ClaimedJob job) throws InterruptedException {
+        AtomicBoolean running = new AtomicBoolean(true);
+        Thread renewer = new Thread(() -> leaseRenewLoop(client, machineIdentifier, job, running), "fdm-job-lease-renewer");
+        renewer.setDaemon(true);
+        renewer.start();
+        try {
+            importMediaExecutor.execute(client, job, machineIdentifier);
+        } catch (ImportFailureException ex) {
+            reportImportFailure(client, machineIdentifier, job, ex.code(), ex.getMessage(), ex.terminal());
+        } catch (Exception ex) {
+            reportImportFailure(client, machineIdentifier, job, "IMPORT_MEDIA_FAILED", ex.getMessage(), false);
+        } finally {
+            running.set(false);
+            renewer.interrupt();
+        }
+    }
+
+    private static void leaseRenewLoop(
+            WorkerAgentClient client,
+            String machineIdentifier,
+            ClaimedJob job,
+            AtomicBoolean running) {
+        Duration interval = Duration.ofSeconds(Math.max(1, job.leaseSeconds() / 2));
+        while (running.get() && !Thread.currentThread().isInterrupted()) {
+            sleep(interval);
+            if (!running.get()) {
+                return;
+            }
+            try {
+                client.renew(job.jobId(), machineIdentifier);
+            } catch (Exception ex) {
+                System.err.println("Worker failed to renew job lease: " + ex.getMessage());
+            }
+        }
+    }
+
+    private static void reportImportFailure(
+            WorkerAgentClient client,
+            String machineIdentifier,
+            ClaimedJob job,
+            String code,
+            String message,
+            boolean terminal) {
+        Object assetId = job.payload().get("assetId");
+        try {
+            if (assetId == null) {
+                client.fail(job.jobId(), machineIdentifier, code, message, terminal);
+            } else {
+                client.failImport(job.jobId(), machineIdentifier, java.util.UUID.fromString(String.valueOf(assetId)), code, message, terminal);
+            }
+        } catch (Exception reportFailure) {
+            System.err.println("Worker failed to report import failure: " + reportFailure.getMessage());
         }
     }
 

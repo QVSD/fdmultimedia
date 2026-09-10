@@ -27,18 +27,19 @@ cd apps/api-spring
 
 The app reads its configuration entirely from environment variables (see
 `src/main/resources/application.yml`) and will fail to start if
-`DB_HOST`/`DB_PORT`/`DB_NAME`/`DB_USER`/`DB_PASSWORD` or the
-`RABBITMQ_*` equivalents aren't set — there is no silent fallback (e.g. no
-H2 in-memory database). The simplest way to get real Postgres/RabbitMQ
+`DB_HOST`/`DB_PORT`/`DB_NAME`/`DB_USER`/`DB_PASSWORD`, the `RABBITMQ_*`
+equivalents, or the object-storage settings aren't set — there is no silent
+fallback (e.g. no H2 in-memory database). The simplest way to get real
+Postgres/RabbitMQ/MinIO
 without running the whole stack:
 
 ```bash
-docker compose up -d postgres rabbitmq
+docker compose up -d postgres rabbitmq minio
 ```
 
 Then export the same variables docker-compose would have injected (see
-`.env.example`) with `DB_HOST=localhost` / `RABBITMQ_HOST=localhost`, and
-run:
+`.env.example`) with `DB_HOST=localhost`, `RABBITMQ_HOST=localhost`, and
+`STORAGE_ENDPOINT=http://localhost:9000`, then run:
 
 ```bash
 ./mvnw spring-boot:run
@@ -113,6 +114,17 @@ Job creation/list/detail endpoints under `/api/jobs` are normal browser
 session APIs. Keep CSRF enabled for mutating human requests and always derive
 workspace scope from the authenticated membership.
 
+Asset endpoints under `/api/assets` are also session APIs. `POST
+/api/assets/import` accepts only a direct HTTP/HTTPS URL and derives workspace
+and created-by user from the session. `GET /api/assets/{id}/download-url`
+returns a short-lived presigned GET URL only for READY assets in the current
+workspace.
+
+Worker import endpoints under `/api/worker-agent/assets/imports/**` are machine
+APIs. Workers request a presigned PUT URL, upload directly to private object
+storage, and report completion/failure. Permanent MinIO/S3 credentials remain
+server-side.
+
 ## Working on the worker agent
 
 ```bash
@@ -144,9 +156,16 @@ Useful worker environment variables:
 - `FDM_WORKER_HEARTBEAT_SECONDS` — heartbeat interval, default 10 seconds.
 - `FDM_WORKER_JOB_POLL_SECONDS` — job polling interval, default 3 seconds.
 
-The Phase 4 worker registers, heartbeats, polls for a job, starts it, executes
-only `SYSTEM_TEST`, and reports success or failure. `SYSTEM_TEST` is limited to
-a bounded message and sleep duration; it is not a generic command runner.
+The Phase 5 worker registers, heartbeats, polls for a job, starts it, executes
+`SYSTEM_TEST` or `IMPORT_MEDIA`, renews active import leases, and reports
+success or failure. `SYSTEM_TEST` is limited to a bounded message and sleep
+duration; `IMPORT_MEDIA` is limited to direct HTTP/HTTPS media-file ingestion.
+The worker does not execute arbitrary commands.
+
+For media imports, the worker validates the URL, follows only bounded
+revalidated redirects, streams to a temporary file with size and timeout
+limits, computes SHA-256, rejects obvious non-media responses, uploads through
+a presigned PUT URL, reports metadata, and deletes the temporary file.
 
 Manual distributed execution check:
 
@@ -158,3 +177,18 @@ Manual distributed execution check:
 4. Create several jobs; each should complete once with the same workspace.
 5. Stop the worker during a longer job and restart it after the lease expires;
    the job should retry until `maxAttempts`, then either succeed or fail.
+
+Manual media import check:
+
+1. Start `docker compose up --build -d` and log in through
+   `http://localhost:8080`.
+2. Leave the worker stopped, open Content, and submit a small direct
+   HTTP/HTTPS media file URL you are authorized to use; the asset should remain
+   `PENDING` and the job `QUEUED`.
+3. Start the worker; it should register, claim `IMPORT_MEDIA`, move the asset
+   through `IMPORTING -> READY`, and mark the job `SUCCEEDED`.
+4. Check MinIO at `http://localhost:9001` and confirm the object exists under
+   `workspaces/{workspaceId}/assets/{assetId}/original` in the private
+   `media-assets` bucket.
+5. Submit a controlled non-media URL and verify a safe `FAILED` asset with no
+   leaked credentials.

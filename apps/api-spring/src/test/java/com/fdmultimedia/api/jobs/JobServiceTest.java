@@ -116,6 +116,23 @@ class JobServiceTest {
     }
 
     @Test
+    void createsImportMediaJobOnlyWithAssetReference() {
+        when(jobs.save(any(Job.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        UUID assetId = UUID.randomUUID();
+
+        JobSummary summary = service.createForWorkspace(
+                workspace,
+                new JobCreateRequest(JobType.IMPORT_MEDIA, Map.of("assetId", assetId.toString())));
+
+        assertThat(summary.type()).isEqualTo(JobType.IMPORT_MEDIA);
+        assertThat(summary.payload()).containsEntry("assetId", assetId.toString());
+        assertThatThrownBy(() -> service.createForWorkspace(workspace, new JobCreateRequest(JobType.IMPORT_MEDIA, Map.of())))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting("statusCode")
+                .isEqualTo(HttpStatus.BAD_REQUEST);
+    }
+
+    @Test
     void listsAndGetsJobsOnlyFromCurrentWorkspace() {
         Job job = job();
         when(jobs.findByWorkspaceOrderByQueuedAtDesc(workspace)).thenReturn(List.of(job));
@@ -129,9 +146,9 @@ class JobServiceTest {
     void workerClaimsNextQueuedJobAtomicallyThroughRepositoryLock() {
         Job job = job();
         when(jobs.findExpiredLeasesForUpdate(workspace.getId(), NOW)).thenReturn(List.of());
-        when(jobs.findNextQueuedForUpdate(workspace.getId())).thenReturn(Optional.of(job));
+        when(jobs.findNextQueuedForUpdate(workspace.getId(), List.of("SYSTEM_TEST"))).thenReturn(Optional.of(job));
 
-        WorkerJobClaimResponse response = service.claim(workerPrincipal, new WorkerJobClaimRequest("machine-1"));
+        WorkerJobClaimResponse response = service.claim(workerPrincipal, new WorkerJobClaimRequest("machine-1", null));
 
         assertThat(response.available()).isTrue();
         assertThat(response.jobId()).isEqualTo(job.getId());
@@ -139,17 +156,51 @@ class JobServiceTest {
         assertThat(job.getAssignedWorker()).isSameAs(worker);
         assertThat(job.getAttemptCount()).isEqualTo(1);
         assertThat(job.getLeaseExpiresAt()).isEqualTo(NOW.plusSeconds(20));
-        verify(jobs).findNextQueuedForUpdate(workspace.getId());
+        verify(jobs).findNextQueuedForUpdate(workspace.getId(), List.of("SYSTEM_TEST"));
     }
 
     @Test
     void claimReportsNoJobsAvailable() {
         when(jobs.findExpiredLeasesForUpdate(workspace.getId(), NOW)).thenReturn(List.of());
-        when(jobs.findNextQueuedForUpdate(workspace.getId())).thenReturn(Optional.empty());
+        when(jobs.findNextQueuedForUpdate(workspace.getId(), List.of("SYSTEM_TEST"))).thenReturn(Optional.empty());
 
-        WorkerJobClaimResponse response = service.claim(workerPrincipal, new WorkerJobClaimRequest("machine-1"));
+        WorkerJobClaimResponse response = service.claim(workerPrincipal, new WorkerJobClaimRequest("machine-1", null));
 
         assertThat(response.available()).isFalse();
+    }
+
+    @Test
+    void workerClaimFiltersBySupportedJobTypes() {
+        Job job = new Job(
+                workspace,
+                JobType.IMPORT_MEDIA,
+                Map.of("assetId", UUID.randomUUID().toString()),
+                3,
+                NOW);
+        when(jobs.findExpiredLeasesForUpdate(workspace.getId(), NOW)).thenReturn(List.of());
+        when(jobs.findNextQueuedForUpdate(workspace.getId(), List.of("SYSTEM_TEST", "IMPORT_MEDIA")))
+                .thenReturn(Optional.of(job));
+
+        WorkerJobClaimResponse response = service.claim(
+                workerPrincipal,
+                new WorkerJobClaimRequest("machine-1", List.of(JobType.SYSTEM_TEST, JobType.IMPORT_MEDIA)));
+
+        assertThat(response.available()).isTrue();
+        assertThat(response.type()).isEqualTo(JobType.IMPORT_MEDIA);
+        verify(jobs).findNextQueuedForUpdate(workspace.getId(), List.of("SYSTEM_TEST", "IMPORT_MEDIA"));
+    }
+
+    @Test
+    void legacyWorkersDefaultToSystemTestOnly() {
+        when(jobs.findExpiredLeasesForUpdate(workspace.getId(), NOW)).thenReturn(List.of());
+        when(jobs.findNextQueuedForUpdate(workspace.getId(), List.of("SYSTEM_TEST"))).thenReturn(Optional.empty());
+
+        WorkerJobClaimResponse response = service.claim(
+                workerPrincipal,
+                new WorkerJobClaimRequest("machine-1", null));
+
+        assertThat(response.available()).isFalse();
+        verify(jobs).findNextQueuedForUpdate(workspace.getId(), List.of("SYSTEM_TEST"));
     }
 
     @Test
@@ -177,6 +228,19 @@ class JobServiceTest {
         assertThat(summary.status()).isEqualTo(JobStatus.SUCCEEDED);
         assertThat(summary.result()).containsEntry("message", "done");
         assertThat(summary.leaseExpiresAt()).isNull();
+    }
+
+    @Test
+    void assignedWorkerCanRenewActiveJobLease() {
+        Job job = job();
+        job.claim(worker, NOW.minusSeconds(2), NOW.plusSeconds(5));
+        job.start(worker, NOW.minusSeconds(1), NOW.plusSeconds(5));
+        when(jobs.findByWorkspaceAndId(workspace, job.getId())).thenReturn(Optional.of(job));
+
+        JobSummary summary = service.renew(workerPrincipal, job.getId(), updateRequest(null));
+
+        assertThat(summary.status()).isEqualTo(JobStatus.RUNNING);
+        assertThat(summary.leaseExpiresAt()).isEqualTo(NOW.plusSeconds(20));
     }
 
     @Test
@@ -211,9 +275,9 @@ class JobServiceTest {
         Job expired = job();
         expired.claim(worker, NOW.minusSeconds(60), NOW.minusSeconds(30));
         when(jobs.findExpiredLeasesForUpdate(workspace.getId(), NOW)).thenReturn(List.of(expired));
-        when(jobs.findNextQueuedForUpdate(workspace.getId())).thenReturn(Optional.empty());
+        when(jobs.findNextQueuedForUpdate(workspace.getId(), List.of("SYSTEM_TEST"))).thenReturn(Optional.empty());
 
-        service.claim(workerPrincipal, new WorkerJobClaimRequest("machine-1"));
+        service.claim(workerPrincipal, new WorkerJobClaimRequest("machine-1", null));
 
         assertThat(expired.getStatus()).isEqualTo(JobStatus.QUEUED);
         assertThat(expired.getErrorCode()).isEqualTo("LEASE_EXPIRED");
@@ -238,11 +302,11 @@ class JobServiceTest {
         Worker offlineWorker = new Worker(workspace, credential, registration("machine-1", "Node A"), NOW.minusSeconds(45));
         when(workers.findByWorkspaceAndMachineIdentifier(workspace, "machine-1")).thenReturn(Optional.of(offlineWorker));
 
-        assertThatThrownBy(() -> service.claim(workerPrincipal, new WorkerJobClaimRequest("machine-1")))
+        assertThatThrownBy(() -> service.claim(workerPrincipal, new WorkerJobClaimRequest("machine-1", null)))
                 .isInstanceOf(ResponseStatusException.class)
                 .extracting("statusCode")
                 .isEqualTo(HttpStatus.CONFLICT);
-        verify(jobs, never()).findNextQueuedForUpdate(any());
+        verify(jobs, never()).findNextQueuedForUpdate(any(), any());
     }
 
     private Job job() {
@@ -254,11 +318,11 @@ class JobServiceTest {
     }
 
     private WorkerJobUpdateRequest updateRequest(Map<String, Object> result) {
-        return new WorkerJobUpdateRequest("machine-1", result, null, null);
+        return new WorkerJobUpdateRequest("machine-1", result, null, null, null);
     }
 
     private WorkerJobUpdateRequest failureRequest(String message) {
-        return new WorkerJobUpdateRequest("machine-1", null, "SYSTEM_TEST_FAILED", message);
+        return new WorkerJobUpdateRequest("machine-1", null, "SYSTEM_TEST_FAILED", message, null);
     }
 
     private WorkerRegistrationRequest registration(String machineIdentifier, String name) {

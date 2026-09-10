@@ -5,9 +5,9 @@ social-media content workflows, video processing workers running across
 multiple laptops/cloud machines, scheduling, AI-assisted content creation,
 publishing, analytics, and revenue tracking.
 
-## Phase 4 scope
+## Phase 5 scope
 
-This repository is currently at **Phase 4: jobs and distributed execution**. That
+This repository is currently at **Phase 5: media assets and video import**. That
 means:
 
 - A clean monorepo layout (`apps/`, `workers/`, `infra/`, `docs/`).
@@ -18,14 +18,17 @@ means:
   roles. Future business resources can be scoped to `workspace_id`.
 - Worker credentials, worker registration, heartbeat tracking, and a
   workspace-scoped Compute page. Worker status is derived from heartbeat age.
-- Centrally-created `SYSTEM_TEST` jobs with PostgreSQL-backed durable state,
+- Centrally-created `SYSTEM_TEST` and `IMPORT_MEDIA` jobs with PostgreSQL-backed durable state,
   atomic worker claiming, leases, bounded retry, and result/error tracking.
 - A standalone Java 21 worker agent in `workers/java-agent` that persists a
   random installation identifier locally, reports basic machine metadata,
-  heartbeats, polls for work, and executes only the safe `SYSTEM_TEST` job.
+  heartbeats, polls for work, renews long-running leases, executes safe
+  `SYSTEM_TEST` jobs, and imports direct HTTP/HTTPS media files.
+- Media assets backed by private S3-compatible object storage. Local
+  development uses MinIO with a private `media-assets` bucket.
 - An Angular application (`apps/web-angular`) with a login page, protected
-  dashboard routes, a sidebar shell, a Compute page, a Jobs page, and
-  placeholder pages for later product sections.
+  dashboard routes, a sidebar shell, a Compute page, a Jobs page, and a
+  functional Content page for direct media imports.
 - Nginx as the single entry point, routing `/api/*` to the backend and
   everything else to the frontend.
 - Docker Compose to run the whole stack locally.
@@ -69,10 +72,11 @@ This builds and starts, in dependency order:
 
 1. `postgres` — PostgreSQL, with a named volume for data.
 2. `rabbitmq` — RabbitMQ, with a named volume for data.
-3. `api` — the Spring Boot backend (waits for Postgres and RabbitMQ to be
+3. `minio` — private S3-compatible object storage for imported media.
+4. `api` — the Spring Boot backend (waits for Postgres, RabbitMQ, and MinIO to be
    healthy, then runs Flyway migrations on startup).
-4. `web` — the Angular frontend, built and served as static files.
-5. `nginx` — the reverse proxy in front of `api` and `web`.
+5. `web` — the Angular frontend, built and served as static files.
+6. `nginx` — the reverse proxy in front of `api` and `web`.
 
 Once everything is healthy, open:
 
@@ -91,14 +95,15 @@ follow logs with `docker compose logs -f`.
 docker compose down
 ```
 
-## Reset local data (Postgres / RabbitMQ volumes)
+## Reset local data (Postgres / RabbitMQ / MinIO volumes)
 
 ```bash
 docker compose down -v
 ```
 
-This deletes the named volumes (`postgres_data`, `rabbitmq_data`), so the
-next `docker compose up` starts from a clean database and message broker.
+This deletes the named volumes (`postgres_data`, `rabbitmq_data`,
+`minio_data`), so the next `docker compose up` starts from a clean database,
+message broker, and object store.
 
 ## Backend health check
 
@@ -147,7 +152,7 @@ On Windows PowerShell, run Maven through `apps\api-spring\mvnw.cmd` and set
 the same environment variables with `$env:FDM_API_BASE_URL` and
 `$env:FDM_WORKER_TOKEN`.
 
-## Jobs and distributed execution
+## Jobs, media assets, and distributed execution
 
 Phase 4 uses PostgreSQL as the durable job queue. Workers poll the control
 plane and claim jobs with a transactional `FOR UPDATE SKIP LOCKED` query, so
@@ -180,6 +185,46 @@ ASSIGNED/RUNNING -> FAILED     (max attempts exhausted)
 lease; if a worker disappears, the next claim operation recovers expired
 leases and either requeues the job or marks it `FAILED` when attempts are
 exhausted.
+
+Phase 5 adds `IMPORT_MEDIA`. A user submits a direct HTTP/HTTPS media file URL
+from Content. The API derives the workspace from the session, creates a
+`MediaAsset` in `PENDING`, creates an `IMPORT_MEDIA` job with only the asset ID
+in its payload, and links them transactionally.
+
+Asset states are:
+
+```text
+PENDING -> IMPORTING -> READY
+PENDING/IMPORTING -> FAILED
+IMPORTING -> PENDING      (retryable worker failure)
+```
+
+`READY` means the original media was successfully stored in private object
+storage and has file size, SHA-256 checksum, content type, and basic metadata
+recorded. The server generates storage keys like
+`workspaces/{workspaceId}/assets/{assetId}/original`; user filenames never
+control object paths.
+
+Workers do not receive permanent MinIO/S3 credentials. For an import, the
+worker requests short-lived upload authorization from the API, downloads the
+validated source URL to a temporary file with size and timeout limits, computes
+SHA-256, uploads with a presigned PUT URL, then reports completion. Authorized
+browser users can request a short-lived presigned GET URL for READY assets via
+`GET /api/assets/{id}/download-url`; the bucket is not public and signed URLs
+are never stored in Postgres.
+
+URL validation is intentionally strict. Only `http` and `https` are accepted.
+Embedded credentials, localhost, loopback, private/link-local/multicast/reserved
+addresses, and cloud metadata endpoints are blocked. Redirect targets are
+revalidated by the worker. Downloads are streamed to disk, capped by
+`MEDIA_MAX_DOWNLOAD_SIZE_BYTES`, and temporary files are deleted on success or
+failure. Clearly non-media responses such as HTML, JSON, XML, and text are
+rejected. Rich codec/duration extraction is deferred to a later FFprobe phase;
+Phase 5 records the safe metadata available without transcoding.
+
+MinIO console is exposed for local development at **http://localhost:9001** (or
+`MINIO_CONSOLE_PORT`) using `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` from
+`.env`.
 
 ## RabbitMQ management UI
 

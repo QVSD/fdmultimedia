@@ -155,6 +155,15 @@ public class Job {
         this.updatedAt = now;
     }
 
+    public void renewLease(Worker worker, Instant now, Instant leaseExpiresAt) {
+        requireAssignedWorker(worker);
+        if (status != JobStatus.ASSIGNED && status != JobStatus.RUNNING) {
+            throw new IllegalStateException("Only active jobs can renew a lease");
+        }
+        this.leaseExpiresAt = leaseExpiresAt;
+        this.updatedAt = now;
+    }
+
     public void fail(Worker worker, String errorCode, String errorMessage, Instant now) {
         requireAssignedWorker(worker);
         if (status != JobStatus.ASSIGNED && status != JobStatus.RUNNING) {
@@ -170,6 +179,20 @@ public class Job {
         } else {
             this.status = JobStatus.FAILED;
         }
+        this.updatedAt = now;
+    }
+
+    public void failTerminal(Worker worker, String errorCode, String errorMessage, Instant now) {
+        requireAssignedWorker(worker);
+        if (status != JobStatus.ASSIGNED && status != JobStatus.RUNNING) {
+            throw new IllegalStateException("Only active jobs can fail");
+        }
+        this.status = JobStatus.FAILED;
+        this.errorCode = normalizeError(errorCode);
+        this.errorMessage = normalizeError(errorMessage);
+        this.result = null;
+        this.finishedAt = now;
+        this.leaseExpiresAt = null;
         this.updatedAt = now;
     }
 

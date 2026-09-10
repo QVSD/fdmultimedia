@@ -63,4 +63,26 @@ class WorkerAgentClientTest {
 
         assertThrows(IOException.class, () -> client.claim("machine-1"));
     }
+
+    @Test
+    void claimAdvertisesSupportedJobTypes() throws Exception {
+        AtomicReference<String> body = new AtomicReference<>();
+        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/api/worker-agent/jobs/claim", exchange -> {
+            body.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+            byte[] response = "{\"available\":false}".getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.start();
+        WorkerAgentClient client = new WorkerAgentClient(
+                java.net.URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/api/"),
+                "WorkerToken credential.secret");
+
+        client.claim("machine-1");
+
+        assertTrue(body.get().contains("\"machineIdentifier\":\"machine-1\""));
+        assertTrue(body.get().contains("\"supportedJobTypes\":[\"SYSTEM_TEST\",\"IMPORT_MEDIA\"]"));
+    }
 }
