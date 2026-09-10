@@ -75,7 +75,7 @@
                     <span>{{ payloadMessage(job) }}</span>
                   </td>
                   <td>
-                    <span class="jobs__badge" [class]="'jobs__badge jobs__badge--' + job.status.toLowerCase()">
+                    <span [class]="'jobs__badge jobs__badge--' + job.status.toLowerCase()">
                       {{ job.status }}
                     </span>
                     @if (job.errorMessage) {

@@ -1,7 +1,7 @@
 import { DatePipe, JsonPipe } from '@angular/common';
 import { Component, OnDestroy, OnInit, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { Subscription, finalize, interval, startWith, switchMap } from 'rxjs';
+import { EMPTY, Subscription, catchError, finalize, interval, startWith, switchMap } from 'rxjs';
 
 import { JobSummary } from '../../core/jobs/job.models';
 import { JobsService } from '../../core/jobs/jobs.service';
@@ -30,14 +30,20 @@ export class Jobs implements OnInit, OnDestroy {
     this.subscription = interval(3000)
       .pipe(
         startWith(0),
-        switchMap(() => this.jobsService.list()),
+        switchMap(() =>
+          this.jobsService.list().pipe(
+            catchError(() => {
+              this.loadState.set('error');
+              return EMPTY;
+            }),
+          ),
+        ),
       )
       .subscribe({
         next: (jobs) => {
           this.jobs.set(jobs);
           this.loadState.set('ready');
         },
-        error: () => this.loadState.set('error'),
       });
   }
 

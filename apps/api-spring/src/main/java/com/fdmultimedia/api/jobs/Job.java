@@ -11,7 +11,6 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.PrePersist;
-import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -102,22 +101,25 @@ public class Job {
 
     @PrePersist
     void prePersist() {
-        Instant now = Instant.now();
+        Instant timestamp = createdAt != null
+                ? createdAt
+                : queuedAt != null
+                        ? queuedAt
+                        : updatedAt != null
+                                ? updatedAt
+                                : Instant.now();
         if (id == null) {
             id = UUID.randomUUID();
         }
         if (queuedAt == null) {
-            queuedAt = now;
+            queuedAt = timestamp;
         }
         if (createdAt == null) {
-            createdAt = now;
+            createdAt = timestamp;
         }
-        updatedAt = now;
-    }
-
-    @PreUpdate
-    void preUpdate() {
-        updatedAt = Instant.now();
+        if (updatedAt == null) {
+            updatedAt = timestamp;
+        }
     }
 
     public void claim(Worker worker, Instant now, Instant leaseExpiresAt) {

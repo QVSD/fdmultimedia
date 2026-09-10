@@ -63,6 +63,31 @@ describe('Jobs', () => {
     expect(fixture.nativeElement.textContent).toContain('Jobs could not be loaded.');
   });
 
+  it('keeps polling after a transient API error', async () => {
+    vi.useFakeTimers();
+    fixture.destroy();
+    vi.mocked(jobsService.list)
+      .mockReset()
+      .mockReturnValueOnce(throwError(() => new Error('Network failure')))
+      .mockReturnValueOnce(of([job('SUCCEEDED')]));
+    fixture = TestBed.createComponent(Jobs);
+    component = fixture.componentInstance;
+
+    try {
+      fixture.detectChanges();
+      expect(fixture.nativeElement.textContent).toContain('Jobs could not be loaded.');
+
+      await vi.advanceTimersByTimeAsync(3000);
+      fixture.detectChanges();
+
+      expect(fixture.nativeElement.textContent).toContain('SUCCEEDED');
+      expect(jobsService.list).toHaveBeenCalledTimes(2);
+    } finally {
+      fixture.destroy();
+      vi.useRealTimers();
+    }
+  });
+
   it('creates a SYSTEM_TEST job', () => {
     fixture.detectChanges();
 

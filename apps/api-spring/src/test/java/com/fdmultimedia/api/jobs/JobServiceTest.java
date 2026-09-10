@@ -97,6 +97,17 @@ class JobServiceTest {
     }
 
     @Test
+    void prePersistDoesNotOverwriteInjectedClockTimestamps() {
+        Job job = job();
+
+        job.prePersist();
+
+        assertThat(job.getQueuedAt()).isEqualTo(NOW);
+        assertThat(job.getCreatedAt()).isEqualTo(NOW);
+        assertThat(job.getUpdatedAt()).isEqualTo(NOW);
+    }
+
+    @Test
     void rejectsExcessiveSystemTestDuration() {
         assertThatThrownBy(() -> service.create(user, createRequest(20_000)))
                 .isInstanceOf(ResponseStatusException.class)
