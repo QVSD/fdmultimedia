@@ -213,7 +213,7 @@ class JobServiceTest {
         Worker otherWorker = new Worker(workspace, credential, registration("machine-2", "Node B"), NOW.minusSeconds(5));
         Job job = job();
         job.claim(otherWorker, NOW, NOW.plusSeconds(20));
-        when(jobs.findByWorkspaceAndId(workspace, job.getId())).thenReturn(Optional.of(job));
+        when(jobs.findByWorkspaceAndIdForUpdate(workspace, job.getId())).thenReturn(Optional.of(job));
 
         assertThatThrownBy(() -> service.started(workerPrincipal, job.getId(), updateRequest(null)))
                 .isInstanceOf(ResponseStatusException.class)
@@ -225,7 +225,7 @@ class JobServiceTest {
     void successfulExecutionCompletesJob() {
         Job job = job();
         job.claim(worker, NOW.minusSeconds(1), NOW.plusSeconds(20));
-        when(jobs.findByWorkspaceAndId(workspace, job.getId())).thenReturn(Optional.of(job));
+        when(jobs.findByWorkspaceAndIdForUpdate(workspace, job.getId())).thenReturn(Optional.of(job));
 
         service.started(workerPrincipal, job.getId(), updateRequest(null));
         JobSummary summary = service.complete(workerPrincipal, job.getId(), updateRequest(Map.of("message", "done")));
@@ -240,7 +240,7 @@ class JobServiceTest {
         Job job = job();
         job.claim(worker, NOW.minusSeconds(2), NOW.plusSeconds(5));
         job.start(worker, NOW.minusSeconds(1), NOW.plusSeconds(5));
-        when(jobs.findByWorkspaceAndId(workspace, job.getId())).thenReturn(Optional.of(job));
+        when(jobs.findByWorkspaceAndIdForUpdate(workspace, job.getId())).thenReturn(Optional.of(job));
 
         JobSummary summary = service.renew(workerPrincipal, job.getId(), updateRequest(null));
 
@@ -253,7 +253,7 @@ class JobServiceTest {
         Job retryable = job();
         retryable.claim(worker, NOW.minusSeconds(2), NOW.plusSeconds(20));
         retryable.start(worker, NOW.minusSeconds(1), NOW.plusSeconds(20));
-        when(jobs.findByWorkspaceAndId(workspace, retryable.getId())).thenReturn(Optional.of(retryable));
+        when(jobs.findByWorkspaceAndIdForUpdate(workspace, retryable.getId())).thenReturn(Optional.of(retryable));
 
         JobSummary firstFailure = service.fail(workerPrincipal, retryable.getId(), failureRequest("Synthetic failure"));
 
@@ -267,7 +267,7 @@ class JobServiceTest {
         exhausted.fail(worker, "ERR", "two", NOW.minusSeconds(2));
         exhausted.claim(worker, NOW.minusSeconds(1), NOW.plusSeconds(20));
         exhausted.start(worker, NOW.minusMillis(500), NOW.plusSeconds(20));
-        when(jobs.findByWorkspaceAndId(workspace, exhausted.getId())).thenReturn(Optional.of(exhausted));
+        when(jobs.findByWorkspaceAndIdForUpdate(workspace, exhausted.getId())).thenReturn(Optional.of(exhausted));
 
         JobSummary finalFailure = service.fail(workerPrincipal, exhausted.getId(), failureRequest("final"));
 
@@ -314,12 +314,73 @@ class JobServiceTest {
     }
 
     @Test
+    void staleWorkerCannotRenewAfterExpiredLeaseIsReclaimed() {
+        Worker workerB = workerB();
+        Job job = reclaimedByWorkerB(workerB);
+        when(jobs.findByWorkspaceAndIdForUpdate(workspace, job.getId())).thenReturn(Optional.of(job));
+
+        assertThatThrownBy(() -> service.renew(workerPrincipal, job.getId(), updateRequest(null)))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting("statusCode")
+                .isEqualTo(HttpStatus.CONFLICT);
+        assertThat(job.getAssignedWorker()).isSameAs(workerB);
+    }
+
+    @Test
+    void staleWorkerCannotCompleteAfterExpiredLeaseIsReclaimed() {
+        Worker workerB = workerB();
+        Job job = reclaimedByWorkerB(workerB);
+        job.start(workerB, NOW.minusMillis(500), NOW.plusSeconds(20));
+        when(jobs.findByWorkspaceAndIdForUpdate(workspace, job.getId())).thenReturn(Optional.of(job));
+
+        assertThatThrownBy(() -> service.complete(workerPrincipal, job.getId(), updateRequest(Map.of("done", true))))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting("statusCode")
+                .isEqualTo(HttpStatus.CONFLICT);
+        assertThat(job.getStatus()).isEqualTo(JobStatus.RUNNING);
+        assertThat(job.getAssignedWorker()).isSameAs(workerB);
+    }
+
+    @Test
+    void staleWorkerCannotFailAfterExpiredLeaseIsReclaimed() {
+        Worker workerB = workerB();
+        Job job = reclaimedByWorkerB(workerB);
+        job.start(workerB, NOW.minusMillis(500), NOW.plusSeconds(20));
+        when(jobs.findByWorkspaceAndIdForUpdate(workspace, job.getId())).thenReturn(Optional.of(job));
+
+        assertThatThrownBy(() -> service.fail(workerPrincipal, job.getId(), failureRequest("late failure")))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting("statusCode")
+                .isEqualTo(HttpStatus.CONFLICT);
+        assertThat(job.getStatus()).isEqualTo(JobStatus.RUNNING);
+        assertThat(job.getAssignedWorker()).isSameAs(workerB);
+    }
+
+    @Test
+    void currentOwnerCanCompleteAfterReclaim() {
+        Worker workerB = workerB();
+        WorkerPrincipal workerBPrincipal = new WorkerPrincipal(credential);
+        Job job = reclaimedByWorkerB(workerB);
+        job.start(workerB, NOW.minusMillis(500), NOW.plusSeconds(20));
+        when(workers.findByWorkspaceAndMachineIdentifier(workspace, "machine-2")).thenReturn(Optional.of(workerB));
+        when(jobs.findByWorkspaceAndIdForUpdate(workspace, job.getId())).thenReturn(Optional.of(job));
+
+        JobSummary summary = service.complete(
+                workerBPrincipal,
+                job.getId(),
+                updateRequest("machine-2", Map.of("done", true)));
+
+        assertThat(summary.status()).isEqualTo(JobStatus.SUCCEEDED);
+        assertThat(summary.result()).containsEntry("done", true);
+    }
+
+    @Test
     void terminalJobCannotBeExecutedAgain() {
         Job job = job();
         job.claim(worker, NOW.minusSeconds(2), NOW.plusSeconds(20));
         job.start(worker, NOW.minusSeconds(1), NOW.plusSeconds(20));
         job.complete(worker, Map.of("ok", true), NOW);
-        when(jobs.findByWorkspaceAndId(workspace, job.getId())).thenReturn(Optional.of(job));
+        when(jobs.findByWorkspaceAndIdForUpdate(workspace, job.getId())).thenReturn(Optional.of(job));
 
         assertThatThrownBy(() -> service.complete(workerPrincipal, job.getId(), updateRequest(Map.of("again", true))))
                 .isInstanceOf(ResponseStatusException.class)
@@ -348,7 +409,11 @@ class JobServiceTest {
     }
 
     private WorkerJobUpdateRequest updateRequest(Map<String, Object> result) {
-        return new WorkerJobUpdateRequest("machine-1", result, null, null, null);
+        return updateRequest("machine-1", result);
+    }
+
+    private WorkerJobUpdateRequest updateRequest(String machineIdentifier, Map<String, Object> result) {
+        return new WorkerJobUpdateRequest(machineIdentifier, result, null, null, null);
     }
 
     private WorkerJobUpdateRequest failureRequest(String message) {
@@ -367,5 +432,18 @@ class JobServiceTest {
                 null,
                 null,
                 "fdm-worker/0.1.0");
+    }
+
+    private Worker workerB() {
+        return new Worker(workspace, credential, registration("machine-2", "Node B"), NOW.minusSeconds(5));
+    }
+
+    private Job reclaimedByWorkerB(Worker workerB) {
+        Job job = job();
+        job.claim(worker, NOW.minusSeconds(60), NOW.minusSeconds(30));
+        job.start(worker, NOW.minusSeconds(59), NOW.minusSeconds(30));
+        job.recoverExpiredLease(NOW.minusSeconds(1));
+        job.claim(workerB, NOW, NOW.plusSeconds(20));
+        return job;
     }
 }

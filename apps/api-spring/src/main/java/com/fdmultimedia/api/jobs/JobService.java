@@ -238,7 +238,7 @@ public class JobService {
     }
 
     public Job requireJobForWorkerWorkspace(Worker worker, UUID jobId) {
-        return jobs.findByWorkspaceAndId(worker.getWorkspace(), jobId)
+        return jobs.findByWorkspaceAndIdForUpdate(worker.getWorkspace(), jobId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Job not found"));
     }
 

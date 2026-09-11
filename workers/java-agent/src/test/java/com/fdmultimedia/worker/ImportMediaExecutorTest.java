@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.sun.net.httpserver.HttpServer;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.net.ServerSocket;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -14,6 +15,8 @@ import java.nio.file.Path;
 import java.util.HexFormat;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -101,6 +104,51 @@ class ImportMediaExecutorTest {
             assertTrue(ex.terminal());
         } finally {
             Files.deleteIfExists(target);
+        }
+    }
+
+    @Test
+    void rejectingNonMediaContentClosesUnderlyingSocket() throws Exception {
+        CountDownLatch requestReceived = new CountDownLatch(1);
+        CountDownLatch clientClosed = new CountDownLatch(1);
+        try (ServerSocket socket = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
+            Thread serverThread = new Thread(() -> {
+                try (var accepted = socket.accept()) {
+                    accepted.setSoTimeout(3_000);
+                    readHttpRequest(accepted.getInputStream());
+                    requestReceived.countDown();
+                    accepted.getOutputStream().write(("""
+                            HTTP/1.1 200 OK\r
+                            Content-Type: application/json\r
+                            Content-Length: 1024\r
+                            Connection: close\r
+                            \r
+                            """).getBytes(StandardCharsets.US_ASCII));
+                    accepted.getOutputStream().flush();
+                    if (accepted.getInputStream().read() == -1) {
+                        clientClosed.countDown();
+                    }
+                } catch (Exception ignored) {
+                    requestReceived.countDown();
+                }
+            });
+            serverThread.start();
+            Path target = Files.createTempFile("fdm-import-test-", ".media");
+
+            try {
+                ImportFailureException ex = assertThrows(
+                        ImportFailureException.class,
+                        () -> executor().download(rawAuthorization(
+                                "http://media.example.test:" + socket.getLocalPort() + "/error.json",
+                                2_048),
+                                target));
+
+                assertEquals("UNSUPPORTED_MEDIA", ex.code());
+                assertTrue(requestReceived.await(1, TimeUnit.SECONDS));
+                assertTrue(clientClosed.await(3, TimeUnit.SECONDS));
+            } finally {
+                Files.deleteIfExists(target);
+            }
         }
     }
 
@@ -236,6 +284,19 @@ class ImportMediaExecutorTest {
                 2);
     }
 
+    private ImportMediaAuthorization rawAuthorization(String sourceUrl, long maxBytes) {
+        return new ImportMediaAuthorization(
+                UUID.randomUUID(),
+                sourceUrl,
+                "http://127.0.0.1/upload",
+                "media-assets",
+                "key",
+                maxBytes,
+                5,
+                5,
+                2);
+    }
+
     private String baseUrl() {
         return "http://127.0.0.1:" + server.getAddress().getPort();
     }
@@ -250,6 +311,23 @@ class ImportMediaExecutorTest {
                     .filter(path -> path.getFileName().toString().startsWith("fdm-import-"))
                     .filter(path -> path.getFileName().toString().endsWith(".media"))
                     .count();
+        }
+    }
+
+    private void readHttpRequest(java.io.InputStream input) throws Exception {
+        int previous = -1;
+        int current;
+        int lineBreaks = 0;
+        while ((current = input.read()) != -1) {
+            if (previous == '\r' && current == '\n') {
+                lineBreaks++;
+                if (lineBreaks == 2) {
+                    return;
+                }
+            } else if (current != '\r') {
+                lineBreaks = 0;
+            }
+            previous = current;
         }
     }
 }

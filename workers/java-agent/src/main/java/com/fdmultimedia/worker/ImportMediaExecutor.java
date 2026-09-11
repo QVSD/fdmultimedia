@@ -56,43 +56,40 @@ final class ImportMediaExecutor {
             throws IOException, InterruptedException, ImportFailureException {
         ValidatedSourceUrl source = urlValidator.validate(authorization.sourceUrl());
         for (int redirect = 0; redirect <= authorization.maxRedirects(); redirect++) {
-            DownloadResponse response = sendGet(source, authorization);
-            int status = response.status();
-            if (status >= 300 && status < 400) {
-                Optional<String> location = response.firstHeader("location");
-                response.close();
-                if (location.isEmpty() || redirect == authorization.maxRedirects()) {
-                    throw new ImportFailureException("TOO_MANY_REDIRECTS", "Source URL redirected too many times", true);
+            try (DownloadResponse response = sendGet(source, authorization)) {
+                int status = response.status();
+                if (status >= 300 && status < 400) {
+                    Optional<String> location = response.firstHeader("location");
+                    if (location.isEmpty() || redirect == authorization.maxRedirects()) {
+                        throw new ImportFailureException("TOO_MANY_REDIRECTS", "Source URL redirected too many times", true);
+                    }
+                    source = urlValidator.validate(source.uri().resolve(location.get()).toString());
+                    continue;
                 }
-                source = urlValidator.validate(source.uri().resolve(location.get()).toString());
-                continue;
+                if (status >= 500) {
+                    throw new ImportFailureException("SOURCE_TEMPORARY_FAILURE", "Source server returned HTTP " + status, false);
+                }
+                if (status < 200 || status >= 300) {
+                    throw new ImportFailureException("SOURCE_REJECTED", "Source server returned HTTP " + status, true);
+                }
+                long contentLength = response.firstHeader("content-length").map(Long::parseLong).orElse(-1L);
+                if (contentLength > authorization.maxDownloadSizeBytes()) {
+                    throw new ImportFailureException("MEDIA_TOO_LARGE", "Source media exceeds maximum size", true);
+                }
+                String contentType = response.firstHeader("content-type")
+                        .map(value -> value.split(";", 2)[0].trim().toLowerCase(Locale.ROOT))
+                        .orElse("application/octet-stream");
+                validateMediaContentType(contentType);
+                String checksum = streamToFile(response.body(), target, authorization.maxDownloadSizeBytes());
+                long size = Files.size(target);
+                return new DownloadedMedia(
+                        target,
+                        originalFilename(source.uri()),
+                        contentType,
+                        size,
+                        checksum,
+                        containerFormat(contentType));
             }
-            if (status >= 500) {
-                response.close();
-                throw new ImportFailureException("SOURCE_TEMPORARY_FAILURE", "Source server returned HTTP " + status, false);
-            }
-            if (status < 200 || status >= 300) {
-                response.close();
-                throw new ImportFailureException("SOURCE_REJECTED", "Source server returned HTTP " + status, true);
-            }
-            long contentLength = response.firstHeader("content-length").map(Long::parseLong).orElse(-1L);
-            if (contentLength > authorization.maxDownloadSizeBytes()) {
-                response.close();
-                throw new ImportFailureException("MEDIA_TOO_LARGE", "Source media exceeds maximum size", true);
-            }
-            String contentType = response.firstHeader("content-type")
-                    .map(value -> value.split(";", 2)[0].trim().toLowerCase(Locale.ROOT))
-                    .orElse("application/octet-stream");
-            validateMediaContentType(contentType);
-            String checksum = streamToFile(response.body(), target, authorization.maxDownloadSizeBytes());
-            long size = Files.size(target);
-            return new DownloadedMedia(
-                    target,
-                    originalFilename(source.uri()),
-                    contentType,
-                    size,
-                    checksum,
-                    containerFormat(contentType));
         }
         throw new ImportFailureException("TOO_MANY_REDIRECTS", "Source URL redirected too many times", true);
     }
@@ -274,13 +271,14 @@ final class ImportMediaExecutor {
         return slash < 0 ? contentType : contentType.substring(slash + 1);
     }
 
-    private record DownloadResponse(int status, Map<String, List<String>> headers, InputStream body) {
+    private record DownloadResponse(int status, Map<String, List<String>> headers, InputStream body)
+            implements AutoCloseable {
         Optional<String> firstHeader(String name) {
             List<String> values = headers.get(name);
             return values == null || values.isEmpty() ? Optional.empty() : Optional.of(values.get(0));
         }
 
-        void close() throws IOException {
+        public void close() throws IOException {
             body.close();
         }
     }
