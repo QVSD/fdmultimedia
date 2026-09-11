@@ -7,6 +7,7 @@ import java.net.InetAddress;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.UnknownHostException;
+import java.util.Arrays;
 import java.util.Locale;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
@@ -63,6 +64,10 @@ public class UrlSecurityValidator {
     }
 
     private boolean isBlocked(InetAddress address) {
+        byte[] embeddedIpv4 = embeddedIpv4(address);
+        if (embeddedIpv4 != null) {
+            return isCloudMetadata(embeddedIpv4) || isReservedIpv4(embeddedIpv4);
+        }
         return address.isAnyLocalAddress()
                 || address.isLoopbackAddress()
                 || address.isLinkLocalAddress()
@@ -74,7 +79,10 @@ public class UrlSecurityValidator {
     }
 
     private boolean isCloudMetadata(InetAddress address) {
-        byte[] bytes = address.getAddress();
+        return isCloudMetadata(address.getAddress());
+    }
+
+    private boolean isCloudMetadata(byte[] bytes) {
         return bytes.length == 4
                 && unsigned(bytes[0]) == 169
                 && unsigned(bytes[1]) == 254
@@ -86,7 +94,10 @@ public class UrlSecurityValidator {
         if (!(address instanceof Inet4Address)) {
             return false;
         }
-        byte[] bytes = address.getAddress();
+        return isReservedIpv4(address.getAddress());
+    }
+
+    private boolean isReservedIpv4(byte[] bytes) {
         int first = unsigned(bytes[0]);
         int second = unsigned(bytes[1]);
         return first == 0
@@ -105,6 +116,20 @@ public class UrlSecurityValidator {
         }
         int first = unsigned(address.getAddress()[0]);
         return (first & 0xfe) == 0xfc;
+    }
+
+    private byte[] embeddedIpv4(InetAddress address) {
+        byte[] bytes = address.getAddress();
+        if (!(address instanceof Inet6Address) || bytes.length != 16) {
+            return null;
+        }
+        boolean leadingZeros = true;
+        for (int index = 0; index < 10; index++) {
+            leadingZeros = leadingZeros && bytes[index] == 0;
+        }
+        boolean compatible = bytes[10] == 0 && bytes[11] == 0;
+        boolean mapped = bytes[10] == (byte) 0xff && bytes[11] == (byte) 0xff;
+        return leadingZeros && (compatible || mapped) ? Arrays.copyOfRange(bytes, 12, 16) : null;
     }
 
     private int unsigned(byte value) {

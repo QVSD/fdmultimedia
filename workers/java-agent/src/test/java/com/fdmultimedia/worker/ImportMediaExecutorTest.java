@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.sun.net.httpserver.HttpServer;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
@@ -134,6 +135,32 @@ class ImportMediaExecutorTest {
     }
 
     @Test
+    void connectsToValidatedAddressAndPreservesOriginalHostHeader() throws Exception {
+        byte[] media = "pinned".getBytes(StandardCharsets.UTF_8);
+        AtomicReference<String> hostHeader = new AtomicReference<>();
+        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/media.mp4", exchange -> {
+            hostHeader.set(exchange.getRequestHeaders().getFirst("Host"));
+            exchange.getResponseHeaders().add("Content-Type", "video/mp4");
+            exchange.sendResponseHeaders(200, media.length);
+            exchange.getResponseBody().write(media);
+            exchange.close();
+        });
+        server.start();
+        Path target = Files.createTempFile("fdm-import-test-", ".media");
+        SourceUrlPolicy policy = rawUrl -> new ValidatedSourceUrl(URI.create(rawUrl), InetAddress.getLoopbackAddress());
+        ImportMediaExecutor executor = new ImportMediaExecutor(policy);
+
+        try {
+            executor.download(authorizationForUrl("http://media.example.test:" + server.getAddress().getPort() + "/media.mp4", 100), target);
+
+            assertEquals("media.example.test:" + server.getAddress().getPort(), hostHeader.get());
+        } finally {
+            Files.deleteIfExists(target);
+        }
+    }
+
+    @Test
     void executeUploadsCompletesAndDeletesTemporaryFile() throws Exception {
         byte[] media = "uploaded".getBytes(StandardCharsets.UTF_8);
         AtomicReference<String> uploaded = new AtomicReference<>();
@@ -188,13 +215,18 @@ class ImportMediaExecutorTest {
     }
 
     private ImportMediaExecutor executor() {
-        return new ImportMediaExecutor(URI::create);
+        return new ImportMediaExecutor(rawUrl ->
+                new ValidatedSourceUrl(URI.create(rawUrl), InetAddress.getLoopbackAddress()));
     }
 
     private ImportMediaAuthorization authorization(String path, long maxBytes) {
+        return authorizationForUrl(baseUrl() + path, maxBytes);
+    }
+
+    private ImportMediaAuthorization authorizationForUrl(String sourceUrl, long maxBytes) {
         return new ImportMediaAuthorization(
                 UUID.randomUUID(),
-                baseUrl() + path,
+                sourceUrl,
                 baseUrl() + "/upload",
                 "media-assets",
                 "key",

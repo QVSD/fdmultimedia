@@ -10,6 +10,9 @@ import static org.mockito.Mockito.when;
 
 import com.fdmultimedia.api.auth.AuthService;
 import com.fdmultimedia.api.auth.security.AuthenticatedUser;
+import com.fdmultimedia.api.assets.MediaAsset;
+import com.fdmultimedia.api.assets.MediaAssetRepository;
+import com.fdmultimedia.api.assets.MediaAssetStatus;
 import com.fdmultimedia.api.users.AppUser;
 import com.fdmultimedia.api.workers.Worker;
 import com.fdmultimedia.api.workers.WorkerCredential;
@@ -42,6 +45,7 @@ class JobServiceTest {
 
     private final AuthService authService = mock(AuthService.class);
     private final JobRepository jobs = mock(JobRepository.class);
+    private final MediaAssetRepository assets = mock(MediaAssetRepository.class);
     private final WorkerRepository workers = mock(WorkerRepository.class);
     private final WorkerCredentialRepository credentials = mock(WorkerCredentialRepository.class);
     private final JobProperties jobProperties = new JobProperties();
@@ -51,6 +55,7 @@ class JobServiceTest {
     private final JobService service = new JobService(
             authService,
             jobs,
+            assets,
             workers,
             credentials,
             workerStatusService,
@@ -281,6 +286,31 @@ class JobServiceTest {
 
         assertThat(expired.getStatus()).isEqualTo(JobStatus.QUEUED);
         assertThat(expired.getErrorCode()).isEqualTo("LEASE_EXPIRED");
+    }
+
+    @Test
+    void expiredImportLeaseMarksAssetFailedWhenAttemptsAreExhausted() {
+        Job expired = new Job(
+                workspace,
+                JobType.IMPORT_MEDIA,
+                Map.of("assetId", UUID.randomUUID().toString()),
+                1,
+                NOW);
+        MediaAsset asset = new MediaAsset(workspace, owner, "https://example.com/video.mp4", NOW);
+        asset.attachImportJob(expired, NOW);
+        asset.markImporting(NOW);
+        expired.claim(worker, NOW.minusSeconds(60), NOW.minusSeconds(30));
+        when(jobs.findExpiredLeasesForUpdate(workspace.getId(), NOW)).thenReturn(List.of(expired));
+        when(jobs.findNextQueuedForUpdate(workspace.getId(), List.of("IMPORT_MEDIA"))).thenReturn(Optional.empty());
+        when(assets.findByImportJobId(expired.getId())).thenReturn(Optional.of(asset));
+
+        service.claim(
+                workerPrincipal,
+                new WorkerJobClaimRequest("machine-1", List.of(JobType.IMPORT_MEDIA)));
+
+        assertThat(expired.getStatus()).isEqualTo(JobStatus.FAILED);
+        assertThat(asset.getStatus()).isEqualTo(MediaAssetStatus.FAILED);
+        assertThat(asset.getErrorCode()).isEqualTo("LEASE_EXPIRED");
     }
 
     @Test

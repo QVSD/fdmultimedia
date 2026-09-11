@@ -4,5 +4,5 @@ import java.net.URI;
 
 interface SourceUrlPolicy {
 
-    URI validate(String rawUrl) throws ImportFailureException;
+    ValidatedSourceUrl validate(String rawUrl) throws ImportFailureException;
 }

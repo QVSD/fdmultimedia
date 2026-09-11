@@ -2,6 +2,9 @@ package com.fdmultimedia.api.jobs;
 
 import com.fdmultimedia.api.auth.AuthService;
 import com.fdmultimedia.api.auth.security.AuthenticatedUser;
+import com.fdmultimedia.api.assets.MediaAsset;
+import com.fdmultimedia.api.assets.MediaAssetRepository;
+import com.fdmultimedia.api.assets.MediaAssetStatus;
 import com.fdmultimedia.api.workers.Worker;
 import com.fdmultimedia.api.workers.WorkerCredential;
 import com.fdmultimedia.api.workers.WorkerCredentialRepository;
@@ -28,6 +31,7 @@ public class JobService {
 
     private final AuthService authService;
     private final JobRepository jobs;
+    private final MediaAssetRepository assets;
     private final WorkerRepository workers;
     private final WorkerCredentialRepository credentials;
     private final WorkerStatusService workerStatusService;
@@ -37,6 +41,7 @@ public class JobService {
     public JobService(
             AuthService authService,
             JobRepository jobs,
+            MediaAssetRepository assets,
             WorkerRepository workers,
             WorkerCredentialRepository credentials,
             WorkerStatusService workerStatusService,
@@ -44,6 +49,7 @@ public class JobService {
             Clock clock) {
         this.authService = authService;
         this.jobs = jobs;
+        this.assets = assets;
         this.workers = workers;
         this.credentials = credentials;
         this.workerStatusService = workerStatusService;
@@ -179,7 +185,28 @@ public class JobService {
 
     private void recoverExpiredLeases(Workspace workspace, Instant now) {
         jobs.findExpiredLeasesForUpdate(workspace.getId(), now)
-                .forEach(job -> job.recoverExpiredLease(now));
+                .forEach(job -> {
+                    job.recoverExpiredLease(now);
+                    reconcileRecoveredImportAsset(job, now);
+                });
+    }
+
+    private void reconcileRecoveredImportAsset(Job job, Instant now) {
+        if (job.getType() != JobType.IMPORT_MEDIA) {
+            return;
+        }
+        assets.findByImportJobId(job.getId()).ifPresent(asset -> reconcileRecoveredImportAsset(job, asset, now));
+    }
+
+    private void reconcileRecoveredImportAsset(Job job, MediaAsset asset, Instant now) {
+        if (asset.getStatus() == MediaAssetStatus.READY || asset.getStatus() == MediaAssetStatus.FAILED) {
+            return;
+        }
+        if (job.getStatus() == JobStatus.FAILED) {
+            asset.markFailed(job.getErrorCode(), job.getErrorMessage(), now);
+        } else if (job.getStatus() == JobStatus.QUEUED) {
+            asset.markPendingForRetry(now);
+        }
     }
 
     private List<String> supportedTypeNames(WorkerJobClaimRequest request) {

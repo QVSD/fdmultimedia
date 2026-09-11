@@ -38,6 +38,9 @@ class UrlSecurityValidatorTest {
         assertBadRequest("https://[::1]/video.mp4");
         assertBadRequest("https://[fc00::1]/video.mp4");
         assertBadRequest("https://[fe80::1]/video.mp4");
+        assertBadRequest("https://[::127.0.0.1]/video.mp4");
+        assertBadRequest("https://[::10.0.0.1]/video.mp4");
+        assertBadRequest("https://[::169.254.169.254]/latest/meta-data");
     }
 
     @Test

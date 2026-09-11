@@ -11,7 +11,7 @@ class ImportUrlValidatorTest {
 
     @Test
     void acceptsPublicHttpUrl() throws Exception {
-        assertEquals("https://93.184.216.34/video.mp4", validator.validate("https://93.184.216.34/video.mp4").toString());
+        assertEquals("https://93.184.216.34/video.mp4", validator.validate("https://93.184.216.34/video.mp4").uri().toString());
     }
 
     @Test
@@ -31,6 +31,9 @@ class ImportUrlValidatorTest {
         assertTerminal("http://[::1]/video.mp4", "SSRF_BLOCKED");
         assertTerminal("http://[fc00::1]/video.mp4", "SSRF_BLOCKED");
         assertTerminal("http://[fe80::1]/video.mp4", "SSRF_BLOCKED");
+        assertTerminal("http://[::127.0.0.1]/video.mp4", "SSRF_BLOCKED");
+        assertTerminal("http://[::10.0.0.1]/video.mp4", "SSRF_BLOCKED");
+        assertTerminal("http://[::169.254.169.254]/latest/meta-data", "SSRF_BLOCKED");
     }
 
     private void assertTerminal(String url, String code) {
