@@ -9,6 +9,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
@@ -36,12 +37,12 @@ final class WorkerAgentClient {
         send("/worker-agent/heartbeat", Map.of("machineIdentifier", machineIdentifier), new TypeReference<Map<String, Object>>() {});
     }
 
-    ClaimedJob claim(String machineIdentifier) throws IOException, InterruptedException {
+    ClaimedJob claim(String machineIdentifier, List<String> supportedJobTypes) throws IOException, InterruptedException {
         return send(
                 "/worker-agent/jobs/claim",
                 Map.of(
                         "machineIdentifier", machineIdentifier,
-                        "supportedJobTypes", java.util.List.of("SYSTEM_TEST", "IMPORT_MEDIA")),
+                        "supportedJobTypes", supportedJobTypes),
                 new TypeReference<ClaimedJob>() {});
     }
 
@@ -108,6 +109,43 @@ final class WorkerAgentClient {
         body.put("errorMessage", errorMessage);
         body.put("terminal", terminal);
         send("/worker-agent/assets/imports/" + jobId + "/fail", body, new TypeReference<Map<String, Object>>() {});
+    }
+
+    InspectionAuthorization authorizeInspection(UUID jobId, String machineIdentifier)
+            throws IOException, InterruptedException {
+        return send(
+                "/worker-agent/assets/inspections/" + jobId + "/authorization",
+                Map.of("machineIdentifier", machineIdentifier),
+                new TypeReference<InspectionAuthorization>() {});
+    }
+
+    void completeInspection(UUID jobId, String machineIdentifier, UUID assetId, InspectionMetadata metadata)
+            throws IOException, InterruptedException {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("machineIdentifier", machineIdentifier);
+        body.put("assetId", assetId);
+        body.put("durationMs", metadata.durationMs());
+        body.put("width", metadata.width());
+        body.put("height", metadata.height());
+        body.put("videoCodec", metadata.videoCodec());
+        body.put("audioCodec", metadata.audioCodec());
+        body.put("containerFormat", metadata.containerFormat());
+        body.put("frameRate", metadata.frameRate());
+        body.put("bitrate", metadata.bitrate());
+        body.put("hasVideo", metadata.hasVideo());
+        body.put("hasAudio", metadata.hasAudio());
+        send("/worker-agent/assets/inspections/" + jobId + "/complete", body, new TypeReference<Map<String, Object>>() {});
+    }
+
+    void failInspection(UUID jobId, String machineIdentifier, UUID assetId, String errorCode, String errorMessage, boolean terminal)
+            throws IOException, InterruptedException {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("machineIdentifier", machineIdentifier);
+        body.put("assetId", assetId);
+        body.put("errorCode", errorCode);
+        body.put("errorMessage", errorMessage);
+        body.put("terminal", terminal);
+        send("/worker-agent/assets/inspections/" + jobId + "/fail", body, new TypeReference<Map<String, Object>>() {});
     }
 
     void upload(URI uploadUrl, Path path, String contentType) throws IOException, InterruptedException {

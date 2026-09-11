@@ -6,6 +6,9 @@
 - Java 21 — for working on `apps/api-spring` outside Docker. Set
   `JAVA_HOME` to the JDK directory when running the Maven Wrapper on Windows.
 - Node.js 22+ and npm — for working on `apps/web-angular` outside Docker.
+- FFprobe — optional for import-only development, required for workers to claim
+  `INSPECT_MEDIA` jobs. Install it with FFmpeg and set `FFPROBE_PATH` when the
+  executable is not on `PATH`.
 
 ## Running everything
 
@@ -155,17 +158,27 @@ Useful worker environment variables:
 - `FDM_WORKER_ID_FILE` — local file that stores the generated installation ID.
 - `FDM_WORKER_HEARTBEAT_SECONDS` — heartbeat interval, default 10 seconds.
 - `FDM_WORKER_JOB_POLL_SECONDS` — job polling interval, default 3 seconds.
+- `FFPROBE_PATH` — FFprobe executable path, default `ffprobe`.
 
-The Phase 5 worker registers, heartbeats, polls for a job, starts it, executes
-`SYSTEM_TEST` or `IMPORT_MEDIA`, renews active import leases, and reports
-success or failure. `SYSTEM_TEST` is limited to a bounded message and sleep
-duration; `IMPORT_MEDIA` is limited to direct HTTP/HTTPS media-file ingestion.
-The worker does not execute arbitrary commands.
+The Phase 6A worker registers, heartbeats, polls for a job, starts it, executes
+`SYSTEM_TEST`, `IMPORT_MEDIA`, or `INSPECT_MEDIA`, renews active media-job
+leases, and reports success or failure. `SYSTEM_TEST` is limited to a bounded
+message and sleep duration; `IMPORT_MEDIA` is limited to direct HTTP/HTTPS
+media-file ingestion; `INSPECT_MEDIA` is limited to read-only FFprobe metadata
+inspection of already stored originals. The worker does not execute arbitrary
+commands.
 
 For media imports, the worker validates the URL, follows only bounded
 revalidated redirects, streams to a temporary file with size and timeout
 limits, computes SHA-256, rejects obvious non-media responses, uploads through
 a presigned PUT URL, reports metadata, and deletes the temporary file.
+
+For media inspection, the worker advertises `INSPECT_MEDIA` only if
+`ffprobe -version` succeeds. It obtains a short-lived presigned GET URL from
+the API, downloads the stored original to a temporary file, runs FFprobe with a
+fixed argument list, reports duration/resolution/codec/container metadata, and
+deletes the temporary file. If FFprobe is missing, inspection jobs remain
+queued for a compatible worker; imports and `SYSTEM_TEST` jobs still work.
 
 Manual distributed execution check:
 
@@ -192,3 +205,16 @@ Manual media import check:
    `media-assets` bucket.
 5. Submit a controlled non-media URL and verify a safe `FAILED` asset with no
    leaked credentials.
+
+Manual media inspection check:
+
+1. Install FFprobe and confirm `ffprobe -version` works, or set
+   `$env:FFPROBE_PATH` to the executable before starting the worker.
+2. Import a small valid media file through Content.
+3. Confirm the import job reaches `SUCCEEDED`, the asset reaches `READY`, and
+   a separate `INSPECT_MEDIA` job is created.
+4. Confirm the worker claims the inspection job only when FFprobe is available.
+5. Confirm Content shows inspection metadata such as duration, resolution,
+   codecs, frame rate, bitrate, and an `Inspected` status.
+6. Stop or hide FFprobe and restart the worker; it should log that
+   `INSPECT_MEDIA` is disabled and leave inspection jobs queued.

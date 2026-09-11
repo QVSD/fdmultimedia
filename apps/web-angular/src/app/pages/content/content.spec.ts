@@ -46,6 +46,8 @@ describe('Content', () => {
     expect(text).toContain('video.mp4');
     expect(text).toContain('video/mp4');
     expect(text).toContain('1920x1080');
+    expect(text).toContain('h264 / aac');
+    expect(text).toContain('Inspected');
     expect(text).toContain('UNSUPPORTED_MEDIA');
   });
 
@@ -131,10 +133,18 @@ describe('Content', () => {
       durationMs: status === 'READY' ? 12_000 : null,
       width: status === 'READY' ? 1920 : null,
       height: status === 'READY' ? 1080 : null,
-      videoCodec: null,
-      audioCodec: null,
+      videoCodec: status === 'READY' ? 'h264' : null,
+      audioCodec: status === 'READY' ? 'aac' : null,
       containerFormat: status === 'READY' ? 'mp4' : null,
       importJobId: `${status}-job`,
+      inspectionStatus: status === 'READY' ? 'INSPECTED' : 'PENDING',
+      inspectionJobId: `${status}-inspection-job`,
+      inspectionErrorCode: null,
+      inspectionErrorMessage: null,
+      frameRate: status === 'READY' ? 29.97 : null,
+      bitrate: status === 'READY' ? 800_000 : null,
+      hasVideo: status === 'READY' ? true : null,
+      hasAudio: status === 'READY' ? true : null,
       errorCode: status === 'FAILED' ? 'UNSUPPORTED_MEDIA' : null,
       errorMessage: status === 'FAILED' ? 'Source did not return media content' : null,
       createdAt: '2026-09-10T08:00:00Z',

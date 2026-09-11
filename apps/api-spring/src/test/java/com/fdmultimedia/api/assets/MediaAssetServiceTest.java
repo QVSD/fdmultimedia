@@ -27,6 +27,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.math.BigDecimal;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -127,6 +128,7 @@ class MediaAssetServiceTest {
     void completesImportTransactionallyWithJobAndReadyAsset() {
         MediaAsset asset = asset();
         Job job = importJob(asset.getId());
+        Job inspectionJob = inspectionJob(asset.getId());
         job.claim(worker, NOW.minusSeconds(3), NOW.plusSeconds(30));
         job.start(worker, NOW.minusSeconds(2), NOW.plusSeconds(30));
         asset.attachImportJob(job, NOW.minusSeconds(4));
@@ -135,6 +137,8 @@ class MediaAssetServiceTest {
         when(assets.findByImportJobId(job.getId())).thenReturn(Optional.of(asset));
         when(storage.objectKey(asset)).thenReturn("workspaces/ws/assets/asset/original");
         when(storage.bucket()).thenReturn("media-assets");
+        when(jobService.createForWorkspace(any(), any(JobCreateRequest.class))).thenReturn(jobSummary(inspectionJob));
+        when(jobService.getJobEntityForWorkspace(workspace, inspectionJob.getId())).thenReturn(Optional.of(inspectionJob));
 
         MediaAssetSummary summary = service.completeWorkerImport(workerPrincipal, job.getId(), completion(asset));
 
@@ -142,6 +146,64 @@ class MediaAssetServiceTest {
         assertThat(summary.checksumSha256()).isEqualTo("0".repeat(64));
         assertThat(job.getStatus()).isEqualTo(JobStatus.SUCCEEDED);
         assertThat(job.getResult()).containsEntry("assetId", asset.getId().toString());
+        assertThat(summary.inspectionStatus()).isEqualTo(MediaInspectionStatus.PENDING);
+        assertThat(summary.inspectionJobId()).isEqualTo(inspectionJob.getId());
+    }
+
+    @Test
+    void completesInspectionAndPersistsMetadataWithoutChangingAssetReadiness() {
+        MediaAsset asset = readyAsset();
+        Job job = inspectionJob(asset.getId());
+        job.claim(worker, NOW.minusSeconds(3), NOW.plusSeconds(30));
+        job.start(worker, NOW.minusSeconds(2), NOW.plusSeconds(30));
+        asset.attachInspectionJob(job, NOW.minusSeconds(4));
+        asset.markInspecting(NOW.minusSeconds(2));
+        when(jobService.requireJobForWorkerWorkspace(worker, job.getId())).thenReturn(job);
+        when(assets.findByInspectionJobId(job.getId())).thenReturn(Optional.of(asset));
+
+        MediaAssetSummary summary = service.completeWorkerInspection(
+                workerPrincipal,
+                job.getId(),
+                new WorkerInspectionCompletionRequest(
+                        "machine-1",
+                        asset.getId(),
+                        12_345L,
+                        1920,
+                        1080,
+                        "h264",
+                        "aac",
+                        "mp4",
+                        new BigDecimal("29.970"),
+                        800_000L,
+                        true,
+                        true));
+
+        assertThat(summary.status()).isEqualTo(MediaAssetStatus.READY);
+        assertThat(summary.inspectionStatus()).isEqualTo(MediaInspectionStatus.INSPECTED);
+        assertThat(summary.videoCodec()).isEqualTo("h264");
+        assertThat(summary.audioCodec()).isEqualTo("aac");
+        assertThat(job.getStatus()).isEqualTo(JobStatus.SUCCEEDED);
+    }
+
+    @Test
+    void terminalInspectionFailureDoesNotFailReadyAsset() {
+        MediaAsset asset = readyAsset();
+        Job job = inspectionJob(asset.getId());
+        job.claim(worker, NOW.minusSeconds(3), NOW.plusSeconds(30));
+        job.start(worker, NOW.minusSeconds(2), NOW.plusSeconds(30));
+        asset.attachInspectionJob(job, NOW.minusSeconds(4));
+        asset.markInspecting(NOW.minusSeconds(2));
+        when(jobService.requireJobForWorkerWorkspace(worker, job.getId())).thenReturn(job);
+        when(assets.findByInspectionJobId(job.getId())).thenReturn(Optional.of(asset));
+
+        MediaAssetSummary summary = service.failWorkerInspection(
+                workerPrincipal,
+                job.getId(),
+                new WorkerInspectionFailureRequest("machine-1", asset.getId(), "FFPROBE_UNSUPPORTED", "Unsupported", true));
+
+        assertThat(summary.status()).isEqualTo(MediaAssetStatus.READY);
+        assertThat(summary.inspectionStatus()).isEqualTo(MediaInspectionStatus.FAILED);
+        assertThat(job.getStatus()).isEqualTo(JobStatus.FAILED);
     }
 
     @Test
@@ -208,6 +270,17 @@ class MediaAssetServiceTest {
 
     private Job importJob(UUID assetId) {
         return new Job(workspace, JobType.IMPORT_MEDIA, Map.of("assetId", assetId.toString()), 3, NOW);
+    }
+
+    private Job inspectionJob(UUID assetId) {
+        return new Job(workspace, JobType.INSPECT_MEDIA, Map.of("assetId", assetId.toString()), 3, NOW);
+    }
+
+    private MediaAsset readyAsset() {
+        MediaAsset asset = asset();
+        asset.markImporting(NOW.minusSeconds(1));
+        asset.markReady(metadata(), "media-assets", "storage-key", NOW);
+        return asset;
     }
 
     private WorkerImportCompletionRequest completion(MediaAsset asset) {

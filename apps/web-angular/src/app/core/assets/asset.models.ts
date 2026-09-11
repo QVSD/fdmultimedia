@@ -1,4 +1,5 @@
 export type MediaAssetStatus = 'PENDING' | 'IMPORTING' | 'READY' | 'FAILED';
+export type MediaInspectionStatus = 'NOT_REQUESTED' | 'PENDING' | 'INSPECTING' | 'INSPECTED' | 'FAILED';
 
 export interface MediaAssetSummary {
   id: string;
@@ -16,6 +17,14 @@ export interface MediaAssetSummary {
   audioCodec: string | null;
   containerFormat: string | null;
   importJobId: string | null;
+  inspectionStatus: MediaInspectionStatus;
+  inspectionJobId: string | null;
+  inspectionErrorCode: string | null;
+  inspectionErrorMessage: string | null;
+  frameRate: number | null;
+  bitrate: number | null;
+  hasVideo: boolean | null;
+  hasAudio: boolean | null;
   errorCode: string | null;
   errorMessage: string | null;
   createdAt: string;

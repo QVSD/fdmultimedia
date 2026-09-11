@@ -5,10 +5,9 @@ social-media content workflows, video processing workers running across
 multiple laptops/cloud machines, scheduling, AI-assisted content creation,
 publishing, analytics, and revenue tracking.
 
-## Phase 5 scope
+## Phase 6A scope
 
-This repository is currently at **Phase 5: media assets and video import**. That
-means:
+This repository is currently at **Phase 6A: media inspection**. That means:
 
 - A clean monorepo layout (`apps/`, `workers/`, `infra/`, `docs/`).
 - A Spring Boot 21 modular monolith (`apps/api-spring`) with the package
@@ -18,12 +17,14 @@ means:
   roles. Future business resources can be scoped to `workspace_id`.
 - Worker credentials, worker registration, heartbeat tracking, and a
   workspace-scoped Compute page. Worker status is derived from heartbeat age.
-- Centrally-created `SYSTEM_TEST` and `IMPORT_MEDIA` jobs with PostgreSQL-backed durable state,
-  atomic worker claiming, leases, bounded retry, and result/error tracking.
+- Centrally-created `SYSTEM_TEST`, `IMPORT_MEDIA`, and `INSPECT_MEDIA` jobs
+  with PostgreSQL-backed durable state, atomic worker claiming, leases,
+  bounded retry, and result/error tracking.
 - A standalone Java 21 worker agent in `workers/java-agent` that persists a
   random installation identifier locally, reports basic machine metadata,
   heartbeats, polls for work, renews long-running leases, executes safe
-  `SYSTEM_TEST` jobs, and imports direct HTTP/HTTPS media files.
+  `SYSTEM_TEST` jobs, imports direct HTTP/HTTPS media files, and, when
+  FFprobe is available, inspects stored originals read-only.
 - Media assets backed by private S3-compatible object storage. Local
   development uses MinIO with a private `media-assets` bucket.
 - An Angular application (`apps/web-angular`) with a login page, protected
@@ -33,10 +34,10 @@ means:
   everything else to the frontend.
 - Docker Compose to run the whole stack locally.
 
-No media processing, publishing, AI, social integrations, analytics, or
-billing are implemented yet — see [docs/ROADMAP.md](docs/ROADMAP.md) for what
-comes next and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how the pieces
-fit together.
+No clipping, transcoding, thumbnails, publishing, AI, social integrations,
+analytics, or billing are implemented yet — see
+[docs/ROADMAP.md](docs/ROADMAP.md) for what comes next and
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how the pieces fit together.
 
 ## Prerequisites
 
@@ -150,7 +151,9 @@ java -jar target/worker-agent-0.1.0-SNAPSHOT.jar
 
 On Windows PowerShell, run Maven through `apps\api-spring\mvnw.cmd` and set
 the same environment variables with `$env:FDM_API_BASE_URL` and
-`$env:FDM_WORKER_TOKEN`.
+`$env:FDM_WORKER_TOKEN`. Install FFmpeg/FFprobe and set `$env:FFPROBE_PATH`
+if `ffprobe` is not on `PATH`; without FFprobe the worker still registers and
+imports media, but it does not advertise `INSPECT_MEDIA`.
 
 ## Jobs, media assets, and distributed execution
 
@@ -219,8 +222,25 @@ addresses, and cloud metadata endpoints are blocked. Redirect targets are
 revalidated by the worker. Downloads are streamed to disk, capped by
 `MEDIA_MAX_DOWNLOAD_SIZE_BYTES`, and temporary files are deleted on success or
 failure. Clearly non-media responses such as HTML, JSON, XML, and text are
-rejected. Rich codec/duration extraction is deferred to a later FFprobe phase;
-Phase 5 records the safe metadata available without transcoding.
+rejected.
+
+Phase 6A adds read-only media inspection with `INSPECT_MEDIA`. When an import
+completes successfully, the API creates one inspection job for the stored
+asset. Workers advertise `INSPECT_MEDIA` only after `ffprobe -version`
+succeeds, then download the private original through a short-lived presigned
+GET URL and run FFprobe with fixed arguments:
+
+```text
+ffprobe -v error -print_format json -show_format -show_streams <file>
+```
+
+The worker uses `ProcessBuilder` without a shell, does not accept arbitrary
+FFprobe arguments, and does not transform media. Inspection stores duration,
+resolution, video codec, audio codec, container format, frame rate, bitrate,
+and `hasVideo`/`hasAudio` flags when FFprobe can determine them. Attached
+picture streams are ignored for primary video selection. Inspection failures
+set the inspection state to failed but do not change a READY asset back to a
+failed import state.
 
 MinIO console is exposed for local development at **http://localhost:9001** (or
 `MINIO_CONSOLE_PORT`) using `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` from

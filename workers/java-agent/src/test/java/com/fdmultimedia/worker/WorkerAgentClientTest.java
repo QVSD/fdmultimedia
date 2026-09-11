@@ -9,6 +9,7 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.UUID;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -61,7 +62,7 @@ class WorkerAgentClientTest {
                 java.net.URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/api/"),
                 "WorkerToken credential.secret");
 
-        assertThrows(IOException.class, () -> client.claim("machine-1"));
+        assertThrows(IOException.class, () -> client.claim("machine-1", List.of("SYSTEM_TEST", "IMPORT_MEDIA")));
     }
 
     @Test
@@ -80,9 +81,9 @@ class WorkerAgentClientTest {
                 java.net.URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/api/"),
                 "WorkerToken credential.secret");
 
-        client.claim("machine-1");
+        client.claim("machine-1", List.of("SYSTEM_TEST", "IMPORT_MEDIA", "INSPECT_MEDIA"));
 
         assertTrue(body.get().contains("\"machineIdentifier\":\"machine-1\""));
-        assertTrue(body.get().contains("\"supportedJobTypes\":[\"SYSTEM_TEST\",\"IMPORT_MEDIA\"]"));
+        assertTrue(body.get().contains("\"supportedJobTypes\":[\"SYSTEM_TEST\",\"IMPORT_MEDIA\",\"INSPECT_MEDIA\"]"));
     }
 }

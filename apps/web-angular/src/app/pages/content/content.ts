@@ -91,4 +91,24 @@ export class Content implements OnInit, OnDestroy {
   protected resolution(asset: MediaAssetSummary): string {
     return asset.width && asset.height ? `${asset.width}x${asset.height}` : '-';
   }
+
+  protected codecs(asset: MediaAssetSummary): string {
+    const codecs = [asset.videoCodec, asset.audioCodec].filter(Boolean);
+    return codecs.length ? codecs.join(' / ') : '-';
+  }
+
+  protected inspectionLabel(asset: MediaAssetSummary): string {
+    switch (asset.inspectionStatus) {
+      case 'PENDING':
+        return 'Pending inspection';
+      case 'INSPECTING':
+        return 'Inspecting';
+      case 'INSPECTED':
+        return 'Inspected';
+      case 'FAILED':
+        return 'Inspection failed';
+      default:
+        return 'Not requested';
+    }
+  }
 }

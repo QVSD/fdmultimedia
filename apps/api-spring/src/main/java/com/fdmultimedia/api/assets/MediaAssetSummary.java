@@ -1,5 +1,6 @@
 package com.fdmultimedia.api.assets;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -19,6 +20,14 @@ public record MediaAssetSummary(
         String audioCodec,
         String containerFormat,
         UUID importJobId,
+        MediaInspectionStatus inspectionStatus,
+        UUID inspectionJobId,
+        String inspectionErrorCode,
+        String inspectionErrorMessage,
+        BigDecimal frameRate,
+        Long bitrate,
+        Boolean hasVideo,
+        Boolean hasAudio,
         String errorCode,
         String errorMessage,
         Instant createdAt,

@@ -1,6 +1,6 @@
 # Roadmap
 
-The repository is currently at Phase 5. Completed phases are marked below;
+The repository is currently at Phase 6A. Completed phases are marked below;
 later phases are planned high-level direction and intentionally do not go into
 implementation detail before they are started.
 
@@ -17,12 +17,16 @@ implementation detail before they are started.
 5. **Media assets / direct video import** — users can submit direct HTTP/HTTPS
    media file URLs, the API creates `MediaAsset` + `IMPORT_MEDIA`, workers
    stream bounded downloads, enforce SSRF protections, checksum content, upload
-   through presigned object-storage URLs, and mark assets READY. *(current
-   phase)*
-6. **Capabilities** — workers report what kinds of jobs they can run.
-7. **FFmpeg processing** — automated video processing pipelines.
-8. **Scheduler / load balancing** — deciding which worker runs which job.
-9. **Social account integrations** — connecting and publishing to external
+   through presigned object-storage URLs, and mark assets READY. *(complete)*
+6. **Media inspection** — API creates `INSPECT_MEDIA` after import success;
+   FFprobe-capable workers read stored originals and persist duration,
+   resolution, codec, container, frame-rate, bitrate, and stream metadata
+   without transforming media. *(current phase)*
+7. **Capabilities and processing prep** — broaden worker capability matching
+   for future media operations.
+8. **FFmpeg processing** — automated video processing pipelines.
+9. **Scheduler / load balancing** — deciding which worker runs which job.
+10. **Social account integrations** — connecting and publishing to external
    platforms.
-10. **AI content** — AI-assisted content creation.
-11. **Analytics / revenue** — performance analytics and revenue tracking.
+11. **AI content** — AI-assisted content creation.
+12. **Analytics / revenue** — performance analytics and revenue tracking.

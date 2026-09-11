@@ -2,6 +2,8 @@ package com.fdmultimedia.worker;
 
 import java.time.Duration;
 import java.util.Map;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -19,6 +21,14 @@ public final class WorkerAgent {
         WorkerAgentClient client = new WorkerAgentClient(config.apiBaseUrl(), config.workerToken());
         SystemTestExecutor systemTestExecutor = new SystemTestExecutor();
         ImportMediaExecutor importMediaExecutor = new ImportMediaExecutor();
+        boolean ffprobeAvailable = FfprobeSupport.isAvailable(config.ffprobePath());
+        if (ffprobeAvailable) {
+            System.err.println("FFprobe available at " + config.ffprobePath());
+        } else {
+            System.err.println("FFprobe unavailable; INSPECT_MEDIA capability disabled");
+        }
+        InspectMediaExecutor inspectMediaExecutor = ffprobeAvailable ? new InspectMediaExecutor(config.ffprobePath()) : null;
+        List<String> supportedJobTypes = supportedJobTypes(ffprobeAvailable);
 
         while (!Thread.currentThread().isInterrupted()) {
             try {
@@ -37,7 +47,7 @@ public final class WorkerAgent {
             shutdown.countDown();
         }));
         executor.submit(() -> heartbeatLoop(client, machineIdentifier, config));
-        executor.submit(() -> jobLoop(client, machineIdentifier, config, systemTestExecutor, importMediaExecutor));
+        executor.submit(() -> jobLoop(client, machineIdentifier, config, systemTestExecutor, importMediaExecutor, inspectMediaExecutor, supportedJobTypes));
         shutdown.await();
     }
 
@@ -58,15 +68,17 @@ public final class WorkerAgent {
             String machineIdentifier,
             WorkerAgentConfig config,
             SystemTestExecutor systemTestExecutor,
-            ImportMediaExecutor importMediaExecutor) {
+            ImportMediaExecutor importMediaExecutor,
+            InspectMediaExecutor inspectMediaExecutor,
+            List<String> supportedJobTypes) {
         while (!Thread.currentThread().isInterrupted()) {
             try {
-                ClaimedJob job = client.claim(machineIdentifier);
+                ClaimedJob job = client.claim(machineIdentifier, supportedJobTypes);
                 if (!job.available()) {
                     sleep(config.jobPollInterval());
                     continue;
                 }
-                executeClaimedJob(client, machineIdentifier, config.workerName(), systemTestExecutor, importMediaExecutor, job);
+                executeClaimedJob(client, machineIdentifier, config.workerName(), systemTestExecutor, importMediaExecutor, inspectMediaExecutor, job);
             } catch (Exception ex) {
                 System.err.println("Worker job polling failed: " + ex.getMessage());
                 sleep(backoff(config.jobPollInterval()));
@@ -80,11 +92,14 @@ public final class WorkerAgent {
             String workerName,
             SystemTestExecutor systemTestExecutor,
             ImportMediaExecutor importMediaExecutor,
+            InspectMediaExecutor inspectMediaExecutor,
             ClaimedJob job) throws InterruptedException {
         try {
             client.started(job.jobId(), machineIdentifier);
             if ("IMPORT_MEDIA".equals(job.type())) {
                 executeImportMediaJob(client, machineIdentifier, importMediaExecutor, job);
+            } else if ("INSPECT_MEDIA".equals(job.type()) && inspectMediaExecutor != null) {
+                executeInspectMediaJob(client, machineIdentifier, inspectMediaExecutor, job);
             } else {
                 Map<String, Object> result = systemTestExecutor.execute(job, workerName);
                 client.complete(job.jobId(), machineIdentifier, result);
@@ -116,6 +131,27 @@ public final class WorkerAgent {
             reportImportFailure(client, machineIdentifier, job, ex.code(), ex.getMessage(), ex.terminal());
         } catch (Exception ex) {
             reportImportFailure(client, machineIdentifier, job, "IMPORT_MEDIA_FAILED", ex.getMessage(), false);
+        } finally {
+            running.set(false);
+            renewer.interrupt();
+        }
+    }
+
+    private static void executeInspectMediaJob(
+            WorkerAgentClient client,
+            String machineIdentifier,
+            InspectMediaExecutor inspectMediaExecutor,
+            ClaimedJob job) throws InterruptedException {
+        AtomicBoolean running = new AtomicBoolean(true);
+        Thread renewer = new Thread(() -> leaseRenewLoop(client, machineIdentifier, job, running), "fdm-job-lease-renewer");
+        renewer.setDaemon(true);
+        renewer.start();
+        try {
+            inspectMediaExecutor.execute(client, job, machineIdentifier);
+        } catch (ImportFailureException ex) {
+            reportInspectionFailure(client, machineIdentifier, job, ex.code(), ex.getMessage(), ex.terminal());
+        } catch (Exception ex) {
+            reportInspectionFailure(client, machineIdentifier, job, "INSPECT_MEDIA_FAILED", ex.getMessage(), false);
         } finally {
             running.set(false);
             renewer.interrupt();
@@ -158,6 +194,35 @@ public final class WorkerAgent {
         } catch (Exception reportFailure) {
             System.err.println("Worker failed to report import failure: " + reportFailure.getMessage());
         }
+    }
+
+    private static void reportInspectionFailure(
+            WorkerAgentClient client,
+            String machineIdentifier,
+            ClaimedJob job,
+            String code,
+            String message,
+            boolean terminal) {
+        Object assetId = job.payload().get("assetId");
+        try {
+            if (assetId == null) {
+                client.fail(job.jobId(), machineIdentifier, code, message, terminal);
+            } else {
+                client.failInspection(job.jobId(), machineIdentifier, java.util.UUID.fromString(String.valueOf(assetId)), code, message, terminal);
+            }
+        } catch (Exception reportFailure) {
+            System.err.println("Worker failed to report inspection failure: " + reportFailure.getMessage());
+        }
+    }
+
+    private static List<String> supportedJobTypes(boolean ffprobeAvailable) {
+        List<String> types = new ArrayList<>();
+        types.add("SYSTEM_TEST");
+        types.add("IMPORT_MEDIA");
+        if (ffprobeAvailable) {
+            types.add("INSPECT_MEDIA");
+        }
+        return List.copyOf(types);
     }
 
     private static Duration backoff(Duration heartbeatInterval) {

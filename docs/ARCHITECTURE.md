@@ -1,13 +1,16 @@
 # Architecture
 
-## Phase 5 scope
+## Phase 6A scope
 
-Phase 5 adds media ingestion on top of the distributed job pipeline.
-Authenticated users can submit direct HTTP/HTTPS media file URLs. The control
-plane creates a `MediaAsset` plus an `IMPORT_MEDIA` job, and a worker safely
-downloads, validates, checksums, uploads, and completes the import. FFmpeg
-transformations, platform extraction, AI, publishing, smart scheduling, and
-social integrations remain out of scope; see [ROADMAP.md](ROADMAP.md).
+Phase 6A adds read-only media inspection on top of the distributed job
+pipeline. Authenticated users can submit direct HTTP/HTTPS media file URLs;
+the control plane creates a `MediaAsset` plus an `IMPORT_MEDIA` job, and a
+worker safely downloads, validates, checksums, uploads, and completes the
+import. Once the asset is READY, the API creates an `INSPECT_MEDIA` job so an
+FFprobe-capable worker can inspect the stored original. FFmpeg
+transformations, clipping, transcoding, platform extraction, AI, publishing,
+smart scheduling, and social integrations remain out of scope; see
+[ROADMAP.md](ROADMAP.md).
 
 ## High-level architecture
 
@@ -35,14 +38,15 @@ Local Laptop       Cloud Worker
 - **Postgres** — system of record for the control plane, media asset metadata,
   and the durable job queue.
 - **RabbitMQ** — available infrastructure reserved for a later event-driven
-  dispatch optimization. Phase 5 intentionally continues to use PostgreSQL row locking
+  dispatch optimization. Phase 6A intentionally continues to use PostgreSQL row locking
   because the database must remain the source of truth for job state anyway.
 - **MinIO / S3-compatible storage** — private object storage for imported
   media binaries. The local stack uses MinIO; the storage abstraction can point
   at S3/R2-compatible storage later.
 - **Workers** — interchangeable compute resources (a laptop, a cloud VM,
   anything that can run the worker process). They register, heartbeat, poll
-  for jobs, execute `SYSTEM_TEST` and `IMPORT_MEDIA`, and report results.
+  for jobs, execute `SYSTEM_TEST` and `IMPORT_MEDIA`, optionally execute
+  `INSPECT_MEDIA` when FFprobe is available, and report results.
 
 ## Request flow
 
@@ -92,8 +96,9 @@ session and CSRF path. The workspace for create/list/detail/cancel/import is
 derived from the authenticated membership; clients cannot choose an arbitrary
 `workspaceId`.
 
-Worker job APIs (`/api/worker-agent/jobs/**`) and worker import APIs
-(`/api/worker-agent/assets/imports/**`) use `WorkerToken` machine
+Worker job APIs (`/api/worker-agent/jobs/**`), worker import APIs
+(`/api/worker-agent/assets/imports/**`), and worker inspection APIs
+(`/api/worker-agent/assets/inspections/**`) use `WorkerToken` machine
 authentication. The credential's workspace is authoritative, the worker must
 already be registered and currently online, and a worker may only update jobs
 assigned to itself.
@@ -127,9 +132,10 @@ is built, its code lands in the matching package with a clear boundary.
 ## Job lifecycle and worker protocol
 
 Jobs are persisted in PostgreSQL with JSONB `payload` and `result` fields.
-`SYSTEM_TEST` accepts a bounded message and duration. `IMPORT_MEDIA` accepts
-only an `assetId` reference; source URL and storage state live on the
-`MediaAsset`. Neither job type executes shell commands or arbitrary code.
+`SYSTEM_TEST` accepts a bounded message and duration. `IMPORT_MEDIA` and
+`INSPECT_MEDIA` accept only an `assetId` reference; source URL, storage state,
+and inspection metadata live on the `MediaAsset`. No job type executes shell
+commands or arbitrary code.
 
 Allowed state transitions:
 
@@ -156,13 +162,13 @@ imports are active, so legitimate downloads do not look abandoned. If a laptop
 disappears after claim/start and stops renewing, the next claim for that
 workspace lazily recovers expired active jobs: retryable jobs return to
 `QUEUED`, while jobs that exhausted `max_attempts` become `FAILED`. This is
-deliberately simple and avoids a distributed scheduler in Phase 5.
+deliberately simple and avoids a distributed scheduler in Phase 6A.
 
 ## MediaAsset lifecycle and object storage
 
 `MediaAsset` rows belong to a workspace and record the original direct URL,
-status, created user, linked import job, storage bucket/key, checksum, size,
-content type, and basic metadata.
+status, created user, linked import and inspection jobs, storage bucket/key,
+checksum, size, content type, and basic metadata.
 
 Allowed asset transitions:
 
@@ -172,10 +178,23 @@ Allowed asset transitions:
 - `PENDING|IMPORTING -> FAILED` for terminal validation failures or exhausted
   retries.
 
-`READY` is terminal for Phase 5 and means a private original object exists in
+`READY` is terminal for import in Phase 6A and means a private original object exists in
 object storage. Server-generated storage keys use
 `workspaces/{workspaceId}/assets/{assetId}/original`; user filenames are stored
 only as metadata and never influence object paths.
+
+Inspection status is tracked separately from import status:
+
+- `NOT_REQUESTED` for older assets or assets not yet ready for inspection.
+- `PENDING` when the API creates an `INSPECT_MEDIA` job after import success.
+- `INSPECTING` when an assigned FFprobe-capable worker requests authorization.
+- `INSPECTED` when FFprobe metadata is persisted successfully.
+- `FAILED` when inspection cannot complete after terminal validation failure or
+  exhausted retries.
+
+Inspection failure does not undo `READY`; the stored original remains usable,
+and the failure is recorded in `inspection_error_code` /
+`inspection_error_message`.
 
 The API owns permanent object-storage credentials. Workers request a short-lived
 presigned PUT URL, upload the downloaded file directly, and report the bucket
@@ -205,9 +224,24 @@ enforcing `MEDIA_MAX_DOWNLOAD_SIZE_BYTES`, even when `Content-Length` is
 missing or wrong. Temporary files are deleted in success and failure paths.
 The worker rejects clearly non-media response types such as HTML, JSON, XML,
 and text. Phase 5 records size, SHA-256, content type, safe original filename,
-and container-like information inferred from content type. Rich codec,
-duration, and resolution extraction can be added later with read-only FFprobe
-without changing the asset model.
+and container-like information inferred from content type.
+
+Phase 6A adds FFprobe strictly for read-only inspection of the stored original.
+The worker first verifies FFprobe availability with `ffprobe -version`; only
+then does it advertise the `INSPECT_MEDIA` capability during job claim. Workers
+without FFprobe continue to import media and run system tests but cannot claim
+inspection jobs. The inspector invokes FFprobe through `ProcessBuilder` with a
+fixed argument list and no shell:
+
+```text
+ffprobe -v error -print_format json -show_format -show_streams <file>
+```
+
+The parsed metadata includes duration, width, height, video codec, audio codec,
+container format, frame rate, bitrate, and `hasVideo`/`hasAudio`. Primary video
+selection ignores attached-picture streams so album art is not mistaken for a
+video track. Unsupported or invalid FFprobe output is recorded as a controlled
+inspection failure without exposing stack traces or credentials.
 
 ## An important architectural rule: Robots are not workers
 

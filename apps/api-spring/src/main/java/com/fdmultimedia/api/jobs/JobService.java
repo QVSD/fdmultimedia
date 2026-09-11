@@ -188,6 +188,7 @@ public class JobService {
                 .forEach(job -> {
                     job.recoverExpiredLease(now);
                     reconcileRecoveredImportAsset(job, now);
+                    reconcileRecoveredInspectionAsset(job, now);
                 });
     }
 
@@ -207,6 +208,19 @@ public class JobService {
         } else if (job.getStatus() == JobStatus.QUEUED) {
             asset.markPendingForRetry(now);
         }
+    }
+
+    private void reconcileRecoveredInspectionAsset(Job job, Instant now) {
+        if (job.getType() != JobType.INSPECT_MEDIA) {
+            return;
+        }
+        assets.findByInspectionJobId(job.getId()).ifPresent(asset -> {
+            if (job.getStatus() == JobStatus.FAILED) {
+                asset.markInspectionFailed(job.getErrorCode(), job.getErrorMessage(), now);
+            } else if (job.getStatus() == JobStatus.QUEUED) {
+                asset.markInspectionPendingForRetry(now);
+            }
+        });
     }
 
     private List<String> supportedTypeNames(WorkerJobClaimRequest request) {
@@ -252,7 +266,10 @@ public class JobService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Payload is required");
         }
         if (type == JobType.IMPORT_MEDIA) {
-            return validateImportMediaPayload(payload);
+            return validateAssetReferencePayload(payload);
+        }
+        if (type == JobType.INSPECT_MEDIA) {
+            return validateAssetReferencePayload(payload);
         }
         if (type != JobType.SYSTEM_TEST) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unsupported job type");
@@ -275,7 +292,7 @@ public class JobService {
         return normalized;
     }
 
-    private Map<String, Object> validateImportMediaPayload(Map<String, Object> payload) {
+    private Map<String, Object> validateAssetReferencePayload(Map<String, Object> payload) {
         String assetId = stringValue(payload.get("assetId"), "assetId");
         try {
             UUID.fromString(assetId);

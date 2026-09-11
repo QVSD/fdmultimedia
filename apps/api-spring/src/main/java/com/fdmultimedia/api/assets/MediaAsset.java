@@ -13,6 +13,7 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -72,6 +73,31 @@ public class MediaAsset {
     @Column(name = "container_format")
     private String containerFormat;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "inspection_status", nullable = false)
+    private MediaInspectionStatus inspectionStatus = MediaInspectionStatus.NOT_REQUESTED;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "inspection_job_id")
+    private Job inspectionJob;
+
+    @Column(name = "inspection_error_code")
+    private String inspectionErrorCode;
+
+    @Column(name = "inspection_error_message")
+    private String inspectionErrorMessage;
+
+    @Column(name = "frame_rate")
+    private BigDecimal frameRate;
+
+    private Long bitrate;
+
+    @Column(name = "has_video")
+    private Boolean hasVideo;
+
+    @Column(name = "has_audio")
+    private Boolean hasAudio;
+
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "created_by_user_id", nullable = false)
     private AppUser createdByUser;
@@ -128,6 +154,17 @@ public class MediaAsset {
         this.updatedAt = now;
     }
 
+    public void attachInspectionJob(Job job, Instant now) {
+        if (status != MediaAssetStatus.READY) {
+            throw new IllegalStateException("Only ready assets can be inspected");
+        }
+        this.inspectionJob = job;
+        this.inspectionStatus = MediaInspectionStatus.PENDING;
+        this.inspectionErrorCode = null;
+        this.inspectionErrorMessage = null;
+        this.updatedAt = now;
+    }
+
     public void markImporting(Instant now) {
         if (status != MediaAssetStatus.PENDING && status != MediaAssetStatus.IMPORTING) {
             throw new IllegalStateException("Only pending assets can start importing");
@@ -169,6 +206,60 @@ public class MediaAsset {
         this.updatedAt = now;
     }
 
+    public void markInspecting(Instant now) {
+        if (status != MediaAssetStatus.READY) {
+            throw new IllegalStateException("Only ready assets can be inspected");
+        }
+        if (inspectionStatus != MediaInspectionStatus.PENDING && inspectionStatus != MediaInspectionStatus.INSPECTING) {
+            throw new IllegalStateException("Inspection is not pending");
+        }
+        this.inspectionStatus = MediaInspectionStatus.INSPECTING;
+        this.inspectionErrorCode = null;
+        this.inspectionErrorMessage = null;
+        this.updatedAt = now;
+    }
+
+    public void markInspectionPendingForRetry(Instant now) {
+        if (status != MediaAssetStatus.READY) {
+            throw new IllegalStateException("Only ready assets can be inspected");
+        }
+        this.inspectionStatus = MediaInspectionStatus.PENDING;
+        this.updatedAt = now;
+    }
+
+    public void markInspected(MediaInspectionMetadata metadata, Instant now) {
+        if (status != MediaAssetStatus.READY) {
+            throw new IllegalStateException("Only ready assets can be inspected");
+        }
+        if (inspectionStatus != MediaInspectionStatus.INSPECTING && inspectionStatus != MediaInspectionStatus.INSPECTED) {
+            throw new IllegalStateException("Inspection is not active");
+        }
+        this.durationMs = metadata.durationMs();
+        this.width = metadata.width();
+        this.height = metadata.height();
+        this.videoCodec = metadata.videoCodec();
+        this.audioCodec = metadata.audioCodec();
+        this.containerFormat = metadata.containerFormat();
+        this.frameRate = metadata.frameRate();
+        this.bitrate = metadata.bitrate();
+        this.hasVideo = metadata.hasVideo();
+        this.hasAudio = metadata.hasAudio();
+        this.inspectionStatus = MediaInspectionStatus.INSPECTED;
+        this.inspectionErrorCode = null;
+        this.inspectionErrorMessage = null;
+        this.updatedAt = now;
+    }
+
+    public void markInspectionFailed(String errorCode, String errorMessage, Instant now) {
+        if (status != MediaAssetStatus.READY) {
+            throw new IllegalStateException("Only ready assets can fail inspection");
+        }
+        this.inspectionStatus = MediaInspectionStatus.FAILED;
+        this.inspectionErrorCode = normalize(errorCode);
+        this.inspectionErrorMessage = normalize(errorMessage);
+        this.updatedAt = now;
+    }
+
     public void markFailed(String errorCode, String errorMessage, Instant now) {
         if (status == MediaAssetStatus.READY) {
             throw new IllegalStateException("Ready assets cannot fail");
@@ -200,6 +291,14 @@ public class MediaAsset {
     public String getVideoCodec() { return videoCodec; }
     public String getAudioCodec() { return audioCodec; }
     public String getContainerFormat() { return containerFormat; }
+    public MediaInspectionStatus getInspectionStatus() { return inspectionStatus; }
+    public Job getInspectionJob() { return inspectionJob; }
+    public String getInspectionErrorCode() { return inspectionErrorCode; }
+    public String getInspectionErrorMessage() { return inspectionErrorMessage; }
+    public BigDecimal getFrameRate() { return frameRate; }
+    public Long getBitrate() { return bitrate; }
+    public Boolean getHasVideo() { return hasVideo; }
+    public Boolean getHasAudio() { return hasAudio; }
     public AppUser getCreatedByUser() { return createdByUser; }
     public Job getImportJob() { return importJob; }
     public String getErrorCode() { return errorCode; }

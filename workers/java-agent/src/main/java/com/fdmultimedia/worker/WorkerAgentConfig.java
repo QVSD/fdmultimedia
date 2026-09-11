@@ -9,6 +9,7 @@ record WorkerAgentConfig(
         URI apiBaseUrl,
         String workerToken,
         String workerName,
+        String ffprobePath,
         Path identityFile,
         Duration heartbeatInterval,
         Duration jobPollInterval) {
@@ -21,6 +22,7 @@ record WorkerAgentConfig(
         URI apiBaseUrl = normalizeBaseUrl(environment.getOrDefault("FDM_API_BASE_URL", "http://localhost:8080/api"));
         String token = required(environment, "FDM_WORKER_TOKEN");
         String workerName = environment.getOrDefault("FDM_WORKER_NAME", localHostname());
+        String ffprobePath = environment.getOrDefault("FFPROBE_PATH", "ffprobe").trim();
         Path identityFile = Path.of(environment.getOrDefault(
                 "FDM_WORKER_ID_FILE",
                 Path.of(System.getProperty("user.home"), ".fdmultimedia", "worker-id").toString()));
@@ -38,6 +40,7 @@ record WorkerAgentConfig(
                 apiBaseUrl,
                 normalizeToken(token),
                 workerName,
+                ffprobePath.isBlank() ? "ffprobe" : ffprobePath,
                 identityFile,
                 heartbeatInterval,
                 jobPollInterval);

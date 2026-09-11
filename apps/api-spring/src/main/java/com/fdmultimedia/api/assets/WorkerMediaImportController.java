@@ -11,7 +11,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@RequestMapping("/api/worker-agent/assets/imports")
+@RequestMapping("/api/worker-agent/assets")
 public class WorkerMediaImportController {
 
     private final MediaAssetService mediaAssetService;
@@ -20,7 +20,7 @@ public class WorkerMediaImportController {
         this.mediaAssetService = mediaAssetService;
     }
 
-    @PostMapping("/{jobId}/authorization")
+    @PostMapping("/imports/{jobId}/authorization")
     public WorkerImportAuthorizationResponse authorization(
             Authentication authentication,
             @PathVariable UUID jobId,
@@ -28,7 +28,7 @@ public class WorkerMediaImportController {
         return mediaAssetService.authorizeWorkerImport((WorkerPrincipal) authentication.getPrincipal(), jobId, request);
     }
 
-    @PostMapping("/{jobId}/complete")
+    @PostMapping("/imports/{jobId}/complete")
     public MediaAssetSummary complete(
             Authentication authentication,
             @PathVariable UUID jobId,
@@ -36,11 +36,35 @@ public class WorkerMediaImportController {
         return mediaAssetService.completeWorkerImport((WorkerPrincipal) authentication.getPrincipal(), jobId, request);
     }
 
-    @PostMapping("/{jobId}/fail")
+    @PostMapping("/imports/{jobId}/fail")
     public MediaAssetSummary fail(
             Authentication authentication,
             @PathVariable UUID jobId,
             @Valid @RequestBody WorkerImportFailureRequest request) {
         return mediaAssetService.failWorkerImport((WorkerPrincipal) authentication.getPrincipal(), jobId, request);
+    }
+
+    @PostMapping("/inspections/{jobId}/authorization")
+    public WorkerInspectionAuthorizationResponse inspectionAuthorization(
+            Authentication authentication,
+            @PathVariable UUID jobId,
+            @Valid @RequestBody WorkerImportAuthorizationRequest request) {
+        return mediaAssetService.authorizeWorkerInspection((WorkerPrincipal) authentication.getPrincipal(), jobId, request);
+    }
+
+    @PostMapping("/inspections/{jobId}/complete")
+    public MediaAssetSummary completeInspection(
+            Authentication authentication,
+            @PathVariable UUID jobId,
+            @Valid @RequestBody WorkerInspectionCompletionRequest request) {
+        return mediaAssetService.completeWorkerInspection((WorkerPrincipal) authentication.getPrincipal(), jobId, request);
+    }
+
+    @PostMapping("/inspections/{jobId}/fail")
+    public MediaAssetSummary failInspection(
+            Authentication authentication,
+            @PathVariable UUID jobId,
+            @Valid @RequestBody WorkerInspectionFailureRequest request) {
+        return mediaAssetService.failWorkerInspection((WorkerPrincipal) authentication.getPrincipal(), jobId, request);
     }
 }

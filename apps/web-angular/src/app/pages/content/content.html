@@ -46,6 +46,8 @@
                 <th scope="col">Type</th>
                 <th scope="col">Duration</th>
                 <th scope="col">Resolution</th>
+                <th scope="col">Codecs</th>
+                <th scope="col">Inspection</th>
                 <th scope="col">Created</th>
               </tr>
             </thead>
@@ -68,6 +70,13 @@
                   <td>{{ asset.contentType || '-' }}</td>
                   <td>{{ duration(asset) }}</td>
                   <td>{{ resolution(asset) }}</td>
+                  <td>{{ codecs(asset) }}</td>
+                  <td>
+                    <span>{{ inspectionLabel(asset) }}</span>
+                    @if (asset.inspectionErrorMessage) {
+                      <span class="content__error">{{ asset.inspectionErrorCode }}: {{ asset.inspectionErrorMessage }}</span>
+                    }
+                  </td>
                   <td>{{ asset.createdAt | date:'medium' }}</td>
                 </tr>
               }
