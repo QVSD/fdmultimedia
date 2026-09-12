@@ -148,6 +148,39 @@ final class WorkerAgentClient {
         send("/worker-agent/assets/inspections/" + jobId + "/fail", body, new TypeReference<Map<String, Object>>() {});
     }
 
+    ClipAuthorization authorizeClip(UUID jobId, String machineIdentifier)
+            throws IOException, InterruptedException {
+        return send(
+                "/worker-agent/assets/clips/" + jobId + "/authorization",
+                Map.of("machineIdentifier", machineIdentifier),
+                new TypeReference<ClipAuthorization>() {});
+    }
+
+    void completeClip(UUID jobId, String machineIdentifier, ClipAuthorization authorization, CreatedClip clip)
+            throws IOException, InterruptedException {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("machineIdentifier", machineIdentifier);
+        body.put("sourceAssetId", authorization.sourceAssetId());
+        body.put("outputAssetId", authorization.outputAssetId());
+        body.put("checksumSha256", clip.checksumSha256());
+        body.put("fileSizeBytes", clip.fileSizeBytes());
+        body.put("contentType", clip.contentType());
+        body.put("containerFormat", clip.containerFormat());
+        send("/worker-agent/assets/clips/" + jobId + "/complete", body, new TypeReference<Map<String, Object>>() {});
+    }
+
+    void failClip(UUID jobId, String machineIdentifier, UUID sourceAssetId, UUID outputAssetId, String errorCode, String errorMessage, boolean terminal)
+            throws IOException, InterruptedException {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("machineIdentifier", machineIdentifier);
+        body.put("sourceAssetId", sourceAssetId);
+        body.put("outputAssetId", outputAssetId);
+        body.put("errorCode", errorCode);
+        body.put("errorMessage", errorMessage);
+        body.put("terminal", terminal);
+        send("/worker-agent/assets/clips/" + jobId + "/fail", body, new TypeReference<Map<String, Object>>() {});
+    }
+
     void upload(URI uploadUrl, Path path, String contentType) throws IOException, InterruptedException {
         HttpRequest request = HttpRequest.newBuilder(uploadUrl)
                 .timeout(Duration.ofMinutes(30))

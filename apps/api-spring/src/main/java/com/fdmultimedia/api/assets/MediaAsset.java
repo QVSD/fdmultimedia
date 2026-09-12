@@ -35,6 +35,14 @@ public class MediaAsset {
     @Column(name = "source_url", nullable = false)
     private String sourceUrl;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "parent_asset_id")
+    private MediaAsset parentAsset;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "derivation_type", nullable = false)
+    private MediaDerivationType derivationType;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private MediaAssetStatus status;
@@ -106,6 +114,10 @@ public class MediaAsset {
     @JoinColumn(name = "import_job_id")
     private Job importJob;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "processing_job_id")
+    private Job processingJob;
+
     @Column(name = "error_code")
     private String errorCode;
 
@@ -130,9 +142,25 @@ public class MediaAsset {
         this.createdByUser = createdByUser;
         this.sourceType = MediaAssetSourceType.DIRECT_URL;
         this.sourceUrl = sourceUrl;
+        this.derivationType = MediaDerivationType.ORIGINAL;
         this.status = MediaAssetStatus.PENDING;
         this.createdAt = now;
         this.updatedAt = now;
+    }
+
+    public static MediaAsset clipDerivative(Workspace workspace, AppUser createdByUser, MediaAsset parent, Instant now) {
+        MediaAsset asset = new MediaAsset();
+        asset.id = UUID.randomUUID();
+        asset.workspace = workspace;
+        asset.createdByUser = createdByUser;
+        asset.sourceType = MediaAssetSourceType.DERIVED;
+        asset.sourceUrl = "asset:" + parent.getId();
+        asset.parentAsset = parent;
+        asset.derivationType = MediaDerivationType.CLIP;
+        asset.status = MediaAssetStatus.PENDING;
+        asset.createdAt = now;
+        asset.updatedAt = now;
+        return asset;
     }
 
     @PrePersist
@@ -165,6 +193,14 @@ public class MediaAsset {
         this.updatedAt = now;
     }
 
+    public void attachProcessingJob(Job job, Instant now) {
+        if (derivationType != MediaDerivationType.CLIP) {
+            throw new IllegalStateException("Only clip derivatives can be processed");
+        }
+        this.processingJob = job;
+        this.updatedAt = now;
+    }
+
     public void markImporting(Instant now) {
         if (status != MediaAssetStatus.PENDING && status != MediaAssetStatus.IMPORTING) {
             throw new IllegalStateException("Only pending assets can start importing");
@@ -184,8 +220,8 @@ public class MediaAsset {
     }
 
     public void markReady(MediaImportMetadata metadata, String bucket, String key, Instant now) {
-        if (status != MediaAssetStatus.IMPORTING && status != MediaAssetStatus.READY) {
-            throw new IllegalStateException("Only importing assets can become ready");
+        if (status != MediaAssetStatus.IMPORTING && status != MediaAssetStatus.PROCESSING && status != MediaAssetStatus.READY) {
+            throw new IllegalStateException("Only active assets can become ready");
         }
         this.status = MediaAssetStatus.READY;
         this.originalFilename = metadata.originalFilename();
@@ -260,6 +296,24 @@ public class MediaAsset {
         this.updatedAt = now;
     }
 
+    public void markProcessing(Instant now) {
+        if (status != MediaAssetStatus.PENDING && status != MediaAssetStatus.PROCESSING) {
+            throw new IllegalStateException("Only pending derivatives can start processing");
+        }
+        this.status = MediaAssetStatus.PROCESSING;
+        this.errorCode = null;
+        this.errorMessage = null;
+        this.updatedAt = now;
+    }
+
+    public void markProcessingPendingForRetry(Instant now) {
+        if (status != MediaAssetStatus.PROCESSING && status != MediaAssetStatus.PENDING) {
+            throw new IllegalStateException("Only active derivatives can be retried");
+        }
+        this.status = MediaAssetStatus.PENDING;
+        this.updatedAt = now;
+    }
+
     public void markFailed(String errorCode, String errorMessage, Instant now) {
         if (status == MediaAssetStatus.READY) {
             throw new IllegalStateException("Ready assets cannot fail");
@@ -278,6 +332,8 @@ public class MediaAsset {
     public Workspace getWorkspace() { return workspace; }
     public MediaAssetSourceType getSourceType() { return sourceType; }
     public String getSourceUrl() { return sourceUrl; }
+    public MediaAsset getParentAsset() { return parentAsset; }
+    public MediaDerivationType getDerivationType() { return derivationType; }
     public MediaAssetStatus getStatus() { return status; }
     public String getOriginalFilename() { return originalFilename; }
     public String getContentType() { return contentType; }
@@ -301,6 +357,7 @@ public class MediaAsset {
     public Boolean getHasAudio() { return hasAudio; }
     public AppUser getCreatedByUser() { return createdByUser; }
     public Job getImportJob() { return importJob; }
+    public Job getProcessingJob() { return processingJob; }
     public String getErrorCode() { return errorCode; }
     public String getErrorMessage() { return errorMessage; }
     public Instant getCreatedAt() { return createdAt; }

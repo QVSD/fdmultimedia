@@ -1,10 +1,13 @@
-export type MediaAssetStatus = 'PENDING' | 'IMPORTING' | 'READY' | 'FAILED';
+export type MediaAssetStatus = 'PENDING' | 'IMPORTING' | 'PROCESSING' | 'READY' | 'FAILED';
 export type MediaInspectionStatus = 'NOT_REQUESTED' | 'PENDING' | 'INSPECTING' | 'INSPECTED' | 'FAILED';
+export type MediaDerivationType = 'ORIGINAL' | 'CLIP';
 
 export interface MediaAssetSummary {
   id: string;
-  sourceType: 'DIRECT_URL';
+  sourceType: 'DIRECT_URL' | 'DERIVED';
   sourceUrl: string;
+  parentAssetId: string | null;
+  derivationType: MediaDerivationType;
   status: MediaAssetStatus;
   originalFilename: string | null;
   contentType: string | null;
@@ -17,6 +20,7 @@ export interface MediaAssetSummary {
   audioCodec: string | null;
   containerFormat: string | null;
   importJobId: string | null;
+  processingJobId: string | null;
   inspectionStatus: MediaInspectionStatus;
   inspectionJobId: string | null;
   inspectionErrorCode: string | null;
@@ -33,5 +37,9 @@ export interface MediaAssetSummary {
 }
 
 export interface MediaImportResponse {
+  asset: MediaAssetSummary;
+}
+
+export interface CreateClipResponse {
   asset: MediaAssetSummary;
 }

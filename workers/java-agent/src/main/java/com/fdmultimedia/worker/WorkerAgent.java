@@ -27,8 +27,15 @@ public final class WorkerAgent {
         } else {
             System.err.println("FFprobe unavailable; INSPECT_MEDIA capability disabled");
         }
+        boolean ffmpegAvailable = FfmpegSupport.isAvailable(config.ffmpegPath());
+        if (ffmpegAvailable) {
+            System.err.println("FFmpeg available at " + config.ffmpegPath());
+        } else {
+            System.err.println("FFmpeg unavailable; CREATE_CLIP capability disabled");
+        }
         InspectMediaExecutor inspectMediaExecutor = ffprobeAvailable ? new InspectMediaExecutor(config.ffprobePath()) : null;
-        List<String> supportedJobTypes = supportedJobTypes(ffprobeAvailable);
+        FfmpegClipExecutor clipExecutor = ffmpegAvailable ? new FfmpegClipExecutor(config.ffmpegPath()) : null;
+        List<String> supportedJobTypes = supportedJobTypes(ffprobeAvailable, ffmpegAvailable);
 
         while (!Thread.currentThread().isInterrupted()) {
             try {
@@ -47,7 +54,7 @@ public final class WorkerAgent {
             shutdown.countDown();
         }));
         executor.submit(() -> heartbeatLoop(client, machineIdentifier, config));
-        executor.submit(() -> jobLoop(client, machineIdentifier, config, systemTestExecutor, importMediaExecutor, inspectMediaExecutor, supportedJobTypes));
+        executor.submit(() -> jobLoop(client, machineIdentifier, config, systemTestExecutor, importMediaExecutor, inspectMediaExecutor, clipExecutor, supportedJobTypes));
         shutdown.await();
     }
 
@@ -70,6 +77,7 @@ public final class WorkerAgent {
             SystemTestExecutor systemTestExecutor,
             ImportMediaExecutor importMediaExecutor,
             InspectMediaExecutor inspectMediaExecutor,
+            FfmpegClipExecutor clipExecutor,
             List<String> supportedJobTypes) {
         while (!Thread.currentThread().isInterrupted()) {
             try {
@@ -78,7 +86,7 @@ public final class WorkerAgent {
                     sleep(config.jobPollInterval());
                     continue;
                 }
-                executeClaimedJob(client, machineIdentifier, config.workerName(), systemTestExecutor, importMediaExecutor, inspectMediaExecutor, job);
+                executeClaimedJob(client, machineIdentifier, config.workerName(), systemTestExecutor, importMediaExecutor, inspectMediaExecutor, clipExecutor, job);
             } catch (Exception ex) {
                 System.err.println("Worker job polling failed: " + ex.getMessage());
                 sleep(backoff(config.jobPollInterval()));
@@ -93,6 +101,7 @@ public final class WorkerAgent {
             SystemTestExecutor systemTestExecutor,
             ImportMediaExecutor importMediaExecutor,
             InspectMediaExecutor inspectMediaExecutor,
+            FfmpegClipExecutor clipExecutor,
             ClaimedJob job) throws InterruptedException {
         try {
             client.started(job.jobId(), machineIdentifier);
@@ -100,9 +109,13 @@ public final class WorkerAgent {
                 executeImportMediaJob(client, machineIdentifier, importMediaExecutor, job);
             } else if ("INSPECT_MEDIA".equals(job.type()) && inspectMediaExecutor != null) {
                 executeInspectMediaJob(client, machineIdentifier, inspectMediaExecutor, job);
-            } else {
+            } else if ("CREATE_CLIP".equals(job.type()) && clipExecutor != null) {
+                executeClipJob(client, machineIdentifier, clipExecutor, job);
+            } else if ("SYSTEM_TEST".equals(job.type())) {
                 Map<String, Object> result = systemTestExecutor.execute(job, workerName);
                 client.complete(job.jobId(), machineIdentifier, result);
+            } else {
+                client.fail(job.jobId(), machineIdentifier, "UNSUPPORTED_JOB_TYPE", "Worker does not support " + job.type(), true);
             }
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
@@ -152,6 +165,27 @@ public final class WorkerAgent {
             reportInspectionFailure(client, machineIdentifier, job, ex.code(), ex.getMessage(), ex.terminal());
         } catch (Exception ex) {
             reportInspectionFailure(client, machineIdentifier, job, "INSPECT_MEDIA_FAILED", ex.getMessage(), false);
+        } finally {
+            running.set(false);
+            renewer.interrupt();
+        }
+    }
+
+    private static void executeClipJob(
+            WorkerAgentClient client,
+            String machineIdentifier,
+            FfmpegClipExecutor clipExecutor,
+            ClaimedJob job) throws InterruptedException {
+        AtomicBoolean running = new AtomicBoolean(true);
+        Thread renewer = new Thread(() -> leaseRenewLoop(client, machineIdentifier, job, running), "fdm-job-lease-renewer");
+        renewer.setDaemon(true);
+        renewer.start();
+        try {
+            clipExecutor.execute(client, job, machineIdentifier);
+        } catch (ImportFailureException ex) {
+            reportClipFailure(client, machineIdentifier, job, ex.code(), ex.getMessage(), ex.terminal());
+        } catch (Exception ex) {
+            reportClipFailure(client, machineIdentifier, job, "CREATE_CLIP_FAILED", ex.getMessage(), false);
         } finally {
             running.set(false);
             renewer.interrupt();
@@ -215,12 +249,42 @@ public final class WorkerAgent {
         }
     }
 
-    private static List<String> supportedJobTypes(boolean ffprobeAvailable) {
+    private static void reportClipFailure(
+            WorkerAgentClient client,
+            String machineIdentifier,
+            ClaimedJob job,
+            String code,
+            String message,
+            boolean terminal) {
+        Object sourceAssetId = job.payload().get("sourceAssetId");
+        Object outputAssetId = job.payload().get("outputAssetId");
+        try {
+            if (sourceAssetId == null || outputAssetId == null) {
+                client.fail(job.jobId(), machineIdentifier, code, message, terminal);
+            } else {
+                client.failClip(
+                        job.jobId(),
+                        machineIdentifier,
+                        java.util.UUID.fromString(String.valueOf(sourceAssetId)),
+                        java.util.UUID.fromString(String.valueOf(outputAssetId)),
+                        code,
+                        message,
+                        terminal);
+            }
+        } catch (Exception reportFailure) {
+            System.err.println("Worker failed to report clip failure: " + reportFailure.getMessage());
+        }
+    }
+
+    private static List<String> supportedJobTypes(boolean ffprobeAvailable, boolean ffmpegAvailable) {
         List<String> types = new ArrayList<>();
         types.add("SYSTEM_TEST");
         types.add("IMPORT_MEDIA");
         if (ffprobeAvailable) {
             types.add("INSPECT_MEDIA");
+        }
+        if (ffmpegAvailable) {
+            types.add("CREATE_CLIP");
         }
         return List.copyOf(types);
     }

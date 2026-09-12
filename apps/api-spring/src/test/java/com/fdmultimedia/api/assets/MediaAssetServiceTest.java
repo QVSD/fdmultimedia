@@ -269,6 +269,89 @@ class MediaAssetServiceTest {
     }
 
     @Test
+    void createsClipDerivativeAndCreateClipJobForInspectedReadySource() {
+        MediaAsset source = inspectedAsset();
+        Job clipJob = clipJob(source.getId(), UUID.randomUUID(), 1_000, 2_000);
+        when(assets.findByWorkspaceAndId(workspace, source.getId())).thenReturn(Optional.of(source));
+        when(assets.save(any(MediaAsset.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(jobService.createForWorkspace(any(), any(JobCreateRequest.class))).thenAnswer(invocation -> {
+            JobCreateRequest request = invocation.getArgument(1);
+            return jobSummary(clipJob(source.getId(), UUID.fromString((String) request.payload().get("outputAssetId")), 1_000, 2_000));
+        });
+        when(jobService.getJobEntityForWorkspace(any(), any(UUID.class))).thenReturn(Optional.of(clipJob));
+
+        CreateClipResponse response = service.createClip(user, source.getId(), new CreateClipRequest(1_000L, 2_000L));
+
+        ArgumentCaptor<JobCreateRequest> jobRequest = ArgumentCaptor.forClass(JobCreateRequest.class);
+        verify(jobService).createForWorkspace(any(), jobRequest.capture());
+        assertThat(jobRequest.getValue().type()).isEqualTo(JobType.CREATE_CLIP);
+        assertThat(jobRequest.getValue().payload()).containsEntry("sourceAssetId", source.getId().toString());
+        assertThat(response.asset().sourceType()).isEqualTo(MediaAssetSourceType.DERIVED);
+        assertThat(response.asset().derivationType()).isEqualTo(MediaDerivationType.CLIP);
+        assertThat(response.asset().parentAssetId()).isEqualTo(source.getId());
+        assertThat(response.asset().status()).isEqualTo(MediaAssetStatus.PENDING);
+    }
+
+    @Test
+    void rejectsClipTimingOutsideKnownDuration() {
+        MediaAsset source = inspectedAsset();
+        when(assets.findByWorkspaceAndId(workspace, source.getId())).thenReturn(Optional.of(source));
+
+        assertThatThrownBy(() -> service.createClip(user, source.getId(), new CreateClipRequest(source.getDurationMs(), 1L)))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting("statusCode")
+                .isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThatThrownBy(() -> service.createClip(user, source.getId(), new CreateClipRequest(0L, 0L)))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting("statusCode")
+                .isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThatThrownBy(() -> service.createClip(user, source.getId(), new CreateClipRequest(Long.MAX_VALUE, 2L)))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting("statusCode")
+                .isEqualTo(HttpStatus.BAD_REQUEST);
+    }
+
+    @Test
+    void completesClipMarksOutputReadyAndCreatesInspectionJob() {
+        MediaAsset source = inspectedAsset();
+        MediaAsset output = MediaAsset.clipDerivative(workspace, owner, source, NOW);
+        Job clipJob = clipJob(source.getId(), output.getId(), 1_000, 2_000);
+        Job inspectionJob = inspectionJob(output.getId());
+        clipJob.claim(worker, NOW.minusSeconds(3), NOW.plusSeconds(30));
+        clipJob.start(worker, NOW.minusSeconds(2), NOW.plusSeconds(30));
+        output.attachProcessingJob(clipJob, NOW.minusSeconds(4));
+        output.markProcessing(NOW.minusSeconds(2));
+        when(jobService.requireJobForWorkerWorkspace(worker, clipJob.getId())).thenReturn(clipJob);
+        when(assets.findByProcessingJobId(clipJob.getId())).thenReturn(Optional.of(output));
+        when(assets.findByWorkspaceAndId(workspace, source.getId())).thenReturn(Optional.of(source));
+        when(storage.objectKey(output)).thenReturn("workspaces/ws/assets/output/original");
+        when(storage.objectSize("workspaces/ws/assets/output/original")).thenReturn(12_000L);
+        when(storage.bucket()).thenReturn("media-assets");
+        when(jobService.createForWorkspace(any(), any(JobCreateRequest.class))).thenReturn(jobSummary(inspectionJob));
+        when(jobService.getJobEntityForWorkspace(workspace, inspectionJob.getId())).thenReturn(Optional.of(inspectionJob));
+
+        MediaAssetSummary summary = service.completeWorkerClip(
+                workerPrincipal,
+                clipJob.getId(),
+                new WorkerClipCompletionRequest(
+                        "machine-1",
+                        source.getId(),
+                        output.getId(),
+                        "1".repeat(64),
+                        12_000,
+                        "video/mp4",
+                        "mp4"));
+
+        assertThat(summary.status()).isEqualTo(MediaAssetStatus.READY);
+        assertThat(summary.parentAssetId()).isEqualTo(source.getId());
+        assertThat(summary.checksumSha256()).isEqualTo("1".repeat(64));
+        assertThat(summary.inspectionStatus()).isEqualTo(MediaInspectionStatus.PENDING);
+        assertThat(summary.inspectionJobId()).isEqualTo(inspectionJob.getId());
+        assertThat(clipJob.getStatus()).isEqualTo(JobStatus.SUCCEEDED);
+        assertThat(source.getStorageKey()).isEqualTo("storage-key");
+    }
+
+    @Test
     void rejectsCompletionForWrongStorageKeyOrChecksum() {
         MediaAsset asset = asset();
         Job job = importJob(asset.getId());
@@ -338,10 +421,39 @@ class MediaAssetServiceTest {
         return new Job(workspace, JobType.INSPECT_MEDIA, Map.of("assetId", assetId.toString()), 3, NOW);
     }
 
+    private Job clipJob(UUID sourceAssetId, UUID outputAssetId, long startMs, long durationMs) {
+        return new Job(workspace, JobType.CREATE_CLIP, Map.of(
+                "sourceAssetId", sourceAssetId.toString(),
+                "outputAssetId", outputAssetId.toString(),
+                "startMs", startMs,
+                "durationMs", durationMs), 3, NOW);
+    }
+
     private MediaAsset readyAsset() {
         MediaAsset asset = asset();
         asset.markImporting(NOW.minusSeconds(1));
         asset.markReady(metadata(), "media-assets", "storage-key", NOW);
+        return asset;
+    }
+
+    private MediaAsset inspectedAsset() {
+        MediaAsset asset = readyAsset();
+        Job inspectionJob = inspectionJob(asset.getId());
+        inspectionJob.claim(worker, NOW.minusSeconds(3), NOW.plusSeconds(30));
+        inspectionJob.start(worker, NOW.minusSeconds(2), NOW.plusSeconds(30));
+        asset.attachInspectionJob(inspectionJob, NOW.minusSeconds(2));
+        asset.markInspecting(NOW.minusSeconds(1));
+        asset.markInspected(new MediaInspectionMetadata(
+                12_345L,
+                1920,
+                1080,
+                "h264",
+                "aac",
+                "mp4",
+                new BigDecimal("29.970"),
+                800_000L,
+                true,
+                true), NOW);
         return asset;
     }
 

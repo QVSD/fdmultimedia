@@ -48,6 +48,7 @@
                 <th scope="col">Resolution</th>
                 <th scope="col">Codecs</th>
                 <th scope="col">Inspection</th>
+                <th scope="col">Clip</th>
                 <th scope="col">Created</th>
               </tr>
             </thead>
@@ -57,6 +58,7 @@
                   <td>
                     <strong>{{ asset.originalFilename || 'Direct URL media' }}</strong>
                     <span>{{ shortUrl(asset) }}</span>
+                    <span>{{ lineage(asset) }}</span>
                   </td>
                   <td>
                     <span [class]="'content__badge content__badge--' + asset.status.toLowerCase()">
@@ -75,6 +77,41 @@
                     <span>{{ inspectionLabel(asset) }}</span>
                     @if (asset.inspectionErrorMessage) {
                       <span class="content__error">{{ asset.inspectionErrorCode }}: {{ asset.inspectionErrorMessage }}</span>
+                    }
+                  </td>
+                  <td>
+                    @if (canCreateClip(asset)) {
+                      <form class="content__clip-form" (ngSubmit)="createClip(asset)">
+                        <label>
+                          <span>Start ms</span>
+                          <input
+                            name="start-{{ asset.id }}"
+                            type="number"
+                            min="0"
+                            [ngModel]="clipStart(asset)"
+                            (ngModelChange)="setClipStart(asset, $event)"
+                          />
+                        </label>
+                        <label>
+                          <span>Duration ms</span>
+                          <input
+                            name="duration-{{ asset.id }}"
+                            type="number"
+                            min="1"
+                            [max]="asset.durationMs || null"
+                            [ngModel]="clipDuration(asset)"
+                            (ngModelChange)="setClipDuration(asset, $event)"
+                          />
+                        </label>
+                        <button type="submit" [disabled]="clipBusy()[asset.id]">
+                          {{ clipBusy()[asset.id] ? 'Creating...' : 'Create Clip' }}
+                        </button>
+                      </form>
+                      @if (clipErrors()[asset.id]) {
+                        <span class="content__error">{{ clipErrors()[asset.id] }}</span>
+                      }
+                    } @else {
+                      <span>-</span>
                     }
                   </td>
                   <td>{{ asset.createdAt | date:'medium' }}</td>

@@ -1,15 +1,16 @@
 # Architecture
 
-## Phase 6A scope
+## Phase 6B scope
 
-Phase 6A adds read-only media inspection on top of the distributed job
+Phase 6B adds controlled FFmpeg clip derivatives on top of the distributed job
 pipeline. Authenticated users can submit direct HTTP/HTTPS media file URLs;
 the control plane creates a `MediaAsset` plus an `IMPORT_MEDIA` job, and a
 worker safely downloads, validates, checksums, uploads, and completes the
 import. Once the asset is READY, the API creates an `INSPECT_MEDIA` job so an
-FFprobe-capable worker can inspect the stored original. FFmpeg
-transformations, clipping, transcoding, platform extraction, AI, publishing,
-smart scheduling, and social integrations remain out of scope; see
+FFprobe-capable worker can inspect the stored original. READY + INSPECTED
+assets can then be used as immutable sources for `CREATE_CLIP`, which creates
+new derived assets instead of modifying originals. AI, highlight detection,
+publishing, smart scheduling, and social integrations remain out of scope; see
 [ROADMAP.md](ROADMAP.md).
 
 ## High-level architecture
@@ -242,6 +243,29 @@ container format, frame rate, bitrate, and `hasVideo`/`hasAudio`. Primary video
 selection ignores attached-picture streams so album art is not mistaken for a
 video track. Unsupported or invalid FFprobe output is recorded as a controlled
 inspection failure without exposing stack traces or credentials.
+
+Phase 6B adds `CREATE_CLIP` as the first controlled FFmpeg derivative. The
+server creates an output `MediaAsset` before queuing the job, stores
+`parent_asset_id` and `derivation_type=CLIP`, and keeps the original asset
+immutable. The job payload contains only `sourceAssetId`, `outputAssetId`,
+`startMs`, and `durationMs`; raw FFmpeg options are never accepted from users
+or workers.
+
+Clip assets move `PENDING -> PROCESSING -> READY`, or `PROCESSING -> PENDING`
+for retryable failures, or `PENDING|PROCESSING -> FAILED` for terminal failure
+or exhausted attempts. Once a derived clip becomes READY, the API reuses the
+existing inspection chain and creates an `INSPECT_MEDIA` job for that output.
+
+Workers advertise `CREATE_CLIP` only when `ffmpeg -version` succeeds. The
+worker obtains a presigned GET for the source and a presigned PUT for the
+server-derived output key, downloads with bounded streaming, invokes FFmpeg
+through `ProcessBuilder` with fixed arguments and no shell, uploads a new MP4,
+and reports checksum/size. The first profile is H.264 video, AAC audio, MP4
+container, and `-ss` after `-i` to favor more accurate timing. The requested
+interval is `[startMs, startMs + durationMs)` with normal codec/container
+tolerance after re-encoding. FFmpeg output capture is bounded but drained, temp
+paths are redacted from worker error messages, and temp source/output files are
+deleted on success and failure paths.
 
 ## An important architectural rule: Robots are not workers
 

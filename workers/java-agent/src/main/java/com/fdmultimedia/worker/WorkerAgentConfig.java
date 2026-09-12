@@ -10,6 +10,7 @@ record WorkerAgentConfig(
         String workerToken,
         String workerName,
         String ffprobePath,
+        String ffmpegPath,
         Path identityFile,
         Duration heartbeatInterval,
         Duration jobPollInterval) {
@@ -23,6 +24,7 @@ record WorkerAgentConfig(
         String token = required(environment, "FDM_WORKER_TOKEN");
         String workerName = environment.getOrDefault("FDM_WORKER_NAME", localHostname());
         String ffprobePath = environment.getOrDefault("FFPROBE_PATH", "ffprobe").trim();
+        String ffmpegPath = environment.getOrDefault("FFMPEG_PATH", "ffmpeg").trim();
         Path identityFile = Path.of(environment.getOrDefault(
                 "FDM_WORKER_ID_FILE",
                 Path.of(System.getProperty("user.home"), ".fdmultimedia", "worker-id").toString()));
@@ -41,6 +43,7 @@ record WorkerAgentConfig(
                 normalizeToken(token),
                 workerName,
                 ffprobePath.isBlank() ? "ffprobe" : ffprobePath,
+                ffmpegPath.isBlank() ? "ffmpeg" : ffmpegPath,
                 identityFile,
                 heartbeatInterval,
                 jobPollInterval);

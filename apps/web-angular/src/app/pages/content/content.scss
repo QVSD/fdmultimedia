@@ -111,6 +111,11 @@
   color: #1e40af;
 }
 
+.content__badge--processing {
+  background: #e0e7ff;
+  color: #3730a3;
+}
+
 .content__badge--ready {
   background: #dcfce7;
   color: #166534;
@@ -119,6 +124,43 @@
 .content__badge--failed {
   background: #fee2e2;
   color: #991b1b;
+}
+
+.content__clip-form {
+  display: grid;
+  gap: 0.45rem;
+  min-width: 11rem;
+
+  label {
+    display: grid;
+    gap: 0.2rem;
+    color: #374151;
+    font-size: 0.75rem;
+    font-weight: 700;
+  }
+
+  input {
+    min-height: 2rem;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    padding: 0.3rem 0.45rem;
+    font: inherit;
+  }
+
+  button {
+    min-height: 2rem;
+    border: 0;
+    border-radius: 6px;
+    background: #111827;
+    color: #ffffff;
+    font-weight: 700;
+    cursor: pointer;
+
+    &:disabled {
+      cursor: wait;
+      opacity: 0.65;
+    }
+  }
 }
 
 @media (max-width: 760px) {

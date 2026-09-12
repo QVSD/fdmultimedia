@@ -102,6 +102,35 @@ public class MediaAssetService {
     }
 
     @Transactional
+    public CreateClipResponse createClip(AuthenticatedUser principal, UUID sourceAssetId, CreateClipRequest request) {
+        WorkspaceMembership membership = authService.currentMembershipFor(principal);
+        Workspace workspace = membership.getWorkspace();
+        MediaAsset source = assets.findByWorkspaceAndId(workspace, sourceAssetId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Asset not found"));
+        if (source.getStatus() != MediaAssetStatus.READY) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Source asset is not ready");
+        }
+        if (source.getInspectionStatus() != MediaInspectionStatus.INSPECTED) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Source asset is not inspected");
+        }
+        validateClipTiming(source, request.startMs(), request.durationMs());
+
+        Instant now = Instant.now(clock);
+        MediaAsset output = assets.save(MediaAsset.clipDerivative(workspace, membership.getUser(), source, now));
+        JobSummary jobSummary = jobService.createForWorkspace(
+                workspace,
+                new JobCreateRequest(JobType.CREATE_CLIP, Map.of(
+                        "sourceAssetId", source.getId().toString(),
+                        "outputAssetId", output.getId().toString(),
+                        "startMs", request.startMs(),
+                        "durationMs", request.durationMs())));
+        Job job = jobService.getJobEntityForWorkspace(workspace, jobSummary.id())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Clip job was not created"));
+        output.attachProcessingJob(job, now);
+        return new CreateClipResponse(toSummary(output), jobSummary);
+    }
+
+    @Transactional
     public WorkerImportAuthorizationResponse authorizeWorkerImport(
             WorkerPrincipal principal,
             UUID jobId,
@@ -153,6 +182,101 @@ public class MediaAssetService {
                 "fileSizeBytes", request.fileSizeBytes()), now);
         ensureInspectionJob(asset, now);
         return toSummary(asset);
+    }
+
+    @Transactional
+    public WorkerClipAuthorizationResponse authorizeWorkerClip(
+            WorkerPrincipal principal,
+            UUID jobId,
+            WorkerImportAuthorizationRequest request) {
+        Worker worker = jobService.requireOnlineWorker(principal, request.machineIdentifier());
+        Job job = requireClipJob(worker, jobId);
+        ClipPayload payload = clipPayload(job);
+        MediaAsset output = requireOutputAssetForClipJob(job);
+        MediaAsset source = assets.findByWorkspaceAndId(worker.getWorkspace(), payload.sourceAssetId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Source asset not found"));
+        validateClipJobReferences(job, source, output, payload);
+        if (source.getStatus() != MediaAssetStatus.READY || source.getStorageKey() == null) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Source asset is not ready");
+        }
+        Instant now = Instant.now(clock);
+        output.markProcessing(now);
+        StorageAccess sourceAccess = storage.presignedGet(source.getStorageKey());
+        StorageAccess outputAccess = storage.presignedPut(storage.objectKey(output));
+        return new WorkerClipAuthorizationResponse(
+                source.getId(),
+                output.getId(),
+                sourceAccess.url(),
+                outputAccess.url(),
+                outputAccess.bucket(),
+                outputAccess.key(),
+                mediaProperties.getMaxDownloadSizeBytes(),
+                (int) mediaProperties.getConnectTimeout().toSeconds(),
+                (int) mediaProperties.getReadTimeout().toSeconds(),
+                payload.startMs(),
+                payload.durationMs());
+    }
+
+    @Transactional
+    public MediaAssetSummary completeWorkerClip(
+            WorkerPrincipal principal,
+            UUID jobId,
+            WorkerClipCompletionRequest request) {
+        Worker worker = jobService.requireOnlineWorker(principal, request.machineIdentifier());
+        Job job = requireClipJob(worker, jobId);
+        ClipPayload payload = clipPayload(job);
+        MediaAsset output = requireOutputAssetForClipJob(job);
+        MediaAsset source = assets.findByWorkspaceAndId(worker.getWorkspace(), payload.sourceAssetId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Source asset not found"));
+        validateClipJobReferences(job, source, output, payload);
+        if (!source.getId().equals(request.sourceAssetId()) || !output.getId().equals(request.outputAssetId())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Asset does not match clip job");
+        }
+        validateCompletionMetadata(request.metadata());
+        Instant now = Instant.now(clock);
+        String key = storage.objectKey(output);
+        long objectSize = storage.objectSize(key);
+        if (objectSize != request.fileSizeBytes()) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Stored clip size does not match completion metadata");
+        }
+        output.markReady(request.metadata(), storage.bucket(), key, now);
+        job.complete(worker, Map.of(
+                "sourceAssetId", source.getId().toString(),
+                "outputAssetId", output.getId().toString(),
+                "checksumSha256", request.checksumSha256(),
+                "fileSizeBytes", request.fileSizeBytes()), now);
+        ensureInspectionJob(output, now);
+        return toSummary(output);
+    }
+
+    @Transactional
+    public MediaAssetSummary failWorkerClip(
+            WorkerPrincipal principal,
+            UUID jobId,
+            WorkerClipFailureRequest request) {
+        Worker worker = jobService.requireOnlineWorker(principal, request.machineIdentifier());
+        Job job = requireClipJob(worker, jobId);
+        ClipPayload payload = clipPayload(job);
+        MediaAsset output = requireOutputAssetForClipJob(job);
+        MediaAsset source = assets.findByWorkspaceAndId(worker.getWorkspace(), payload.sourceAssetId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Source asset not found"));
+        validateClipJobReferences(job, source, output, payload);
+        if (!source.getId().equals(request.sourceAssetId()) || !output.getId().equals(request.outputAssetId())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Asset does not match clip job");
+        }
+        Instant now = Instant.now(clock);
+        if (Boolean.TRUE.equals(request.terminal())) {
+            job.failTerminal(worker, request.errorCode(), safeErrorMessage(request.errorMessage()), now);
+            output.markFailed(request.errorCode(), safeErrorMessage(request.errorMessage()), now);
+        } else {
+            job.fail(worker, request.errorCode(), safeErrorMessage(request.errorMessage()), now);
+            if (job.getStatus() == JobStatus.FAILED) {
+                output.markFailed(request.errorCode(), safeErrorMessage(request.errorMessage()), now);
+            } else {
+                output.markProcessingPendingForRetry(now);
+            }
+        }
+        return toSummary(output);
     }
 
     @Transactional
@@ -272,6 +396,17 @@ public class MediaAssetService {
         return job;
     }
 
+    private Job requireClipJob(Worker worker, UUID jobId) {
+        Job job = jobService.requireJobForWorkerWorkspace(worker, jobId);
+        if (job.getType() != JobType.CREATE_CLIP) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Job is not a clip creation");
+        }
+        if (job.getStatus() != JobStatus.RUNNING && job.getStatus() != JobStatus.ASSIGNED) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Job is not active");
+        }
+        return job;
+    }
+
     private MediaAsset requireAssetForJob(Job job) {
         return assets.findByImportJobId(job.getId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Asset not found"));
@@ -282,6 +417,11 @@ public class MediaAssetService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Asset not found"));
     }
 
+    private MediaAsset requireOutputAssetForClipJob(Job job) {
+        return assets.findByProcessingJobId(job.getId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Output asset not found"));
+    }
+
     private void validateJobReferencesAsset(Job job, MediaAsset asset) {
         Object payloadAssetId = job.getPayload().get("assetId");
         if (!asset.getId().toString().equals(String.valueOf(payloadAssetId))) {
@@ -289,12 +429,56 @@ public class MediaAssetService {
         }
     }
 
+    private void validateClipJobReferences(Job job, MediaAsset source, MediaAsset output, ClipPayload payload) {
+        if (!source.getId().equals(payload.sourceAssetId()) || !output.getId().equals(payload.outputAssetId())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Job payload does not match assets");
+        }
+        if (output.getParentAsset() == null || !output.getParentAsset().getId().equals(source.getId())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Output asset does not belong to source");
+        }
+        if (output.getDerivationType() != MediaDerivationType.CLIP) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Output asset is not a clip derivative");
+        }
+        validateClipTiming(source, payload.startMs(), payload.durationMs());
+    }
+
     private void validateCompletionMetadata(WorkerImportCompletionRequest request) {
-        if (request.fileSizeBytes() <= 0) {
+        validateCompletionMetadata(request.metadata());
+    }
+
+    private void validateCompletionMetadata(MediaImportMetadata metadata) {
+        if (metadata.fileSizeBytes() <= 0) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Imported media is empty");
         }
-        if (!SHA_256.matcher(request.checksumSha256()).matches()) {
+        if (!SHA_256.matcher(metadata.checksumSha256()).matches()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid media checksum");
+        }
+    }
+
+    private void validateClipTiming(MediaAsset source, Long startMs, Long durationMs) {
+        if (startMs == null || durationMs == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Clip timing is required");
+        }
+        if (startMs < 0) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "startMs must be non-negative");
+        }
+        if (durationMs <= 0) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "durationMs must be positive");
+        }
+        long endMs;
+        try {
+            endMs = Math.addExact(startMs, durationMs);
+        } catch (ArithmeticException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Clip timing is too large");
+        }
+        Long sourceDuration = source.getDurationMs();
+        if (sourceDuration != null) {
+            if (startMs >= sourceDuration) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "startMs must be before source duration");
+            }
+            if (endMs > sourceDuration) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Clip extends beyond source duration");
+            }
         }
     }
 
@@ -341,6 +525,29 @@ public class MediaAssetService {
         asset.attachInspectionJob(job, now);
     }
 
+    private ClipPayload clipPayload(Job job) {
+        Map<String, Object> payload = job.getPayload();
+        return new ClipPayload(
+                UUID.fromString(String.valueOf(payload.get("sourceAssetId"))),
+                UUID.fromString(String.valueOf(payload.get("outputAssetId"))),
+                longPayload(payload.get("startMs"), "startMs"),
+                longPayload(payload.get("durationMs"), "durationMs"));
+    }
+
+    private long longPayload(Object value, String field) {
+        if (value instanceof Number number) {
+            return number.longValue();
+        }
+        if (value instanceof String text) {
+            try {
+                return Long.parseLong(text);
+            } catch (NumberFormatException ex) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "Invalid " + field + " in job payload");
+            }
+        }
+        throw new ResponseStatusException(HttpStatus.CONFLICT, "Invalid " + field + " in job payload");
+    }
+
     private Workspace currentWorkspace(AuthenticatedUser principal) {
         return authService.currentMembershipFor(principal).getWorkspace();
     }
@@ -355,10 +562,14 @@ public class MediaAssetService {
     private MediaAssetSummary toSummary(MediaAsset asset) {
         Job importJob = asset.getImportJob();
         Job inspectionJob = asset.getInspectionJob();
+        Job processingJob = asset.getProcessingJob();
+        MediaAsset parent = asset.getParentAsset();
         return new MediaAssetSummary(
                 asset.getId(),
                 asset.getSourceType(),
                 asset.getSourceUrl(),
+                parent == null ? null : parent.getId(),
+                asset.getDerivationType(),
                 asset.getStatus(),
                 asset.getOriginalFilename(),
                 asset.getContentType(),
@@ -371,6 +582,7 @@ public class MediaAssetService {
                 asset.getAudioCodec(),
                 asset.getContainerFormat(),
                 importJob == null ? null : importJob.getId(),
+                processingJob == null ? null : processingJob.getId(),
                 asset.getInspectionStatus(),
                 inspectionJob == null ? null : inspectionJob.getId(),
                 asset.getInspectionErrorCode(),
@@ -384,5 +596,8 @@ public class MediaAssetService {
                 asset.getCreatedAt(),
                 asset.getUpdatedAt(),
                 asset.getReadyAt());
+    }
+
+    private record ClipPayload(UUID sourceAssetId, UUID outputAssetId, long startMs, long durationMs) {
     }
 }

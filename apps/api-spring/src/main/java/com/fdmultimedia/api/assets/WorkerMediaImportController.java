@@ -67,4 +67,28 @@ public class WorkerMediaImportController {
             @Valid @RequestBody WorkerInspectionFailureRequest request) {
         return mediaAssetService.failWorkerInspection((WorkerPrincipal) authentication.getPrincipal(), jobId, request);
     }
+
+    @PostMapping("/clips/{jobId}/authorization")
+    public WorkerClipAuthorizationResponse clipAuthorization(
+            Authentication authentication,
+            @PathVariable UUID jobId,
+            @Valid @RequestBody WorkerImportAuthorizationRequest request) {
+        return mediaAssetService.authorizeWorkerClip((WorkerPrincipal) authentication.getPrincipal(), jobId, request);
+    }
+
+    @PostMapping("/clips/{jobId}/complete")
+    public MediaAssetSummary completeClip(
+            Authentication authentication,
+            @PathVariable UUID jobId,
+            @Valid @RequestBody WorkerClipCompletionRequest request) {
+        return mediaAssetService.completeWorkerClip((WorkerPrincipal) authentication.getPrincipal(), jobId, request);
+    }
+
+    @PostMapping("/clips/{jobId}/fail")
+    public MediaAssetSummary failClip(
+            Authentication authentication,
+            @PathVariable UUID jobId,
+            @Valid @RequestBody WorkerClipFailureRequest request) {
+        return mediaAssetService.failWorkerClip((WorkerPrincipal) authentication.getPrincipal(), jobId, request);
+    }
 }

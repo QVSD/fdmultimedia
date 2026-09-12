@@ -1,10 +1,11 @@
 # workers
 
-Phase 6A includes a standalone Java worker agent in `java-agent/`. It registers
+Phase 6B includes a standalone Java worker agent in `java-agent/`. It registers
 the current machine with the Spring control plane, sends periodic heartbeats,
 polls for work, executes the safe `SYSTEM_TEST` job type, and imports direct
 HTTP/HTTPS media files through `IMPORT_MEDIA`. When FFprobe is available, it
-also inspects stored originals through `INSPECT_MEDIA`.
+also inspects stored originals through `INSPECT_MEDIA`. When FFmpeg is
+available, it creates controlled clip derivatives through `CREATE_CLIP`.
 
 The agent persists a random installation UUID locally and uses that as the
 machine identifier. It does not use MAC addresses or other hardware IDs.
@@ -33,6 +34,7 @@ FDM_WORKER_HEARTBEAT_SECONDS=10 \
 FDM_WORKER_JOB_POLL_SECONDS=3 \
 FDM_WORKER_ID_FILE=.fdm-worker-id \
 FFPROBE_PATH=ffprobe \
+FFMPEG_PATH=ffmpeg \
 java -jar target/worker-agent-0.1.0-SNAPSHOT.jar
 ```
 
@@ -41,7 +43,8 @@ The agent loop is:
 1. register or update this installation
 2. heartbeat in a dedicated loop
 3. poll `POST /api/worker-agent/jobs/claim`
-4. start and execute a claimed `SYSTEM_TEST`, `IMPORT_MEDIA`, or `INSPECT_MEDIA`
+4. start and execute a claimed `SYSTEM_TEST`, `IMPORT_MEDIA`, `INSPECT_MEDIA`,
+   or `CREATE_CLIP`
 5. report completion or failure
 
 When no jobs exist, polling backs off using `FDM_WORKER_JOB_POLL_SECONDS`.
@@ -82,6 +85,20 @@ With FFprobe available, the worker:
    and stream presence
 5. deletes the temporary file
 
-The worker never accepts arbitrary FFprobe arguments, never runs FFmpeg
-transformations, and never clips, transcodes, filters, remuxes, or publishes
-media in Phase 6A.
+`CREATE_CLIP` is enabled only when `ffmpeg -version` succeeds at startup.
+Without FFmpeg, the worker still registers, heartbeats, imports, inspects when
+FFprobe is present, and runs system tests, but it does not advertise
+`CREATE_CLIP` during claim. With FFmpeg available, the worker:
+
+1. asks the API for clip authorization
+2. downloads the source asset through a short-lived presigned GET URL
+3. runs FFmpeg with fixed arguments and no shell
+4. uploads a new MP4 through a short-lived presigned PUT URL
+5. reports checksum, size, and output format
+6. deletes source and output temporary files
+
+The source object is never modified. The API creates the output asset and
+server-derived storage key before the job runs, so retries target the same
+derived asset instead of creating duplicates. Users cannot supply raw FFmpeg
+arguments; the first encoding profile is H.264 video, AAC audio, MP4 container,
+and timing is interpreted as `[startMs, startMs + durationMs)`.

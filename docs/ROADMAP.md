@@ -1,6 +1,6 @@
 # Roadmap
 
-The repository is currently at Phase 6A. Completed phases are marked below;
+The repository is currently at Phase 6B. Completed phases are marked below;
 later phases are planned high-level direction and intentionally do not go into
 implementation detail before they are started.
 
@@ -21,12 +21,15 @@ implementation detail before they are started.
 6. **Media inspection** — API creates `INSPECT_MEDIA` after import success;
    FFprobe-capable workers read stored originals and persist duration,
    resolution, codec, container, frame-rate, bitrate, and stream metadata
-   without transforming media. *(current phase)*
-7. **Capabilities and processing prep** — broaden worker capability matching
+   without transforming media. *(complete)*
+7. **Clip derivatives** — users create bounded clips from READY + INSPECTED
+   assets; FFmpeg-capable workers produce immutable derived MP4 assets and
+   automatic inspection runs on the result. *(current phase)*
+8. **Capabilities and processing prep** — broaden worker capability matching
    for future media operations.
-8. **FFmpeg processing** — automated video processing pipelines.
-9. **Scheduler / load balancing** — deciding which worker runs which job.
-10. **Social account integrations** — connecting and publishing to external
+9. **FFmpeg processing** — richer automated video processing pipelines.
+10. **Scheduler / load balancing** — deciding which worker runs which job.
+11. **Social account integrations** — connecting and publishing to external
    platforms.
-11. **AI content** — AI-assisted content creation.
-12. **Analytics / revenue** — performance analytics and revenue tracking.
+12. **AI content** — AI-assisted content creation.
+13. **Analytics / revenue** — performance analytics and revenue tracking.

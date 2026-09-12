@@ -15,4 +15,6 @@ public interface MediaAssetRepository extends JpaRepository<MediaAsset, UUID> {
     Optional<MediaAsset> findByImportJobId(UUID importJobId);
 
     Optional<MediaAsset> findByInspectionJobId(UUID inspectionJobId);
+
+    Optional<MediaAsset> findByProcessingJobId(UUID processingJobId);
 }

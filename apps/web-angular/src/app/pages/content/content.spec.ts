@@ -8,17 +8,19 @@ import { Content } from './content';
 describe('Content', () => {
   let component: Content;
   let fixture: ComponentFixture<Content>;
-  let assetsService: Pick<AssetsService, 'list' | 'importUrl'>;
+  let assetsService: Pick<AssetsService, 'list' | 'importUrl' | 'createClip'>;
 
   beforeEach(async () => {
     assetsService = {
       list: vi.fn().mockReturnValue(of([
         asset('PENDING'),
         asset('IMPORTING'),
+        asset('PROCESSING'),
         asset('READY'),
         asset('FAILED'),
       ])),
       importUrl: vi.fn().mockReturnValue(of({ asset: asset('PENDING') })),
+      createClip: vi.fn().mockReturnValue(of({ asset: clipAsset() })),
     };
 
     await TestBed.configureTestingModule({
@@ -41,6 +43,7 @@ describe('Content', () => {
     const text = fixture.nativeElement.textContent as string;
     expect(text).toContain('PENDING');
     expect(text).toContain('IMPORTING');
+    expect(text).toContain('PROCESSING');
     expect(text).toContain('READY');
     expect(text).toContain('FAILED');
     expect(text).toContain('video.mp4');
@@ -48,6 +51,7 @@ describe('Content', () => {
     expect(text).toContain('1920x1080');
     expect(text).toContain('h264 / aac');
     expect(text).toContain('Inspected');
+    expect(text).toContain('Create Clip');
     expect(text).toContain('UNSUPPORTED_MEDIA');
   });
 
@@ -120,11 +124,25 @@ describe('Content', () => {
     expect(component['url']()).toBe('');
   });
 
+  it('creates a clip for an inspected ready asset', () => {
+    fixture.detectChanges();
+    const ready = component['assets']().find((item) => item.status === 'READY')!;
+
+    component['setClipStart'](ready, '1000');
+    component['setClipDuration'](ready, '2000');
+    component['createClip'](ready);
+
+    expect(assetsService.createClip).toHaveBeenCalledWith(ready.id, 1000, 2000);
+    expect(component['assets']()[0].derivationType).toBe('CLIP');
+  });
+
   function asset(status: MediaAssetStatus): MediaAssetSummary {
     return {
       id: `${status}-asset`,
       sourceType: 'DIRECT_URL',
       sourceUrl: `https://example.com/${status.toLowerCase()}/video.mp4`,
+      parentAssetId: null,
+      derivationType: 'ORIGINAL',
       status,
       originalFilename: status === 'PENDING' ? null : 'video.mp4',
       contentType: status === 'PENDING' ? null : 'video/mp4',
@@ -137,6 +155,7 @@ describe('Content', () => {
       audioCodec: status === 'READY' ? 'aac' : null,
       containerFormat: status === 'READY' ? 'mp4' : null,
       importJobId: `${status}-job`,
+      processingJobId: null,
       inspectionStatus: status === 'READY' ? 'INSPECTED' : 'PENDING',
       inspectionJobId: `${status}-inspection-job`,
       inspectionErrorCode: null,
@@ -150,6 +169,19 @@ describe('Content', () => {
       createdAt: '2026-09-10T08:00:00Z',
       updatedAt: '2026-09-10T08:00:10Z',
       readyAt: status === 'READY' ? '2026-09-10T08:00:10Z' : null,
+    };
+  }
+
+  function clipAsset(): MediaAssetSummary {
+    return {
+      ...asset('PROCESSING'),
+      id: 'clip-asset',
+      sourceType: 'DERIVED',
+      sourceUrl: 'asset:READY-asset',
+      parentAssetId: 'READY-asset',
+      derivationType: 'CLIP',
+      importJobId: null,
+      processingJobId: 'clip-job',
     };
   }
 });

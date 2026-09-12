@@ -9,6 +9,9 @@
 - FFprobe — optional for import-only development, required for workers to claim
   `INSPECT_MEDIA` jobs. Install it with FFmpeg and set `FFPROBE_PATH` when the
   executable is not on `PATH`.
+- FFmpeg — optional for import/inspection-only development, required for
+  workers to claim `CREATE_CLIP` jobs. Set `FFMPEG_PATH` when the executable is
+  not on `PATH`.
 
 ## Running everything
 
@@ -159,14 +162,16 @@ Useful worker environment variables:
 - `FDM_WORKER_HEARTBEAT_SECONDS` — heartbeat interval, default 10 seconds.
 - `FDM_WORKER_JOB_POLL_SECONDS` — job polling interval, default 3 seconds.
 - `FFPROBE_PATH` — FFprobe executable path, default `ffprobe`.
+- `FFMPEG_PATH` — FFmpeg executable path, default `ffmpeg`.
 
-The Phase 6A worker registers, heartbeats, polls for a job, starts it, executes
-`SYSTEM_TEST`, `IMPORT_MEDIA`, or `INSPECT_MEDIA`, renews active media-job
-leases, and reports success or failure. `SYSTEM_TEST` is limited to a bounded
-message and sleep duration; `IMPORT_MEDIA` is limited to direct HTTP/HTTPS
-media-file ingestion; `INSPECT_MEDIA` is limited to read-only FFprobe metadata
-inspection of already stored originals. The worker does not execute arbitrary
-commands.
+The Phase 6B worker registers, heartbeats, polls for a job, starts it, executes
+`SYSTEM_TEST`, `IMPORT_MEDIA`, `INSPECT_MEDIA`, or `CREATE_CLIP`, renews active
+media-job leases, and reports success or failure. `SYSTEM_TEST` is limited to a
+bounded message and sleep duration; `IMPORT_MEDIA` is limited to direct
+HTTP/HTTPS media-file ingestion; `INSPECT_MEDIA` is limited to read-only
+FFprobe metadata inspection of already stored originals; `CREATE_CLIP` is
+limited to controlled FFmpeg MP4 clip creation from a stored source asset. The
+worker does not execute arbitrary commands.
 
 For media imports, the worker validates the URL, follows only bounded
 revalidated redirects, streams to a temporary file with size and timeout
@@ -218,3 +223,18 @@ Manual media inspection check:
    codecs, frame rate, bitrate, and an `Inspected` status.
 6. Stop or hide FFprobe and restart the worker; it should log that
    `INSPECT_MEDIA` is disabled and leave inspection jobs queued.
+
+Manual clip derivative check:
+
+1. Install FFmpeg and confirm `ffmpeg -version` works, or set
+   `$env:FFMPEG_PATH` to the executable before starting the worker.
+2. Import and inspect a small media file through Content.
+3. On a READY + INSPECTED source, create a clip with `startMs=3000` and
+   `durationMs=5000`.
+4. Confirm the output asset is a `CLIP` derivative of the source and the source
+   asset storage key/checksum remain unchanged.
+5. Confirm the `CREATE_CLIP` job reaches `SUCCEEDED`, the derived object exists
+   under its own asset ID in MinIO, and an `INSPECT_MEDIA` job is created for
+   the derived asset.
+6. Confirm the derived asset becomes `INSPECTED` and its duration is close to
+   the requested interval.

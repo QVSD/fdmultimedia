@@ -47,4 +47,12 @@ public class MediaAssetController {
             @PathVariable UUID assetId) {
         return mediaAssetService.downloadUrl(principal, assetId);
     }
+
+    @PostMapping("/{assetId}/clips")
+    public CreateClipResponse createClip(
+            @AuthenticationPrincipal AuthenticatedUser principal,
+            @PathVariable UUID assetId,
+            @Valid @RequestBody CreateClipRequest request) {
+        return mediaAssetService.createClip(principal, assetId, request);
+    }
 }

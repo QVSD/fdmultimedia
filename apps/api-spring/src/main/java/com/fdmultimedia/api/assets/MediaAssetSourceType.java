@@ -1,5 +1,6 @@
 package com.fdmultimedia.api.assets;
 
 public enum MediaAssetSourceType {
-    DIRECT_URL
+    DIRECT_URL,
+    DERIVED
 }

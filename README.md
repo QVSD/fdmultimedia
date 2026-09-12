@@ -5,9 +5,9 @@ social-media content workflows, video processing workers running across
 multiple laptops/cloud machines, scheduling, AI-assisted content creation,
 publishing, analytics, and revenue tracking.
 
-## Phase 6A scope
+## Phase 6B scope
 
-This repository is currently at **Phase 6A: media inspection**. That means:
+This repository is currently at **Phase 6B: FFmpeg clip derivatives**. That means:
 
 - A clean monorepo layout (`apps/`, `workers/`, `infra/`, `docs/`).
 - A Spring Boot 21 modular monolith (`apps/api-spring`) with the package
@@ -17,25 +17,26 @@ This repository is currently at **Phase 6A: media inspection**. That means:
   roles. Future business resources can be scoped to `workspace_id`.
 - Worker credentials, worker registration, heartbeat tracking, and a
   workspace-scoped Compute page. Worker status is derived from heartbeat age.
-- Centrally-created `SYSTEM_TEST`, `IMPORT_MEDIA`, and `INSPECT_MEDIA` jobs
+- Centrally-created `SYSTEM_TEST`, `IMPORT_MEDIA`, `INSPECT_MEDIA`, and
+  `CREATE_CLIP` jobs
   with PostgreSQL-backed durable state, atomic worker claiming, leases,
   bounded retry, and result/error tracking.
 - A standalone Java 21 worker agent in `workers/java-agent` that persists a
   random installation identifier locally, reports basic machine metadata,
   heartbeats, polls for work, renews long-running leases, executes safe
-  `SYSTEM_TEST` jobs, imports direct HTTP/HTTPS media files, and, when
-  FFprobe is available, inspects stored originals read-only.
+  `SYSTEM_TEST` jobs, imports direct HTTP/HTTPS media files, inspects stored
+  originals read-only when FFprobe is available, and creates controlled clip
+  derivatives when FFmpeg is available.
 - Media assets backed by private S3-compatible object storage. Local
   development uses MinIO with a private `media-assets` bucket.
 - An Angular application (`apps/web-angular`) with a login page, protected
   dashboard routes, a sidebar shell, a Compute page, a Jobs page, and a
-  functional Content page for direct media imports.
+  functional Content page for direct media imports and simple clip creation.
 - Nginx as the single entry point, routing `/api/*` to the backend and
   everything else to the frontend.
 - Docker Compose to run the whole stack locally.
 
-No clipping, transcoding, thumbnails, publishing, AI, social integrations,
-analytics, or billing are implemented yet — see
+No thumbnails, publishing, AI, social integrations, analytics, or billing are implemented yet — see
 [docs/ROADMAP.md](docs/ROADMAP.md) for what comes next and
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how the pieces fit together.
 
@@ -152,8 +153,10 @@ java -jar target/worker-agent-0.1.0-SNAPSHOT.jar
 On Windows PowerShell, run Maven through `apps\api-spring\mvnw.cmd` and set
 the same environment variables with `$env:FDM_API_BASE_URL` and
 `$env:FDM_WORKER_TOKEN`. Install FFmpeg/FFprobe and set `$env:FFPROBE_PATH`
-if `ffprobe` is not on `PATH`; without FFprobe the worker still registers and
-imports media, but it does not advertise `INSPECT_MEDIA`.
+if `ffprobe` is not on `PATH`; set `$env:FFMPEG_PATH` if `ffmpeg` is not on
+`PATH`. Without FFprobe the worker still registers and imports media, but it
+does not advertise `INSPECT_MEDIA`. Without FFmpeg it does not advertise
+`CREATE_CLIP`.
 
 ## Jobs, media assets, and distributed execution
 
@@ -241,6 +244,25 @@ and `hasVideo`/`hasAudio` flags when FFprobe can determine them. Attached
 picture streams are ignored for primary video selection. Inspection failures
 set the inspection state to failed but do not change a READY asset back to a
 failed import state.
+
+Phase 6B adds controlled clip derivatives with `CREATE_CLIP`. A user can create
+a clip only from a `READY` + `INSPECTED` source asset. The API validates
+`startMs >= 0`, `durationMs > 0`, and, when duration is known, requires the
+requested interval `[startMs, startMs + durationMs)` to fit inside the source.
+The original object is immutable: the API creates a new derived `MediaAsset`
+with `parentAssetId` pointing to the source and `derivationType=CLIP`, then a
+`CREATE_CLIP` job with the source/output IDs and timing parameters.
+
+FFmpeg-capable workers request a presigned GET URL for the source and a
+presigned PUT URL for the derived output. The worker downloads the source with
+the same bounded streaming pattern used for inspection, runs FFmpeg through
+`ProcessBuilder` with fixed arguments and no shell, uploads the new MP4,
+reports checksum/size, and deletes both temp files. The server owns the output
+storage key (`workspaces/{workspaceId}/assets/{derivedAssetId}/original`) and
+marks the derived asset `READY`, then automatically creates `INSPECT_MEDIA` so
+the derivative can become `INSPECTED`. FFmpeg uses H.264 video, AAC audio, MP4
+container, `-ss` after `-i` for more accurate first-pass timing, and controlled
+arguments only; users cannot submit raw FFmpeg options.
 
 MinIO console is exposed for local development at **http://localhost:9001** (or
 `MINIO_CONSOLE_PORT`) using `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` from

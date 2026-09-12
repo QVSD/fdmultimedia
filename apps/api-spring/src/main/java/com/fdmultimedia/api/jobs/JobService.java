@@ -189,6 +189,7 @@ public class JobService {
                     job.recoverExpiredLease(now);
                     reconcileRecoveredImportAsset(job, now);
                     reconcileRecoveredInspectionAsset(job, now);
+                    reconcileRecoveredClipAsset(job, now);
                 });
     }
 
@@ -219,6 +220,22 @@ public class JobService {
                 asset.markInspectionFailed(job.getErrorCode(), job.getErrorMessage(), now);
             } else if (job.getStatus() == JobStatus.QUEUED) {
                 asset.markInspectionPendingForRetry(now);
+            }
+        });
+    }
+
+    private void reconcileRecoveredClipAsset(Job job, Instant now) {
+        if (job.getType() != JobType.CREATE_CLIP) {
+            return;
+        }
+        assets.findByProcessingJobId(job.getId()).ifPresent(asset -> {
+            if (asset.getStatus() == MediaAssetStatus.READY || asset.getStatus() == MediaAssetStatus.FAILED) {
+                return;
+            }
+            if (job.getStatus() == JobStatus.FAILED) {
+                asset.markFailed(job.getErrorCode(), job.getErrorMessage(), now);
+            } else if (job.getStatus() == JobStatus.QUEUED) {
+                asset.markProcessingPendingForRetry(now);
             }
         });
     }
@@ -271,6 +288,9 @@ public class JobService {
         if (type == JobType.INSPECT_MEDIA) {
             return validateAssetReferencePayload(payload);
         }
+        if (type == JobType.CREATE_CLIP) {
+            return validateCreateClipPayload(payload);
+        }
         if (type != JobType.SYSTEM_TEST) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unsupported job type");
         }
@@ -300,6 +320,40 @@ public class JobService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "assetId must be a UUID");
         }
         return Map.of("assetId", assetId);
+    }
+
+    private Map<String, Object> validateCreateClipPayload(Map<String, Object> payload) {
+        String sourceAssetId = uuidString(payload.get("sourceAssetId"), "sourceAssetId");
+        String outputAssetId = uuidString(payload.get("outputAssetId"), "outputAssetId");
+        long startMs = longValue(payload.get("startMs"), "startMs");
+        long durationMs = longValue(payload.get("durationMs"), "durationMs");
+        if (startMs < 0) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "startMs must be non-negative");
+        }
+        if (durationMs <= 0) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "durationMs must be positive");
+        }
+        try {
+            Math.addExact(startMs, durationMs);
+        } catch (ArithmeticException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Clip timing is too large");
+        }
+        Map<String, Object> normalized = new LinkedHashMap<>();
+        normalized.put("sourceAssetId", sourceAssetId);
+        normalized.put("outputAssetId", outputAssetId);
+        normalized.put("startMs", startMs);
+        normalized.put("durationMs", durationMs);
+        return normalized;
+    }
+
+    private String uuidString(Object value, String field) {
+        String text = stringValue(value, field);
+        try {
+            UUID.fromString(text);
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, field + " must be a UUID");
+        }
+        return text;
     }
 
     private Map<String, Object> sanitizeResult(Map<String, Object> result) {

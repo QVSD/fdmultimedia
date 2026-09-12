@@ -12,6 +12,7 @@ import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.S3Configuration;
 import software.amazon.awssdk.services.s3.model.CreateBucketRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
+import software.amazon.awssdk.services.s3.model.HeadObjectRequest;
 import software.amazon.awssdk.services.s3.model.HeadBucketRequest;
 import software.amazon.awssdk.services.s3.model.NoSuchBucketException;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
@@ -81,6 +82,14 @@ public class ObjectStorageService {
                 .build();
         String url = presigner.presignGetObject(presignRequest).url().toString();
         return new StorageAccess(url, properties.getBucket(), key, Instant.now(clock).plus(properties.getPresignedDownloadTtl()));
+    }
+
+    public long objectSize(String key) {
+        return s3Client.headObject(HeadObjectRequest.builder()
+                        .bucket(properties.getBucket())
+                        .key(key)
+                        .build())
+                .contentLength();
     }
 
     private S3Client s3Client(URI endpoint, StorageProperties properties) {
