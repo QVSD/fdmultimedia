@@ -3,6 +3,8 @@ package com.fdmultimedia.worker;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.ByteArrayOutputStream;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.nio.charset.StandardCharsets;
@@ -17,9 +19,11 @@ import java.util.concurrent.TimeUnit;
 final class FfprobeMediaInspector {
 
     private static final int MAX_OUTPUT_BYTES = 1024 * 1024;
+    private static final int MAX_ERROR_BYTES = 16 * 1024;
 
     private final String ffprobePath;
     private final Duration timeout;
+    private final ProcessFactory processFactory;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     FfprobeMediaInspector(String ffprobePath) {
@@ -27,27 +31,50 @@ final class FfprobeMediaInspector {
     }
 
     FfprobeMediaInspector(String ffprobePath, Duration timeout) {
+        this(ffprobePath, timeout, command -> new ProcessBuilder(command).start());
+    }
+
+    FfprobeMediaInspector(String ffprobePath, Duration timeout, ProcessFactory processFactory) {
         this.ffprobePath = ffprobePath;
         this.timeout = timeout;
+        this.processFactory = processFactory;
     }
 
     InspectionMetadata inspect(Path mediaFile) throws IOException, InterruptedException, ImportFailureException {
         List<String> command = command(mediaFile);
-        Process process = new ProcessBuilder(command).start();
-        CompletableFuture<byte[]> stdoutFuture = CompletableFuture.supplyAsync(() -> readBounded(process.getInputStream(), MAX_OUTPUT_BYTES));
-        CompletableFuture<byte[]> stderrFuture = CompletableFuture.supplyAsync(() -> readBounded(process.getErrorStream(), 16 * 1024));
-        boolean finished = process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS);
-        if (!finished) {
-            process.destroyForcibly();
-            throw new ImportFailureException("FFPROBE_TIMEOUT", "FFprobe timed out", false);
+        Process process = processFactory.start(command);
+        boolean completed = false;
+        try {
+            CompletableFuture<CapturedOutput> stdoutFuture = CompletableFuture.supplyAsync(() -> captureAndDrain(process.getInputStream(), MAX_OUTPUT_BYTES));
+            CompletableFuture<CapturedOutput> stderrFuture = CompletableFuture.supplyAsync(() -> captureAndDrain(process.getErrorStream(), MAX_ERROR_BYTES));
+            boolean finished = process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS);
+            if (!finished) {
+                terminate(process);
+                throw new ImportFailureException("FFPROBE_TIMEOUT", "FFprobe timed out", false);
+            }
+            completed = true;
+            CapturedOutput stdout = awaitOutput(stdoutFuture);
+            CapturedOutput stderr = awaitOutput(stderrFuture);
+            if (process.exitValue() != 0) {
+                String message = sanitizeError(new String(stderr.bytes(), StandardCharsets.UTF_8).trim(), mediaFile);
+                throw new ImportFailureException("FFPROBE_UNSUPPORTED", message.isBlank() ? "FFprobe could not inspect media" : message, true);
+            }
+            if (stdout.truncated()) {
+                throw new ImportFailureException("FFPROBE_OUTPUT_TOO_LARGE", "FFprobe output exceeded inspection limit", true);
+            }
+            return parse(new String(stdout.bytes(), StandardCharsets.UTF_8));
+        } catch (InterruptedException ex) {
+            terminateQuietly(process);
+            Thread.currentThread().interrupt();
+            throw ex;
+        } catch (RuntimeException | IOException | ImportFailureException ex) {
+            terminateQuietly(process);
+            throw ex;
+        } finally {
+            if (!completed) {
+                terminateQuietly(process);
+            }
         }
-        byte[] stdout = awaitOutput(stdoutFuture);
-        byte[] stderr = awaitOutput(stderrFuture);
-        if (process.exitValue() != 0) {
-            String message = new String(stderr, StandardCharsets.UTF_8).trim();
-            throw new ImportFailureException("FFPROBE_UNSUPPORTED", message.isBlank() ? "FFprobe could not inspect media" : message, true);
-        }
-        return parse(new String(stdout, StandardCharsets.UTF_8));
     }
 
     List<String> command(Path mediaFile) {
@@ -59,6 +86,7 @@ final class FfprobeMediaInspector {
         command.add("json");
         command.add("-show_format");
         command.add("-show_streams");
+        command.add("--");
         command.add(mediaFile.toString());
         return command;
     }
@@ -184,7 +212,7 @@ final class FfprobeMediaInspector {
         return value.isBlank() || "N/A".equals(value) ? null : value;
     }
 
-    private byte[] awaitOutput(CompletableFuture<byte[]> output) throws IOException, InterruptedException {
+    private CapturedOutput awaitOutput(CompletableFuture<CapturedOutput> output) throws IOException, InterruptedException {
         try {
             return output.get();
         } catch (ExecutionException ex) {
@@ -196,11 +224,75 @@ final class FfprobeMediaInspector {
         }
     }
 
-    private static byte[] readBounded(java.io.InputStream input, int maxBytes) {
+    private void terminate(Process process) throws InterruptedException {
+        if (!process.isAlive()) {
+            return;
+        }
+        process.destroy();
+        if (!process.waitFor(2, TimeUnit.SECONDS) && process.isAlive()) {
+            process.destroyForcibly();
+            process.waitFor(2, TimeUnit.SECONDS);
+        }
+    }
+
+    private void terminateQuietly(Process process) {
+        boolean interrupted = false;
+        try {
+            terminate(process);
+        } catch (InterruptedException ex) {
+            interrupted = true;
+            if (process.isAlive()) {
+                process.destroyForcibly();
+            }
+        } finally {
+            if (interrupted) {
+                Thread.currentThread().interrupt();
+            }
+        }
+    }
+
+    private String sanitizeError(String message, Path mediaFile) {
+        if (message.isBlank()) {
+            return message;
+        }
+        String sanitized = message.replace(mediaFile.toString(), "<media-file>");
+        Path fileName = mediaFile.getFileName();
+        if (fileName != null) {
+            sanitized = sanitized.replace(fileName.toString(), "<media-file>");
+        }
+        return sanitized;
+    }
+
+    private static CapturedOutput captureAndDrain(InputStream input, int maxBytes) {
         try (input) {
-            return input.readNBytes(maxBytes);
+            ByteArrayOutputStream captured = new ByteArrayOutputStream(Math.min(maxBytes, 8192));
+            byte[] buffer = new byte[8192];
+            int total = 0;
+            boolean truncated = false;
+            int read;
+            while ((read = input.read(buffer)) != -1) {
+                int remaining = maxBytes - total;
+                if (remaining > 0) {
+                    int toCapture = Math.min(remaining, read);
+                    captured.write(buffer, 0, toCapture);
+                    total += toCapture;
+                    if (toCapture < read) {
+                        truncated = true;
+                    }
+                } else {
+                    truncated = true;
+                }
+            }
+            return new CapturedOutput(captured.toByteArray(), truncated);
         } catch (IOException ex) {
             throw new RuntimeException(ex);
         }
+    }
+
+    interface ProcessFactory {
+        Process start(List<String> command) throws IOException;
+    }
+
+    record CapturedOutput(byte[] bytes, boolean truncated) {
     }
 }

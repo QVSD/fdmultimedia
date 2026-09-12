@@ -299,6 +299,9 @@ public class MediaAssetService {
     }
 
     private void validateInspectionMetadata(MediaInspectionMetadata metadata) {
+        if (!Boolean.TRUE.equals(metadata.hasVideo()) && !Boolean.TRUE.equals(metadata.hasAudio())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Inspection metadata must contain a media stream");
+        }
         if (metadata.durationMs() != null && metadata.durationMs() < 0) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid duration");
         }

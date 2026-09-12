@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -183,6 +184,67 @@ class MediaAssetServiceTest {
         assertThat(summary.videoCodec()).isEqualTo("h264");
         assertThat(summary.audioCodec()).isEqualTo("aac");
         assertThat(job.getStatus()).isEqualTo(JobStatus.SUCCEEDED);
+    }
+
+    @Test
+    void rejectsInspectionCompletionWithoutMediaStreams() {
+        MediaAsset asset = readyAsset();
+        Job job = inspectionJob(asset.getId());
+        job.claim(worker, NOW.minusSeconds(3), NOW.plusSeconds(30));
+        job.start(worker, NOW.minusSeconds(2), NOW.plusSeconds(30));
+        asset.attachInspectionJob(job, NOW.minusSeconds(4));
+        asset.markInspecting(NOW.minusSeconds(2));
+        when(jobService.requireJobForWorkerWorkspace(worker, job.getId())).thenReturn(job);
+        when(assets.findByInspectionJobId(job.getId())).thenReturn(Optional.of(asset));
+
+        assertThatThrownBy(() -> service.completeWorkerInspection(
+                workerPrincipal,
+                job.getId(),
+                new WorkerInspectionCompletionRequest(
+                        "machine-1",
+                        asset.getId(),
+                        12_345L,
+                        null,
+                        null,
+                        null,
+                        null,
+                        "mp4",
+                        null,
+                        800_000L,
+                        false,
+                        false)))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting("statusCode")
+                .isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(asset.getInspectionStatus()).isEqualTo(MediaInspectionStatus.INSPECTING);
+        assertThat(job.getStatus()).isEqualTo(JobStatus.RUNNING);
+    }
+
+    @Test
+    void duplicateImportCompletionCannotCreateDuplicateInspectionJob() {
+        MediaAsset asset = asset();
+        Job job = importJob(asset.getId());
+        Job inspectionJob = inspectionJob(asset.getId());
+        job.claim(worker, NOW.minusSeconds(3), NOW.plusSeconds(30));
+        job.start(worker, NOW.minusSeconds(2), NOW.plusSeconds(30));
+        asset.attachImportJob(job, NOW.minusSeconds(4));
+        asset.markImporting(NOW.minusSeconds(2));
+        when(jobService.requireJobForWorkerWorkspace(worker, job.getId())).thenReturn(job);
+        when(assets.findByImportJobId(job.getId())).thenReturn(Optional.of(asset));
+        when(storage.objectKey(asset)).thenReturn("workspaces/ws/assets/asset/original");
+        when(storage.bucket()).thenReturn("media-assets");
+        when(jobService.createForWorkspace(any(), any(JobCreateRequest.class))).thenReturn(jobSummary(inspectionJob));
+        when(jobService.getJobEntityForWorkspace(workspace, inspectionJob.getId())).thenReturn(Optional.of(inspectionJob));
+
+        MediaAssetSummary summary = service.completeWorkerImport(workerPrincipal, job.getId(), completion(asset));
+
+        assertThat(summary.inspectionJobId()).isEqualTo(inspectionJob.getId());
+        assertThat(summary.inspectionStatus()).isEqualTo(MediaInspectionStatus.PENDING);
+        assertThatThrownBy(() -> service.completeWorkerImport(workerPrincipal, job.getId(), completion(asset)))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting("statusCode")
+                .isEqualTo(HttpStatus.CONFLICT);
+        verify(jobService, times(1)).createForWorkspace(any(), any(JobCreateRequest.class));
     }
 
     @Test
