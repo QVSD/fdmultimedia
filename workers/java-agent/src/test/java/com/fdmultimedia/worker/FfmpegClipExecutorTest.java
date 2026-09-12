@@ -38,6 +38,28 @@ class FfmpegClipExecutorTest {
     }
 
     @Test
+    void buildsSocialVerticalCommandWithFixedCenterCropFilter() {
+        FfmpegClipExecutor executor = new FfmpegClipExecutor("ffmpeg", Duration.ofSeconds(1));
+        Path source = Path.of("landscape-source.mp4");
+        Path output = Path.of("social-vertical.mp4");
+
+        List<String> command = executor.socialVerticalCommand(source, output);
+
+        assertEquals("ffmpeg", command.get(0));
+        assertEquals(source.toString(), command.get(command.indexOf("-i") + 1));
+        assertTrue(command.contains("-vf"));
+        assertEquals(
+                "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920",
+                command.get(command.indexOf("-vf") + 1));
+        assertTrue(command.contains("libx264"));
+        assertTrue(command.contains("aac"));
+        assertFalse(command.contains("-ss"));
+        assertFalse(command.contains("-t"));
+        assertEquals(output.toString(), command.get(command.size() - 1));
+        assertTrue(command.stream().noneMatch(argument -> argument.equals("sh") || argument.equals("cmd") || argument.equals("powershell")));
+    }
+
+    @Test
     void successfulProcessCreatesChecksumWithoutDestroyingChild() throws Exception {
         byte[] outputBytes = "mp4-output".getBytes(StandardCharsets.UTF_8);
         ControllableProcess process = ControllableProcess.completed(new byte[0], new byte[0], 0);
@@ -62,6 +84,34 @@ class FfmpegClipExecutorTest {
             assertEquals("74a678c9cdfbe430e9292085f5d5cfb61264942982eb39075971f593d43974f1", clip.checksumSha256());
             assertFalse(process.destroyed());
             assertFalse(process.destroyedForcibly());
+        } finally {
+            Files.deleteIfExists(source);
+            Files.deleteIfExists(output);
+        }
+    }
+
+    @Test
+    void successfulSocialVerticalUsesDedicatedFilename() throws Exception {
+        byte[] outputBytes = "vertical-output".getBytes(StandardCharsets.UTF_8);
+        ControllableProcess process = ControllableProcess.completed(new byte[0], new byte[0], 0);
+        FfmpegClipExecutor executor = new FfmpegClipExecutor(
+                "ffmpeg",
+                Duration.ofSeconds(1),
+                command -> {
+                    Files.write(Path.of(command.get(command.size() - 1)), outputBytes);
+                    return process;
+                });
+        Path source = Files.createTempFile("fdm-test-source-", ".media");
+        Path output = Files.createTempFile("fdm-test-output-", ".mp4");
+        try {
+            Files.writeString(source, "source");
+
+            CreatedClip clip = executor.createSocialVertical(source, output);
+
+            assertEquals("social-vertical.mp4", clip.originalFilename());
+            assertEquals(outputBytes.length, clip.fileSizeBytes());
+            assertEquals("video/mp4", clip.contentType());
+            assertFalse(process.destroyed());
         } finally {
             Files.deleteIfExists(source);
             Files.deleteIfExists(output);

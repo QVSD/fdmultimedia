@@ -1,6 +1,6 @@
 export type MediaAssetStatus = 'PENDING' | 'IMPORTING' | 'PROCESSING' | 'READY' | 'FAILED';
 export type MediaInspectionStatus = 'NOT_REQUESTED' | 'PENDING' | 'INSPECTING' | 'INSPECTED' | 'FAILED';
-export type MediaDerivationType = 'ORIGINAL' | 'CLIP';
+export type MediaDerivationType = 'ORIGINAL' | 'CLIP' | 'SOCIAL_VERTICAL';
 
 export interface MediaAssetSummary {
   id: string;

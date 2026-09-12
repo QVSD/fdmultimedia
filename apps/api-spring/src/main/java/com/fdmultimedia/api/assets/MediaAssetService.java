@@ -131,6 +131,27 @@ public class MediaAssetService {
     }
 
     @Transactional
+    public CreateClipResponse createSocialVertical(AuthenticatedUser principal, UUID sourceAssetId) {
+        WorkspaceMembership membership = authService.currentMembershipFor(principal);
+        Workspace workspace = membership.getWorkspace();
+        MediaAsset source = assets.findByWorkspaceAndId(workspace, sourceAssetId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Asset not found"));
+        validateSocialVerticalSource(source);
+
+        Instant now = Instant.now(clock);
+        MediaAsset output = assets.save(MediaAsset.socialVerticalDerivative(workspace, membership.getUser(), source, now));
+        JobSummary jobSummary = jobService.createForWorkspace(
+                workspace,
+                new JobCreateRequest(JobType.CREATE_SOCIAL_VERTICAL, Map.of(
+                        "sourceAssetId", source.getId().toString(),
+                        "outputAssetId", output.getId().toString())));
+        Job job = jobService.getJobEntityForWorkspace(workspace, jobSummary.id())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Social vertical job was not created"));
+        output.attachProcessingJob(job, now);
+        return new CreateClipResponse(toSummary(output), jobSummary);
+    }
+
+    @Transactional
     public WorkerImportAuthorizationResponse authorizeWorkerImport(
             WorkerPrincipal principal,
             UUID jobId,
@@ -218,6 +239,40 @@ public class MediaAssetService {
     }
 
     @Transactional
+    public WorkerClipAuthorizationResponse authorizeWorkerSocialVertical(
+            WorkerPrincipal principal,
+            UUID jobId,
+            WorkerImportAuthorizationRequest request) {
+        Worker worker = jobService.requireOnlineWorker(principal, request.machineIdentifier());
+        Job job = requireSocialVerticalJob(worker, jobId);
+        DerivativePayload payload = derivativePayload(job);
+        MediaAsset output = requireOutputAssetForClipJob(job);
+        MediaAsset source = assets.findByWorkspaceAndId(worker.getWorkspace(), payload.sourceAssetId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Source asset not found"));
+        validateSocialVerticalJobReferences(job, source, output, payload);
+        validateSocialVerticalSource(source);
+        if (source.getStorageKey() == null) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Source asset is not ready");
+        }
+        Instant now = Instant.now(clock);
+        output.markProcessing(now);
+        StorageAccess sourceAccess = storage.presignedGet(source.getStorageKey());
+        StorageAccess outputAccess = storage.presignedPut(storage.objectKey(output));
+        return new WorkerClipAuthorizationResponse(
+                source.getId(),
+                output.getId(),
+                sourceAccess.url(),
+                outputAccess.url(),
+                outputAccess.bucket(),
+                outputAccess.key(),
+                mediaProperties.getMaxDownloadSizeBytes(),
+                (int) mediaProperties.getConnectTimeout().toSeconds(),
+                (int) mediaProperties.getReadTimeout().toSeconds(),
+                0,
+                0);
+    }
+
+    @Transactional
     public MediaAssetSummary completeWorkerClip(
             WorkerPrincipal principal,
             UUID jobId,
@@ -250,6 +305,38 @@ public class MediaAssetService {
     }
 
     @Transactional
+    public MediaAssetSummary completeWorkerSocialVertical(
+            WorkerPrincipal principal,
+            UUID jobId,
+            WorkerClipCompletionRequest request) {
+        Worker worker = jobService.requireOnlineWorker(principal, request.machineIdentifier());
+        Job job = requireSocialVerticalJob(worker, jobId);
+        DerivativePayload payload = derivativePayload(job);
+        MediaAsset output = requireOutputAssetForClipJob(job);
+        MediaAsset source = assets.findByWorkspaceAndId(worker.getWorkspace(), payload.sourceAssetId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Source asset not found"));
+        validateSocialVerticalJobReferences(job, source, output, payload);
+        if (!source.getId().equals(request.sourceAssetId()) || !output.getId().equals(request.outputAssetId())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Asset does not match social vertical job");
+        }
+        validateCompletionMetadata(request.metadata());
+        Instant now = Instant.now(clock);
+        String key = storage.objectKey(output);
+        long objectSize = storage.objectSize(key);
+        if (objectSize != request.fileSizeBytes()) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Stored derivative size does not match completion metadata");
+        }
+        output.markReady(request.metadata(), storage.bucket(), key, now);
+        job.complete(worker, Map.of(
+                "sourceAssetId", source.getId().toString(),
+                "outputAssetId", output.getId().toString(),
+                "checksumSha256", request.checksumSha256(),
+                "fileSizeBytes", request.fileSizeBytes()), now);
+        ensureInspectionJob(output, now);
+        return toSummary(output);
+    }
+
+    @Transactional
     public MediaAssetSummary failWorkerClip(
             WorkerPrincipal principal,
             UUID jobId,
@@ -263,6 +350,36 @@ public class MediaAssetService {
         validateClipJobReferences(job, source, output, payload);
         if (!source.getId().equals(request.sourceAssetId()) || !output.getId().equals(request.outputAssetId())) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Asset does not match clip job");
+        }
+        Instant now = Instant.now(clock);
+        if (Boolean.TRUE.equals(request.terminal())) {
+            job.failTerminal(worker, request.errorCode(), safeErrorMessage(request.errorMessage()), now);
+            output.markFailed(request.errorCode(), safeErrorMessage(request.errorMessage()), now);
+        } else {
+            job.fail(worker, request.errorCode(), safeErrorMessage(request.errorMessage()), now);
+            if (job.getStatus() == JobStatus.FAILED) {
+                output.markFailed(request.errorCode(), safeErrorMessage(request.errorMessage()), now);
+            } else {
+                output.markProcessingPendingForRetry(now);
+            }
+        }
+        return toSummary(output);
+    }
+
+    @Transactional
+    public MediaAssetSummary failWorkerSocialVertical(
+            WorkerPrincipal principal,
+            UUID jobId,
+            WorkerClipFailureRequest request) {
+        Worker worker = jobService.requireOnlineWorker(principal, request.machineIdentifier());
+        Job job = requireSocialVerticalJob(worker, jobId);
+        DerivativePayload payload = derivativePayload(job);
+        MediaAsset output = requireOutputAssetForClipJob(job);
+        MediaAsset source = assets.findByWorkspaceAndId(worker.getWorkspace(), payload.sourceAssetId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Source asset not found"));
+        validateSocialVerticalJobReferences(job, source, output, payload);
+        if (!source.getId().equals(request.sourceAssetId()) || !output.getId().equals(request.outputAssetId())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Asset does not match social vertical job");
         }
         Instant now = Instant.now(clock);
         if (Boolean.TRUE.equals(request.terminal())) {
@@ -407,6 +524,17 @@ public class MediaAssetService {
         return job;
     }
 
+    private Job requireSocialVerticalJob(Worker worker, UUID jobId) {
+        Job job = jobService.requireJobForWorkerWorkspace(worker, jobId);
+        if (job.getType() != JobType.CREATE_SOCIAL_VERTICAL) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Job is not a social vertical creation");
+        }
+        if (job.getStatus() != JobStatus.RUNNING && job.getStatus() != JobStatus.ASSIGNED) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Job is not active");
+        }
+        return job;
+    }
+
     private MediaAsset requireAssetForJob(Job job) {
         return assets.findByImportJobId(job.getId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Asset not found"));
@@ -440,6 +568,33 @@ public class MediaAssetService {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Output asset is not a clip derivative");
         }
         validateClipTiming(source, payload.startMs(), payload.durationMs());
+    }
+
+    private void validateSocialVerticalJobReferences(Job job, MediaAsset source, MediaAsset output, DerivativePayload payload) {
+        if (!source.getId().equals(payload.sourceAssetId()) || !output.getId().equals(payload.outputAssetId())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Job payload does not match assets");
+        }
+        if (output.getParentAsset() == null || !output.getParentAsset().getId().equals(source.getId())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Output asset does not belong to source");
+        }
+        if (output.getDerivationType() != MediaDerivationType.SOCIAL_VERTICAL) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Output asset is not a social vertical derivative");
+        }
+    }
+
+    private void validateSocialVerticalSource(MediaAsset source) {
+        if (source.getStatus() != MediaAssetStatus.READY) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Source asset is not ready");
+        }
+        if (source.getInspectionStatus() != MediaInspectionStatus.INSPECTED) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Source asset is not inspected");
+        }
+        if (!Boolean.TRUE.equals(source.getHasVideo())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Source asset must contain video");
+        }
+        if (source.getWidth() == null || source.getWidth() <= 0 || source.getHeight() == null || source.getHeight() <= 0) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Source asset dimensions are not known");
+        }
     }
 
     private void validateCompletionMetadata(WorkerImportCompletionRequest request) {
@@ -534,6 +689,13 @@ public class MediaAssetService {
                 longPayload(payload.get("durationMs"), "durationMs"));
     }
 
+    private DerivativePayload derivativePayload(Job job) {
+        Map<String, Object> payload = job.getPayload();
+        return new DerivativePayload(
+                UUID.fromString(String.valueOf(payload.get("sourceAssetId"))),
+                UUID.fromString(String.valueOf(payload.get("outputAssetId"))));
+    }
+
     private long longPayload(Object value, String field) {
         if (value instanceof Number number) {
             return number.longValue();
@@ -599,5 +761,8 @@ public class MediaAssetService {
     }
 
     private record ClipPayload(UUID sourceAssetId, UUID outputAssetId, long startMs, long durationMs) {
+    }
+
+    private record DerivativePayload(UUID sourceAssetId, UUID outputAssetId) {
     }
 }

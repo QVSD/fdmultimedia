@@ -53,15 +53,38 @@ final class FfmpegClipExecutor {
     void execute(WorkerAgentClient client, ClaimedJob job, String machineIdentifier)
             throws IOException, InterruptedException, ImportFailureException {
         ClipAuthorization authorization = client.authorizeClip(job.jobId(), machineIdentifier);
+        executeClipTransform(client, job, machineIdentifier, authorization, Transform.CLIP);
+    }
+
+    void executeSocialVertical(WorkerAgentClient client, ClaimedJob job, String machineIdentifier)
+            throws IOException, InterruptedException, ImportFailureException {
+        ClipAuthorization authorization = client.authorizeSocialVertical(job.jobId(), machineIdentifier);
+        executeClipTransform(client, job, machineIdentifier, authorization, Transform.SOCIAL_VERTICAL);
+    }
+
+    private void executeClipTransform(
+            WorkerAgentClient client,
+            ClaimedJob job,
+            String machineIdentifier,
+            ClipAuthorization authorization,
+            Transform transform)
+            throws IOException, InterruptedException, ImportFailureException {
         Path source = null;
         Path output = null;
         try {
             source = Files.createTempFile("fdm-clip-source-", ".media");
             output = Files.createTempFile("fdm-clip-output-", ".mp4");
             download(authorization, source);
-            CreatedClip clip = createClip(source, output, authorization.startMs(), authorization.durationMs());
+            CreatedClip clip = switch (transform) {
+                case CLIP -> createClip(source, output, authorization.startMs(), authorization.durationMs());
+                case SOCIAL_VERTICAL -> createSocialVertical(source, output);
+            };
             client.upload(URI.create(authorization.outputUploadUrl()), clip.path(), clip.contentType());
-            client.completeClip(job.jobId(), machineIdentifier, authorization, clip);
+            if (transform == Transform.SOCIAL_VERTICAL) {
+                client.completeSocialVertical(job.jobId(), machineIdentifier, authorization, clip);
+            } else {
+                client.completeClip(job.jobId(), machineIdentifier, authorization, clip);
+            }
         } finally {
             if (source != null) {
                 Files.deleteIfExists(source);
@@ -97,7 +120,16 @@ final class FfmpegClipExecutor {
 
     CreatedClip createClip(Path source, Path output, long startMs, long durationMs)
             throws IOException, InterruptedException, ImportFailureException {
-        List<String> command = command(source, output, startMs, durationMs);
+        return runFfmpeg(command(source, output, startMs, durationMs), source, output, "clip.mp4");
+    }
+
+    CreatedClip createSocialVertical(Path source, Path output)
+            throws IOException, InterruptedException, ImportFailureException {
+        return runFfmpeg(socialVerticalCommand(source, output), source, output, "social-vertical.mp4");
+    }
+
+    private CreatedClip runFfmpeg(List<String> command, Path source, Path output, String originalFilename)
+            throws IOException, InterruptedException, ImportFailureException {
         Process process = processFactory.start(command);
         boolean completed = false;
         try {
@@ -121,7 +153,7 @@ final class FfmpegClipExecutor {
             if (size <= 0) {
                 throw new ImportFailureException("FFMPEG_EMPTY_OUTPUT", "FFmpeg created an empty clip", true);
             }
-            return new CreatedClip(output, size, sha256(output), OUTPUT_CONTENT_TYPE, OUTPUT_CONTAINER);
+            return new CreatedClip(output, originalFilename, size, sha256(output), OUTPUT_CONTENT_TYPE, OUTPUT_CONTAINER);
         } catch (InterruptedException ex) {
             terminateQuietly(process);
             Thread.currentThread().interrupt();
@@ -153,6 +185,35 @@ final class FfmpegClipExecutor {
         command.add("0:v?");
         command.add("-map");
         command.add("0:a?");
+        command.add("-c:v");
+        command.add("libx264");
+        command.add("-preset");
+        command.add("veryfast");
+        command.add("-pix_fmt");
+        command.add("yuv420p");
+        command.add("-c:a");
+        command.add("aac");
+        command.add("-movflags");
+        command.add("+faststart");
+        command.add(output.toString());
+        return command;
+    }
+
+    List<String> socialVerticalCommand(Path source, Path output) {
+        List<String> command = new ArrayList<>();
+        command.add(ffmpegPath);
+        command.add("-y");
+        command.add("-hide_banner");
+        command.add("-v");
+        command.add("error");
+        command.add("-i");
+        command.add(source.toString());
+        command.add("-map");
+        command.add("0:v:0");
+        command.add("-map");
+        command.add("0:a?");
+        command.add("-vf");
+        command.add("scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920");
         command.add("-c:v");
         command.add("libx264");
         command.add("-preset");
@@ -294,5 +355,10 @@ final class FfmpegClipExecutor {
     }
 
     record CapturedOutput(byte[] bytes, boolean truncated) {
+    }
+
+    private enum Transform {
+        CLIP,
+        SOCIAL_VERTICAL
     }
 }

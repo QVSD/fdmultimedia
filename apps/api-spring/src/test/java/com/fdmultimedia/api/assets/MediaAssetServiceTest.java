@@ -339,6 +339,7 @@ class MediaAssetServiceTest {
                         output.getId(),
                         "1".repeat(64),
                         12_000,
+                        "clip.mp4",
                         "video/mp4",
                         "mp4"));
 
@@ -349,6 +350,95 @@ class MediaAssetServiceTest {
         assertThat(summary.inspectionJobId()).isEqualTo(inspectionJob.getId());
         assertThat(clipJob.getStatus()).isEqualTo(JobStatus.SUCCEEDED);
         assertThat(source.getStorageKey()).isEqualTo("storage-key");
+    }
+
+    @Test
+    void createsSocialVerticalDerivativeAndJobForInspectedVideoSource() {
+        MediaAsset source = inspectedAsset();
+        when(assets.findByWorkspaceAndId(workspace, source.getId())).thenReturn(Optional.of(source));
+        when(assets.save(any(MediaAsset.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(jobService.createForWorkspace(any(), any(JobCreateRequest.class))).thenAnswer(invocation -> {
+            JobCreateRequest request = invocation.getArgument(1);
+            return jobSummary(socialVerticalJob(source.getId(), UUID.fromString((String) request.payload().get("outputAssetId"))));
+        });
+        when(jobService.getJobEntityForWorkspace(any(), any(UUID.class))).thenAnswer(invocation -> {
+            UUID jobId = invocation.getArgument(1);
+            return Optional.of(new Job(workspace, JobType.CREATE_SOCIAL_VERTICAL, Map.of(
+                    "sourceAssetId", source.getId().toString(),
+                    "outputAssetId", UUID.randomUUID().toString()), 3, NOW));
+        });
+
+        CreateClipResponse response = service.createSocialVertical(user, source.getId());
+
+        ArgumentCaptor<JobCreateRequest> jobRequest = ArgumentCaptor.forClass(JobCreateRequest.class);
+        verify(jobService).createForWorkspace(any(), jobRequest.capture());
+        assertThat(jobRequest.getValue().type()).isEqualTo(JobType.CREATE_SOCIAL_VERTICAL);
+        assertThat(jobRequest.getValue().payload()).containsEntry("sourceAssetId", source.getId().toString());
+        assertThat(response.asset().sourceType()).isEqualTo(MediaAssetSourceType.DERIVED);
+        assertThat(response.asset().derivationType()).isEqualTo(MediaDerivationType.SOCIAL_VERTICAL);
+        assertThat(response.asset().parentAssetId()).isEqualTo(source.getId());
+        assertThat(response.asset().status()).isEqualTo(MediaAssetStatus.PENDING);
+    }
+
+    @Test
+    void rejectsSocialVerticalForAudioOnlyOrUnknownDimensions() {
+        MediaAsset audioOnly = inspectedAsset(false, true, null, null);
+        when(assets.findByWorkspaceAndId(workspace, audioOnly.getId())).thenReturn(Optional.of(audioOnly));
+
+        assertThatThrownBy(() -> service.createSocialVertical(user, audioOnly.getId()))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting("statusCode")
+                .isEqualTo(HttpStatus.CONFLICT);
+
+        MediaAsset unknownDimensions = inspectedAsset(true, false, null, null);
+        when(assets.findByWorkspaceAndId(workspace, unknownDimensions.getId())).thenReturn(Optional.of(unknownDimensions));
+
+        assertThatThrownBy(() -> service.createSocialVertical(user, unknownDimensions.getId()))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting("statusCode")
+                .isEqualTo(HttpStatus.CONFLICT);
+    }
+
+    @Test
+    void completesSocialVerticalMarksOutputReadyAndCreatesInspectionJob() {
+        MediaAsset source = inspectedAsset();
+        MediaAsset output = MediaAsset.socialVerticalDerivative(workspace, owner, source, NOW);
+        Job socialJob = socialVerticalJob(source.getId(), output.getId());
+        Job inspectionJob = inspectionJob(output.getId());
+        socialJob.claim(worker, NOW.minusSeconds(3), NOW.plusSeconds(30));
+        socialJob.start(worker, NOW.minusSeconds(2), NOW.plusSeconds(30));
+        output.attachProcessingJob(socialJob, NOW.minusSeconds(4));
+        output.markProcessing(NOW.minusSeconds(2));
+        when(jobService.requireJobForWorkerWorkspace(worker, socialJob.getId())).thenReturn(socialJob);
+        when(assets.findByProcessingJobId(socialJob.getId())).thenReturn(Optional.of(output));
+        when(assets.findByWorkspaceAndId(workspace, source.getId())).thenReturn(Optional.of(source));
+        when(storage.objectKey(output)).thenReturn("workspaces/ws/assets/vertical/original");
+        when(storage.objectSize("workspaces/ws/assets/vertical/original")).thenReturn(22_000L);
+        when(storage.bucket()).thenReturn("media-assets");
+        when(jobService.createForWorkspace(any(), any(JobCreateRequest.class))).thenReturn(jobSummary(inspectionJob));
+        when(jobService.getJobEntityForWorkspace(workspace, inspectionJob.getId())).thenReturn(Optional.of(inspectionJob));
+
+        MediaAssetSummary summary = service.completeWorkerSocialVertical(
+                workerPrincipal,
+                socialJob.getId(),
+                new WorkerClipCompletionRequest(
+                        "machine-1",
+                        source.getId(),
+                        output.getId(),
+                        "2".repeat(64),
+                        22_000,
+                        "social-vertical.mp4",
+                        "video/mp4",
+                        "mp4"));
+
+        assertThat(summary.status()).isEqualTo(MediaAssetStatus.READY);
+        assertThat(summary.derivationType()).isEqualTo(MediaDerivationType.SOCIAL_VERTICAL);
+        assertThat(summary.parentAssetId()).isEqualTo(source.getId());
+        assertThat(summary.originalFilename()).isEqualTo("social-vertical.mp4");
+        assertThat(summary.inspectionStatus()).isEqualTo(MediaInspectionStatus.PENDING);
+        assertThat(summary.inspectionJobId()).isEqualTo(inspectionJob.getId());
+        assertThat(socialJob.getStatus()).isEqualTo(JobStatus.SUCCEEDED);
+        assertThat(source.getChecksumSha256()).isEqualTo("0".repeat(64));
     }
 
     @Test
@@ -429,6 +519,12 @@ class MediaAssetServiceTest {
                 "durationMs", durationMs), 3, NOW);
     }
 
+    private Job socialVerticalJob(UUID sourceAssetId, UUID outputAssetId) {
+        return new Job(workspace, JobType.CREATE_SOCIAL_VERTICAL, Map.of(
+                "sourceAssetId", sourceAssetId.toString(),
+                "outputAssetId", outputAssetId.toString()), 3, NOW);
+    }
+
     private MediaAsset readyAsset() {
         MediaAsset asset = asset();
         asset.markImporting(NOW.minusSeconds(1));
@@ -437,6 +533,10 @@ class MediaAssetServiceTest {
     }
 
     private MediaAsset inspectedAsset() {
+        return inspectedAsset(true, true, 1920, 1080);
+    }
+
+    private MediaAsset inspectedAsset(boolean hasVideo, boolean hasAudio, Integer width, Integer height) {
         MediaAsset asset = readyAsset();
         Job inspectionJob = inspectionJob(asset.getId());
         inspectionJob.claim(worker, NOW.minusSeconds(3), NOW.plusSeconds(30));
@@ -445,15 +545,15 @@ class MediaAssetServiceTest {
         asset.markInspecting(NOW.minusSeconds(1));
         asset.markInspected(new MediaInspectionMetadata(
                 12_345L,
-                1920,
-                1080,
-                "h264",
-                "aac",
+                width,
+                height,
+                hasVideo ? "h264" : null,
+                hasAudio ? "aac" : null,
                 "mp4",
                 new BigDecimal("29.970"),
                 800_000L,
-                true,
-                true), NOW);
+                hasVideo,
+                hasAudio), NOW);
         return asset;
     }
 

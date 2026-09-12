@@ -1,11 +1,12 @@
 # workers
 
-Phase 6B includes a standalone Java worker agent in `java-agent/`. It registers
+Phase 6C includes a standalone Java worker agent in `java-agent/`. It registers
 the current machine with the Spring control plane, sends periodic heartbeats,
 polls for work, executes the safe `SYSTEM_TEST` job type, and imports direct
 HTTP/HTTPS media files through `IMPORT_MEDIA`. When FFprobe is available, it
 also inspects stored originals through `INSPECT_MEDIA`. When FFmpeg is
-available, it creates controlled clip derivatives through `CREATE_CLIP`.
+available, it creates controlled clip derivatives through `CREATE_CLIP` and
+fixed 1080x1920 social vertical derivatives through `CREATE_SOCIAL_VERTICAL`.
 
 The agent persists a random installation UUID locally and uses that as the
 machine identifier. It does not use MAC addresses or other hardware IDs.
@@ -44,7 +45,7 @@ The agent loop is:
 2. heartbeat in a dedicated loop
 3. poll `POST /api/worker-agent/jobs/claim`
 4. start and execute a claimed `SYSTEM_TEST`, `IMPORT_MEDIA`, `INSPECT_MEDIA`,
-   or `CREATE_CLIP`
+   `CREATE_CLIP`, or `CREATE_SOCIAL_VERTICAL`
 5. report completion or failure
 
 When no jobs exist, polling backs off using `FDM_WORKER_JOB_POLL_SECONDS`.
@@ -88,7 +89,8 @@ With FFprobe available, the worker:
 `CREATE_CLIP` is enabled only when `ffmpeg -version` succeeds at startup.
 Without FFmpeg, the worker still registers, heartbeats, imports, inspects when
 FFprobe is present, and runs system tests, but it does not advertise
-`CREATE_CLIP` during claim. With FFmpeg available, the worker:
+`CREATE_CLIP` or `CREATE_SOCIAL_VERTICAL` during claim. With FFmpeg available,
+the worker:
 
 1. asks the API for clip authorization
 2. downloads the source asset through a short-lived presigned GET URL
@@ -102,3 +104,19 @@ server-derived storage key before the job runs, so retries target the same
 derived asset instead of creating duplicates. Users cannot supply raw FFmpeg
 arguments; the first encoding profile is H.264 video, AAC audio, MP4 container,
 and timing is interpreted as `[startMs, startMs + durationMs)`.
+
+`CREATE_SOCIAL_VERTICAL` uses the same FFmpeg installation and storage flow,
+but does not accept timing, dimensions, crop coordinates, or raw filter input.
+The API creates one output asset with `derivationType=SOCIAL_VERTICAL`, and the
+worker runs a fixed center-crop filter:
+
+```text
+scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920
+```
+
+The output is MP4/H.264 at exactly 1080x1920. AAC audio is produced when the
+source has audio; video-only sources remain video-only. Audio-only sources are
+rejected by the server because the preset requires video. The source object is
+never modified, retries target the same derived asset/storage key, and the
+normal automatic inspection job verifies the derivative afterward. AI or
+subject-aware reframing is intentionally deferred.

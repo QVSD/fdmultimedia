@@ -4,5 +4,6 @@ public enum JobType {
     SYSTEM_TEST,
     IMPORT_MEDIA,
     INSPECT_MEDIA,
-    CREATE_CLIP
+    CREATE_CLIP,
+    CREATE_SOCIAL_VERTICAL
 }

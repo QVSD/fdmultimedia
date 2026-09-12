@@ -24,6 +24,8 @@ export class Content implements OnInit, OnDestroy {
   protected readonly clipDurations = signal<Record<string, number>>({});
   protected readonly clipBusy = signal<Record<string, boolean>>({});
   protected readonly clipErrors = signal<Record<string, string | null>>({});
+  protected readonly verticalBusy = signal<Record<string, boolean>>({});
+  protected readonly verticalErrors = signal<Record<string, string | null>>({});
 
   private subscription?: Subscription;
 
@@ -117,14 +119,24 @@ export class Content implements OnInit, OnDestroy {
   }
 
   protected lineage(asset: MediaAssetSummary): string {
-    if (asset.derivationType !== 'CLIP' || !asset.parentAssetId) {
+    if (!asset.parentAssetId) {
       return asset.sourceType === 'DERIVED' ? 'Derived asset' : 'Original asset';
+    }
+    if (asset.derivationType === 'SOCIAL_VERTICAL') {
+      return `Vertical of ${asset.parentAssetId.slice(0, 8)}`;
+    }
+    if (asset.derivationType !== 'CLIP') {
+      return `Derived from ${asset.parentAssetId.slice(0, 8)}`;
     }
     return `Clip of ${asset.parentAssetId.slice(0, 8)}`;
   }
 
   protected canCreateClip(asset: MediaAssetSummary): boolean {
     return asset.status === 'READY' && asset.inspectionStatus === 'INSPECTED';
+  }
+
+  protected canCreateSocialVertical(asset: MediaAssetSummary): boolean {
+    return asset.status === 'READY' && asset.inspectionStatus === 'INSPECTED' && asset.hasVideo === true;
   }
 
   protected clipStart(asset: MediaAssetSummary): number {
@@ -161,6 +173,25 @@ export class Content implements OnInit, OnDestroy {
           this.loadState.set('ready');
         },
         error: () => this.clipErrors.update((errors) => ({ ...errors, [asset.id]: 'Clip could not be created.' })),
+      });
+  }
+
+  protected createSocialVertical(asset: MediaAssetSummary): void {
+    this.verticalErrors.update((errors) => ({ ...errors, [asset.id]: null }));
+    if (!this.canCreateSocialVertical(asset)) {
+      this.verticalErrors.update((errors) => ({ ...errors, [asset.id]: 'Asset must be inspected video.' }));
+      return;
+    }
+    this.verticalBusy.update((busy) => ({ ...busy, [asset.id]: true }));
+    this.assetsService
+      .createSocialVertical(asset.id)
+      .pipe(finalize(() => this.verticalBusy.update((busy) => ({ ...busy, [asset.id]: false }))))
+      .subscribe({
+        next: (response) => {
+          this.assets.set([response.asset, ...this.assets().filter((existing) => existing.id !== response.asset.id)]);
+          this.loadState.set('ready');
+        },
+        error: () => this.verticalErrors.update((errors) => ({ ...errors, [asset.id]: 'Vertical preset could not be created.' })),
       });
   }
 }

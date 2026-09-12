@@ -1,6 +1,6 @@
 # Roadmap
 
-The repository is currently at Phase 6B. Completed phases are marked below;
+The repository is currently at Phase 6C. Completed phases are marked below;
 later phases are planned high-level direction and intentionally do not go into
 implementation detail before they are started.
 
@@ -24,12 +24,14 @@ implementation detail before they are started.
    without transforming media. *(complete)*
 7. **Clip derivatives** — users create bounded clips from READY + INSPECTED
    assets; FFmpeg-capable workers produce immutable derived MP4 assets and
-   automatic inspection runs on the result. *(current phase)*
-8. **Capabilities and processing prep** — broaden worker capability matching
+   automatic inspection runs on the result. *(complete)*
+8. **Social vertical preset** — users create immutable 1080x1920 center-cropped
+   derivatives from READY + INSPECTED video assets. *(current phase)*
+9. **Capabilities and processing prep** — broaden worker capability matching
    for future media operations.
-9. **FFmpeg processing** — richer automated video processing pipelines.
-10. **Scheduler / load balancing** — deciding which worker runs which job.
-11. **Social account integrations** — connecting and publishing to external
+10. **FFmpeg processing** — richer automated video processing pipelines.
+11. **Scheduler / load balancing** — deciding which worker runs which job.
+12. **Social account integrations** — connecting and publishing to external
    platforms.
-12. **AI content** — AI-assisted content creation.
-13. **Analytics / revenue** — performance analytics and revenue tracking.
+13. **AI content** — AI-assisted content creation.
+14. **Analytics / revenue** — performance analytics and revenue tracking.

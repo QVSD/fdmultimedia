@@ -31,7 +31,7 @@ public final class WorkerAgent {
         if (ffmpegAvailable) {
             System.err.println("FFmpeg available at " + config.ffmpegPath());
         } else {
-            System.err.println("FFmpeg unavailable; CREATE_CLIP capability disabled");
+            System.err.println("FFmpeg unavailable; CREATE_CLIP and CREATE_SOCIAL_VERTICAL capabilities disabled");
         }
         InspectMediaExecutor inspectMediaExecutor = ffprobeAvailable ? new InspectMediaExecutor(config.ffprobePath()) : null;
         FfmpegClipExecutor clipExecutor = ffmpegAvailable ? new FfmpegClipExecutor(config.ffmpegPath()) : null;
@@ -111,6 +111,8 @@ public final class WorkerAgent {
                 executeInspectMediaJob(client, machineIdentifier, inspectMediaExecutor, job);
             } else if ("CREATE_CLIP".equals(job.type()) && clipExecutor != null) {
                 executeClipJob(client, machineIdentifier, clipExecutor, job);
+            } else if ("CREATE_SOCIAL_VERTICAL".equals(job.type()) && clipExecutor != null) {
+                executeSocialVerticalJob(client, machineIdentifier, clipExecutor, job);
             } else if ("SYSTEM_TEST".equals(job.type())) {
                 Map<String, Object> result = systemTestExecutor.execute(job, workerName);
                 client.complete(job.jobId(), machineIdentifier, result);
@@ -186,6 +188,27 @@ public final class WorkerAgent {
             reportClipFailure(client, machineIdentifier, job, ex.code(), ex.getMessage(), ex.terminal());
         } catch (Exception ex) {
             reportClipFailure(client, machineIdentifier, job, "CREATE_CLIP_FAILED", ex.getMessage(), false);
+        } finally {
+            running.set(false);
+            renewer.interrupt();
+        }
+    }
+
+    private static void executeSocialVerticalJob(
+            WorkerAgentClient client,
+            String machineIdentifier,
+            FfmpegClipExecutor clipExecutor,
+            ClaimedJob job) throws InterruptedException {
+        AtomicBoolean running = new AtomicBoolean(true);
+        Thread renewer = new Thread(() -> leaseRenewLoop(client, machineIdentifier, job, running), "fdm-job-lease-renewer");
+        renewer.setDaemon(true);
+        renewer.start();
+        try {
+            clipExecutor.executeSocialVertical(client, job, machineIdentifier);
+        } catch (ImportFailureException ex) {
+            reportSocialVerticalFailure(client, machineIdentifier, job, ex.code(), ex.getMessage(), ex.terminal());
+        } catch (Exception ex) {
+            reportSocialVerticalFailure(client, machineIdentifier, job, "CREATE_SOCIAL_VERTICAL_FAILED", ex.getMessage(), false);
         } finally {
             running.set(false);
             renewer.interrupt();
@@ -276,6 +299,33 @@ public final class WorkerAgent {
         }
     }
 
+    private static void reportSocialVerticalFailure(
+            WorkerAgentClient client,
+            String machineIdentifier,
+            ClaimedJob job,
+            String code,
+            String message,
+            boolean terminal) {
+        Object sourceAssetId = job.payload().get("sourceAssetId");
+        Object outputAssetId = job.payload().get("outputAssetId");
+        try {
+            if (sourceAssetId == null || outputAssetId == null) {
+                client.fail(job.jobId(), machineIdentifier, code, message, terminal);
+            } else {
+                client.failSocialVertical(
+                        job.jobId(),
+                        machineIdentifier,
+                        java.util.UUID.fromString(String.valueOf(sourceAssetId)),
+                        java.util.UUID.fromString(String.valueOf(outputAssetId)),
+                        code,
+                        message,
+                        terminal);
+            }
+        } catch (Exception reportFailure) {
+            System.err.println("Worker failed to report social vertical failure: " + reportFailure.getMessage());
+        }
+    }
+
     private static List<String> supportedJobTypes(boolean ffprobeAvailable, boolean ffmpegAvailable) {
         List<String> types = new ArrayList<>();
         types.add("SYSTEM_TEST");
@@ -285,6 +335,7 @@ public final class WorkerAgent {
         }
         if (ffmpegAvailable) {
             types.add("CREATE_CLIP");
+            types.add("CREATE_SOCIAL_VERTICAL");
         }
         return List.copyOf(types);
     }

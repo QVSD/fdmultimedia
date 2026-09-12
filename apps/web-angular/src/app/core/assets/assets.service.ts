@@ -24,4 +24,12 @@ export class AssetsService {
       { withCredentials: true },
     );
   }
+
+  createSocialVertical(assetId: string): Observable<CreateClipResponse> {
+    return this.http.post<CreateClipResponse>(
+      `${environment.apiBaseUrl}/assets/${assetId}/social-vertical`,
+      {},
+      { withCredentials: true },
+    );
+  }
 }

@@ -91,4 +91,28 @@ public class WorkerMediaImportController {
             @Valid @RequestBody WorkerClipFailureRequest request) {
         return mediaAssetService.failWorkerClip((WorkerPrincipal) authentication.getPrincipal(), jobId, request);
     }
+
+    @PostMapping("/social-verticals/{jobId}/authorization")
+    public WorkerClipAuthorizationResponse socialVerticalAuthorization(
+            Authentication authentication,
+            @PathVariable UUID jobId,
+            @Valid @RequestBody WorkerImportAuthorizationRequest request) {
+        return mediaAssetService.authorizeWorkerSocialVertical((WorkerPrincipal) authentication.getPrincipal(), jobId, request);
+    }
+
+    @PostMapping("/social-verticals/{jobId}/complete")
+    public MediaAssetSummary completeSocialVertical(
+            Authentication authentication,
+            @PathVariable UUID jobId,
+            @Valid @RequestBody WorkerClipCompletionRequest request) {
+        return mediaAssetService.completeWorkerSocialVertical((WorkerPrincipal) authentication.getPrincipal(), jobId, request);
+    }
+
+    @PostMapping("/social-verticals/{jobId}/fail")
+    public MediaAssetSummary failSocialVertical(
+            Authentication authentication,
+            @PathVariable UUID jobId,
+            @Valid @RequestBody WorkerClipFailureRequest request) {
+        return mediaAssetService.failWorkerSocialVertical((WorkerPrincipal) authentication.getPrincipal(), jobId, request);
+    }
 }

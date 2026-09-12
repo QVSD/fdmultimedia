@@ -1,16 +1,17 @@
 # Architecture
 
-## Phase 6B scope
+## Phase 6C scope
 
-Phase 6B adds controlled FFmpeg clip derivatives on top of the distributed job
+Phase 6C adds a fixed social vertical 9:16 preset on top of the distributed job
 pipeline. Authenticated users can submit direct HTTP/HTTPS media file URLs;
 the control plane creates a `MediaAsset` plus an `IMPORT_MEDIA` job, and a
 worker safely downloads, validates, checksums, uploads, and completes the
 import. Once the asset is READY, the API creates an `INSPECT_MEDIA` job so an
 FFprobe-capable worker can inspect the stored original. READY + INSPECTED
 assets can then be used as immutable sources for `CREATE_CLIP`, which creates
-new derived assets instead of modifying originals. AI, highlight detection,
-publishing, smart scheduling, and social integrations remain out of scope; see
+new clip assets, or `CREATE_SOCIAL_VERTICAL`, which creates 1080x1920
+center-cropped derivatives. AI reframing, highlight detection, publishing,
+smart scheduling, and social integrations remain out of scope; see
 [ROADMAP.md](ROADMAP.md).
 
 ## High-level architecture
@@ -47,7 +48,8 @@ Local Laptop       Cloud Worker
 - **Workers** — interchangeable compute resources (a laptop, a cloud VM,
   anything that can run the worker process). They register, heartbeat, poll
   for jobs, execute `SYSTEM_TEST` and `IMPORT_MEDIA`, optionally execute
-  `INSPECT_MEDIA` when FFprobe is available, and report results.
+  `INSPECT_MEDIA` when FFprobe is available, and FFmpeg derivatives when
+  FFmpeg is available.
 
 ## Request flow
 
@@ -266,6 +268,31 @@ interval is `[startMs, startMs + durationMs)` with normal codec/container
 tolerance after re-encoding. FFmpeg output capture is bounded but drained, temp
 paths are redacted from worker error messages, and temp source/output files are
 deleted on success and failure paths.
+
+Phase 6C adds `CREATE_SOCIAL_VERTICAL` as a second controlled FFmpeg derivative
+using the same job, lease, retry, presigned storage, checksum, and automatic
+inspection flow. The API creates a new output asset with
+`derivation_type=SOCIAL_VERTICAL` and `parent_asset_id` set to the selected
+source. The source can be an original or another derivative; lineage always
+uses the immediate selected parent rather than jumping to the root original.
+
+The preset accepts no user dimensions, crop points, filter expressions, or raw
+FFmpeg arguments. The worker invokes FFmpeg without a shell and uses this fixed
+video filter:
+
+```text
+scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920
+```
+
+That scales the source until the 1080x1920 canvas is covered while preserving
+aspect ratio, then center-crops any excess. It intentionally does not
+letterbox, stretch, track subjects, or use AI reframing. Output is MP4/H.264,
+with AAC audio when the source has audio; video-only input remains valid and
+audio-only input is rejected by the API because the preset requires video.
+The transformation changes geometry only and preserves source duration within
+normal encoding/container tolerance. Standard FFmpeg autorotation behavior is
+relied on for common phone-video rotation metadata; a larger orientation
+subsystem is deferred until there is a real need.
 
 ## An important architectural rule: Robots are not workers
 

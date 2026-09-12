@@ -10,12 +10,13 @@ public record WorkerClipCompletionRequest(
         @NotNull UUID outputAssetId,
         @NotBlank String checksumSha256,
         long fileSizeBytes,
+        String originalFilename,
         String contentType,
         String containerFormat) {
 
     MediaImportMetadata metadata() {
         return new MediaImportMetadata(
-                "clip.mp4",
+                originalFilename == null || originalFilename.isBlank() ? "derivative.mp4" : originalFilename,
                 contentType == null || contentType.isBlank() ? "video/mp4" : contentType,
                 fileSizeBytes,
                 checksumSha256,

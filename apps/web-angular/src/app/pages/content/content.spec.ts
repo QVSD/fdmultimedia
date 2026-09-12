@@ -8,7 +8,7 @@ import { Content } from './content';
 describe('Content', () => {
   let component: Content;
   let fixture: ComponentFixture<Content>;
-  let assetsService: Pick<AssetsService, 'list' | 'importUrl' | 'createClip'>;
+  let assetsService: Pick<AssetsService, 'list' | 'importUrl' | 'createClip' | 'createSocialVertical'>;
 
   beforeEach(async () => {
     assetsService = {
@@ -21,6 +21,7 @@ describe('Content', () => {
       ])),
       importUrl: vi.fn().mockReturnValue(of({ asset: asset('PENDING') })),
       createClip: vi.fn().mockReturnValue(of({ asset: clipAsset() })),
+      createSocialVertical: vi.fn().mockReturnValue(of({ asset: verticalAsset() })),
     };
 
     await TestBed.configureTestingModule({
@@ -52,6 +53,7 @@ describe('Content', () => {
     expect(text).toContain('h264 / aac');
     expect(text).toContain('Inspected');
     expect(text).toContain('Create Clip');
+    expect(text).toContain('Make 9:16');
     expect(text).toContain('UNSUPPORTED_MEDIA');
   });
 
@@ -136,6 +138,17 @@ describe('Content', () => {
     expect(component['assets']()[0].derivationType).toBe('CLIP');
   });
 
+  it('creates a social vertical derivative for an inspected ready video asset', () => {
+    fixture.detectChanges();
+    const ready = component['assets']().find((item) => item.status === 'READY')!;
+
+    component['createSocialVertical'](ready);
+
+    expect(assetsService.createSocialVertical).toHaveBeenCalledWith(ready.id);
+    expect(component['assets']()[0].derivationType).toBe('SOCIAL_VERTICAL');
+    expect(component['lineage'](component['assets']()[0])).toBe('Vertical of READY-as');
+  });
+
   function asset(status: MediaAssetStatus): MediaAssetSummary {
     return {
       id: `${status}-asset`,
@@ -182,6 +195,19 @@ describe('Content', () => {
       derivationType: 'CLIP',
       importJobId: null,
       processingJobId: 'clip-job',
+    };
+  }
+
+  function verticalAsset(): MediaAssetSummary {
+    return {
+      ...asset('PROCESSING'),
+      id: 'vertical-asset',
+      sourceType: 'DERIVED',
+      sourceUrl: 'asset:READY-asset',
+      parentAssetId: 'READY-asset',
+      derivationType: 'SOCIAL_VERTICAL',
+      importJobId: null,
+      processingJobId: 'vertical-job',
     };
   }
 });

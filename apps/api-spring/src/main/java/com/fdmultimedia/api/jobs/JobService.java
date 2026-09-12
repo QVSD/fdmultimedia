@@ -189,7 +189,7 @@ public class JobService {
                     job.recoverExpiredLease(now);
                     reconcileRecoveredImportAsset(job, now);
                     reconcileRecoveredInspectionAsset(job, now);
-                    reconcileRecoveredClipAsset(job, now);
+                    reconcileRecoveredProcessingAsset(job, now);
                 });
     }
 
@@ -224,8 +224,8 @@ public class JobService {
         });
     }
 
-    private void reconcileRecoveredClipAsset(Job job, Instant now) {
-        if (job.getType() != JobType.CREATE_CLIP) {
+    private void reconcileRecoveredProcessingAsset(Job job, Instant now) {
+        if (job.getType() != JobType.CREATE_CLIP && job.getType() != JobType.CREATE_SOCIAL_VERTICAL) {
             return;
         }
         assets.findByProcessingJobId(job.getId()).ifPresent(asset -> {
@@ -291,6 +291,9 @@ public class JobService {
         if (type == JobType.CREATE_CLIP) {
             return validateCreateClipPayload(payload);
         }
+        if (type == JobType.CREATE_SOCIAL_VERTICAL) {
+            return validateDerivativePayload(payload);
+        }
         if (type != JobType.SYSTEM_TEST) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unsupported job type");
         }
@@ -343,6 +346,15 @@ public class JobService {
         normalized.put("outputAssetId", outputAssetId);
         normalized.put("startMs", startMs);
         normalized.put("durationMs", durationMs);
+        return normalized;
+    }
+
+    private Map<String, Object> validateDerivativePayload(Map<String, Object> payload) {
+        String sourceAssetId = uuidString(payload.get("sourceAssetId"), "sourceAssetId");
+        String outputAssetId = uuidString(payload.get("outputAssetId"), "outputAssetId");
+        Map<String, Object> normalized = new LinkedHashMap<>();
+        normalized.put("sourceAssetId", sourceAssetId);
+        normalized.put("outputAssetId", outputAssetId);
         return normalized;
     }
 

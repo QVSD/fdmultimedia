@@ -55,4 +55,11 @@ public class MediaAssetController {
             @Valid @RequestBody CreateClipRequest request) {
         return mediaAssetService.createClip(principal, assetId, request);
     }
+
+    @PostMapping("/{assetId}/social-vertical")
+    public CreateClipResponse createSocialVertical(
+            @AuthenticationPrincipal AuthenticatedUser principal,
+            @PathVariable UUID assetId) {
+        return mediaAssetService.createSocialVertical(principal, assetId);
+    }
 }

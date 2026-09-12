@@ -10,8 +10,8 @@
   `INSPECT_MEDIA` jobs. Install it with FFmpeg and set `FFPROBE_PATH` when the
   executable is not on `PATH`.
 - FFmpeg — optional for import/inspection-only development, required for
-  workers to claim `CREATE_CLIP` jobs. Set `FFMPEG_PATH` when the executable is
-  not on `PATH`.
+  workers to claim `CREATE_CLIP` and `CREATE_SOCIAL_VERTICAL` jobs. Set
+  `FFMPEG_PATH` when the executable is not on `PATH`.
 
 ## Running everything
 
@@ -164,14 +164,16 @@ Useful worker environment variables:
 - `FFPROBE_PATH` — FFprobe executable path, default `ffprobe`.
 - `FFMPEG_PATH` — FFmpeg executable path, default `ffmpeg`.
 
-The Phase 6B worker registers, heartbeats, polls for a job, starts it, executes
-`SYSTEM_TEST`, `IMPORT_MEDIA`, `INSPECT_MEDIA`, or `CREATE_CLIP`, renews active
+The Phase 6C worker registers, heartbeats, polls for a job, starts it, executes
+`SYSTEM_TEST`, `IMPORT_MEDIA`, `INSPECT_MEDIA`, `CREATE_CLIP`, or
+`CREATE_SOCIAL_VERTICAL`, renews active
 media-job leases, and reports success or failure. `SYSTEM_TEST` is limited to a
 bounded message and sleep duration; `IMPORT_MEDIA` is limited to direct
 HTTP/HTTPS media-file ingestion; `INSPECT_MEDIA` is limited to read-only
 FFprobe metadata inspection of already stored originals; `CREATE_CLIP` is
-limited to controlled FFmpeg MP4 clip creation from a stored source asset. The
-worker does not execute arbitrary commands.
+limited to controlled FFmpeg MP4 clip creation from a stored source asset; and
+`CREATE_SOCIAL_VERTICAL` is limited to the fixed 1080x1920 center-crop preset.
+The worker does not execute arbitrary commands.
 
 For media imports, the worker validates the URL, follows only bounded
 revalidated redirects, streams to a temporary file with size and timeout
@@ -238,3 +240,21 @@ Manual clip derivative check:
    the derived asset.
 6. Confirm the derived asset becomes `INSPECTED` and its duration is close to
    the requested interval.
+
+Manual social vertical preset check:
+
+1. Install FFmpeg and FFprobe, or set `$env:FFMPEG_PATH` / `$env:FFPROBE_PATH`
+   before starting the worker.
+2. Import and inspect a small landscape media file, for example 640x360 with
+   H.264 video and AAC audio.
+3. On the READY + INSPECTED source, click **Make 9:16** in Content.
+4. Confirm the output asset is a `SOCIAL_VERTICAL` derivative of the selected
+   source and the source checksum/size remain unchanged.
+5. Confirm `CREATE_SOCIAL_VERTICAL` reaches `SUCCEEDED`, the derived object is
+   stored under its own asset ID in the private bucket, and automatic
+   `INSPECT_MEDIA` runs.
+6. Download through `GET /api/assets/{id}/download-url` and inspect with
+   FFprobe; the output should be MP4/H.264, 1080x1920, AAC when source audio
+   exists, and approximately the same duration as the source.
+7. Direct bucket access should remain forbidden. The preset is deterministic
+   center crop only; subject-aware reframing is intentionally not implemented.

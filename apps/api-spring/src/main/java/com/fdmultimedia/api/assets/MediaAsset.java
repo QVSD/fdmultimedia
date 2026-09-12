@@ -149,6 +149,19 @@ public class MediaAsset {
     }
 
     public static MediaAsset clipDerivative(Workspace workspace, AppUser createdByUser, MediaAsset parent, Instant now) {
+        return derivative(workspace, createdByUser, parent, MediaDerivationType.CLIP, now);
+    }
+
+    public static MediaAsset socialVerticalDerivative(Workspace workspace, AppUser createdByUser, MediaAsset parent, Instant now) {
+        return derivative(workspace, createdByUser, parent, MediaDerivationType.SOCIAL_VERTICAL, now);
+    }
+
+    private static MediaAsset derivative(
+            Workspace workspace,
+            AppUser createdByUser,
+            MediaAsset parent,
+            MediaDerivationType derivationType,
+            Instant now) {
         MediaAsset asset = new MediaAsset();
         asset.id = UUID.randomUUID();
         asset.workspace = workspace;
@@ -156,7 +169,7 @@ public class MediaAsset {
         asset.sourceType = MediaAssetSourceType.DERIVED;
         asset.sourceUrl = "asset:" + parent.getId();
         asset.parentAsset = parent;
-        asset.derivationType = MediaDerivationType.CLIP;
+        asset.derivationType = derivationType;
         asset.status = MediaAssetStatus.PENDING;
         asset.createdAt = now;
         asset.updatedAt = now;
@@ -194,8 +207,8 @@ public class MediaAsset {
     }
 
     public void attachProcessingJob(Job job, Instant now) {
-        if (derivationType != MediaDerivationType.CLIP) {
-            throw new IllegalStateException("Only clip derivatives can be processed");
+        if (derivationType != MediaDerivationType.CLIP && derivationType != MediaDerivationType.SOCIAL_VERTICAL) {
+            throw new IllegalStateException("Only derivatives can be processed");
         }
         this.processingJob = job;
         this.updatedAt = now;

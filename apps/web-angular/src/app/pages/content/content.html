@@ -49,6 +49,7 @@
                 <th scope="col">Codecs</th>
                 <th scope="col">Inspection</th>
                 <th scope="col">Clip</th>
+                <th scope="col">Vertical</th>
                 <th scope="col">Created</th>
               </tr>
             </thead>
@@ -109,6 +110,18 @@
                       </form>
                       @if (clipErrors()[asset.id]) {
                         <span class="content__error">{{ clipErrors()[asset.id] }}</span>
+                      }
+                    } @else {
+                      <span>-</span>
+                    }
+                  </td>
+                  <td>
+                    @if (canCreateSocialVertical(asset)) {
+                      <button type="button" (click)="createSocialVertical(asset)" [disabled]="verticalBusy()[asset.id]">
+                        {{ verticalBusy()[asset.id] ? 'Creating...' : 'Make 9:16' }}
+                      </button>
+                      @if (verticalErrors()[asset.id]) {
+                        <span class="content__error">{{ verticalErrors()[asset.id] }}</span>
                       }
                     } @else {
                       <span>-</span>

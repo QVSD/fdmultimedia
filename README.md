@@ -5,9 +5,9 @@ social-media content workflows, video processing workers running across
 multiple laptops/cloud machines, scheduling, AI-assisted content creation,
 publishing, analytics, and revenue tracking.
 
-## Phase 6B scope
+## Phase 6C scope
 
-This repository is currently at **Phase 6B: FFmpeg clip derivatives**. That means:
+This repository is currently at **Phase 6C: social vertical preset**. That means:
 
 - A clean monorepo layout (`apps/`, `workers/`, `infra/`, `docs/`).
 - A Spring Boot 21 modular monolith (`apps/api-spring`) with the package
@@ -17,8 +17,8 @@ This repository is currently at **Phase 6B: FFmpeg clip derivatives**. That mean
   roles. Future business resources can be scoped to `workspace_id`.
 - Worker credentials, worker registration, heartbeat tracking, and a
   workspace-scoped Compute page. Worker status is derived from heartbeat age.
-- Centrally-created `SYSTEM_TEST`, `IMPORT_MEDIA`, `INSPECT_MEDIA`, and
-  `CREATE_CLIP` jobs
+- Centrally-created `SYSTEM_TEST`, `IMPORT_MEDIA`, `INSPECT_MEDIA`,
+  `CREATE_CLIP`, and `CREATE_SOCIAL_VERTICAL` jobs
   with PostgreSQL-backed durable state, atomic worker claiming, leases,
   bounded retry, and result/error tracking.
 - A standalone Java 21 worker agent in `workers/java-agent` that persists a
@@ -26,12 +26,13 @@ This repository is currently at **Phase 6B: FFmpeg clip derivatives**. That mean
   heartbeats, polls for work, renews long-running leases, executes safe
   `SYSTEM_TEST` jobs, imports direct HTTP/HTTPS media files, inspects stored
   originals read-only when FFprobe is available, and creates controlled clip
-  derivatives when FFmpeg is available.
+  and 9:16 social vertical derivatives when FFmpeg is available.
 - Media assets backed by private S3-compatible object storage. Local
   development uses MinIO with a private `media-assets` bucket.
 - An Angular application (`apps/web-angular`) with a login page, protected
   dashboard routes, a sidebar shell, a Compute page, a Jobs page, and a
-  functional Content page for direct media imports and simple clip creation.
+  functional Content page for direct media imports, simple clip creation, and
+  a fixed vertical 9:16 preset.
 - Nginx as the single entry point, routing `/api/*` to the backend and
   everything else to the frontend.
 - Docker Compose to run the whole stack locally.
@@ -156,7 +157,7 @@ the same environment variables with `$env:FDM_API_BASE_URL` and
 if `ffprobe` is not on `PATH`; set `$env:FFMPEG_PATH` if `ffmpeg` is not on
 `PATH`. Without FFprobe the worker still registers and imports media, but it
 does not advertise `INSPECT_MEDIA`. Without FFmpeg it does not advertise
-`CREATE_CLIP`.
+`CREATE_CLIP` or `CREATE_SOCIAL_VERTICAL`.
 
 ## Jobs, media assets, and distributed execution
 
@@ -263,6 +264,28 @@ marks the derived asset `READY`, then automatically creates `INSPECT_MEDIA` so
 the derivative can become `INSPECTED`. FFmpeg uses H.264 video, AAC audio, MP4
 container, `-ss` after `-i` for more accurate first-pass timing, and controlled
 arguments only; users cannot submit raw FFmpeg options.
+
+Phase 6C adds `CREATE_SOCIAL_VERTICAL`, the first fixed social-media transform
+preset. A user can choose any `READY` + `INSPECTED` asset that contains video
+and request `SOCIAL_VERTICAL`. The selected asset is the immediate parent, so
+both `ORIGINAL -> SOCIAL_VERTICAL` and `ORIGINAL -> CLIP -> SOCIAL_VERTICAL`
+lineage are valid. The source object remains immutable.
+
+The server creates a new derived `MediaAsset` with
+`derivationType=SOCIAL_VERTICAL`, queues a `CREATE_SOCIAL_VERTICAL` job, and
+uses the same private presigned GET/PUT storage flow as clips. FFmpeg-capable
+workers use a fixed, internally constructed center-crop filter:
+
+```text
+scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920
+```
+
+The output is MP4, exactly 1080x1920, H.264 video, and AAC audio when the
+source has audio. Video-only sources produce valid video-only MP4s. The preset
+preserves timeline duration within normal encoding/container tolerance, does
+not letterbox, does not stretch, and does not use subject-aware or AI reframing
+yet. The derivative becomes `READY`, then the existing automatic
+`INSPECT_MEDIA` chain verifies the stored output.
 
 MinIO console is exposed for local development at **http://localhost:9001** (or
 `MINIO_CONSOLE_PORT`) using `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` from
