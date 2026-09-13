@@ -1,6 +1,7 @@
 export type MediaAssetStatus = 'PENDING' | 'IMPORTING' | 'PROCESSING' | 'READY' | 'FAILED';
 export type MediaInspectionStatus = 'NOT_REQUESTED' | 'PENDING' | 'INSPECTING' | 'INSPECTED' | 'FAILED';
 export type MediaDerivationType = 'ORIGINAL' | 'CLIP' | 'SOCIAL_VERTICAL';
+export type HighlightAnalysisStatus = 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED';
 
 export interface MediaAssetSummary {
   id: string;
@@ -42,4 +43,32 @@ export interface MediaImportResponse {
 
 export interface CreateClipResponse {
   asset: MediaAssetSummary;
+}
+
+export interface HighlightCandidateSummary {
+  id: string;
+  analysisId: string;
+  assetId: string;
+  startMs: number;
+  endMs: number;
+  durationMs: number;
+  score: number;
+  reason: string;
+  rank: number;
+  createdAt: string;
+}
+
+export interface HighlightAnalysisSummary {
+  id: string;
+  assetId: string;
+  status: HighlightAnalysisStatus;
+  analysisJobId: string;
+  analyzerType: string;
+  analyzerVersion: string;
+  errorCode: string | null;
+  errorMessage: string | null;
+  createdAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+  candidates: HighlightCandidateSummary[];
 }

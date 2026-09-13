@@ -2,13 +2,22 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { of, throwError } from 'rxjs';
 
 import { AssetsService } from '../../core/assets/assets.service';
-import { MediaAssetSummary, MediaAssetStatus } from '../../core/assets/asset.models';
+import { HighlightAnalysisSummary, MediaAssetSummary, MediaAssetStatus } from '../../core/assets/asset.models';
 import { Content } from './content';
 
 describe('Content', () => {
   let component: Content;
   let fixture: ComponentFixture<Content>;
-  let assetsService: Pick<AssetsService, 'list' | 'importUrl' | 'createClip' | 'createSocialVertical'>;
+  let assetsService: Pick<
+    AssetsService,
+    | 'list'
+    | 'importUrl'
+    | 'createClip'
+    | 'createSocialVertical'
+    | 'createHighlightAnalysis'
+    | 'listHighlightAnalyses'
+    | 'createClipFromHighlightCandidate'
+  >;
 
   beforeEach(async () => {
     assetsService = {
@@ -22,6 +31,9 @@ describe('Content', () => {
       importUrl: vi.fn().mockReturnValue(of({ asset: asset('PENDING') })),
       createClip: vi.fn().mockReturnValue(of({ asset: clipAsset() })),
       createSocialVertical: vi.fn().mockReturnValue(of({ asset: verticalAsset() })),
+      createHighlightAnalysis: vi.fn().mockReturnValue(of(analysis('PENDING'))),
+      listHighlightAnalyses: vi.fn().mockReturnValue(of([analysis('SUCCEEDED')])),
+      createClipFromHighlightCandidate: vi.fn().mockReturnValue(of({ asset: clipAsset() })),
     };
 
     await TestBed.configureTestingModule({
@@ -54,6 +66,9 @@ describe('Content', () => {
     expect(text).toContain('Inspected');
     expect(text).toContain('Create Clip');
     expect(text).toContain('Make 9:16');
+    expect(text).toContain('Find Highlights');
+    expect(text).toContain('Analyzer: DETERMINISTIC_V1');
+    expect(text).toContain('Deterministic Phase 7A candidate');
     expect(text).toContain('UNSUPPORTED_MEDIA');
   });
 
@@ -149,6 +164,28 @@ describe('Content', () => {
     expect(component['lineage'](component['assets']()[0])).toBe('Vertical of READY-as');
   });
 
+  it('starts highlight analysis for an eligible asset', () => {
+    fixture.detectChanges();
+    const ready = component['assets']().find((item) => item.status === 'READY')!;
+
+    component['findHighlights'](ready);
+
+    expect(assetsService.createHighlightAnalysis).toHaveBeenCalledWith(ready.id);
+    expect(component['highlightAnalysis'](ready)?.status).toBe('PENDING');
+  });
+
+  it('creates a clip from a highlight candidate', () => {
+    fixture.detectChanges();
+    const ready = component['assets']().find((item) => item.status === 'READY')!;
+    const candidate = analysis('SUCCEEDED').candidates[0];
+
+    component['createClipFromCandidate'](candidate);
+
+    expect(assetsService.createClipFromHighlightCandidate).toHaveBeenCalledWith(candidate.id);
+    expect(component['assets']()[0].derivationType).toBe('CLIP');
+    expect(component['highlightAnalysis'](ready)?.candidates[0].rank).toBe(1);
+  });
+
   function asset(status: MediaAssetStatus): MediaAssetSummary {
     return {
       id: `${status}-asset`,
@@ -208,6 +245,38 @@ describe('Content', () => {
       derivationType: 'SOCIAL_VERTICAL',
       importJobId: null,
       processingJobId: 'vertical-job',
+    };
+  }
+
+  function analysis(status: HighlightAnalysisSummary['status']): HighlightAnalysisSummary {
+    return {
+      id: 'analysis-1',
+      assetId: 'READY-asset',
+      status,
+      analysisJobId: 'analysis-job',
+      analyzerType: 'DETERMINISTIC_V1',
+      analyzerVersion: '1',
+      errorCode: status === 'FAILED' ? 'ANALYSIS_FAILED' : null,
+      errorMessage: status === 'FAILED' ? 'Highlight analysis failed' : null,
+      createdAt: '2026-09-10T08:01:00Z',
+      updatedAt: '2026-09-10T08:01:10Z',
+      completedAt: status === 'SUCCEEDED' ? '2026-09-10T08:01:10Z' : null,
+      candidates: status === 'SUCCEEDED'
+        ? [
+            {
+              id: 'candidate-1',
+              analysisId: 'analysis-1',
+              assetId: 'READY-asset',
+              startMs: 1000,
+              endMs: 6000,
+              durationMs: 5000,
+              score: 0.82,
+              reason: 'Deterministic Phase 7A candidate',
+              rank: 1,
+              createdAt: '2026-09-10T08:01:10Z',
+            },
+          ]
+        : [],
     };
   }
 });

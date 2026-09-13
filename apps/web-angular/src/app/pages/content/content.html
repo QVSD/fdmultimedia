@@ -48,6 +48,7 @@
                 <th scope="col">Resolution</th>
                 <th scope="col">Codecs</th>
                 <th scope="col">Inspection</th>
+                <th scope="col">Highlights</th>
                 <th scope="col">Clip</th>
                 <th scope="col">Vertical</th>
                 <th scope="col">Created</th>
@@ -78,6 +79,47 @@
                     <span>{{ inspectionLabel(asset) }}</span>
                     @if (asset.inspectionErrorMessage) {
                       <span class="content__error">{{ asset.inspectionErrorCode }}: {{ asset.inspectionErrorMessage }}</span>
+                    }
+                  </td>
+                  <td>
+                    @if (canAnalyzeHighlights(asset)) {
+                      <button type="button" (click)="findHighlights(asset)" [disabled]="highlightBusy()[asset.id]">
+                        {{ highlightBusy()[asset.id] ? 'Starting...' : 'Find Highlights' }}
+                      </button>
+                      @if (highlightErrors()[asset.id]) {
+                        <span class="content__error">{{ highlightErrors()[asset.id] }}</span>
+                      }
+                      @if (highlightAnalysis(asset); as analysis) {
+                        <div class="content__highlights">
+                          <span>{{ analysisLabel(analysis) }}</span>
+                          <span>Analyzer: {{ analysis.analyzerType }}</span>
+                          @if (analysis.errorMessage) {
+                            <span class="content__error">{{ analysis.errorCode }}: {{ analysis.errorMessage }}</span>
+                          }
+                          @if (analysis.status === 'SUCCEEDED' && analysis.candidates.length === 0) {
+                            <span>No candidates found.</span>
+                          }
+                          @for (candidate of analysis.candidates; track candidate.id) {
+                            <div class="content__candidate">
+                              <strong>#{{ candidate.rank }} {{ timeMs(candidate.startMs) }}-{{ timeMs(candidate.endMs) }}</strong>
+                              <span>{{ timeMs(candidate.durationMs) }} · {{ score(candidate.score) }}</span>
+                              <span>{{ candidate.reason }}</span>
+                              <button
+                                type="button"
+                                (click)="createClipFromCandidate(candidate)"
+                                [disabled]="candidateClipBusy()[candidate.id]"
+                              >
+                                {{ candidateClipBusy()[candidate.id] ? 'Creating...' : 'Create Clip' }}
+                              </button>
+                              @if (candidateClipErrors()[candidate.id]) {
+                                <span class="content__error">{{ candidateClipErrors()[candidate.id] }}</span>
+                              }
+                            </div>
+                          }
+                        </div>
+                      }
+                    } @else {
+                      <span>-</span>
                     }
                   </td>
                   <td>

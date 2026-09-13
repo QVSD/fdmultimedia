@@ -1,8 +1,8 @@
 # Architecture
 
-## Phase 6C scope
+## Phase 7A scope
 
-Phase 6C adds a fixed social vertical 9:16 preset on top of the distributed job
+Phase 7A adds persisted highlight candidates on top of the distributed job
 pipeline. Authenticated users can submit direct HTTP/HTTPS media file URLs;
 the control plane creates a `MediaAsset` plus an `IMPORT_MEDIA` job, and a
 worker safely downloads, validates, checksums, uploads, and completes the
@@ -10,8 +10,10 @@ import. Once the asset is READY, the API creates an `INSPECT_MEDIA` job so an
 FFprobe-capable worker can inspect the stored original. READY + INSPECTED
 assets can then be used as immutable sources for `CREATE_CLIP`, which creates
 new clip assets, or `CREATE_SOCIAL_VERTICAL`, which creates 1080x1920
-center-cropped derivatives. AI reframing, highlight detection, publishing,
-smart scheduling, and social integrations remain out of scope; see
+center-cropped derivatives. Phase 7A can also create `ANALYZE_HIGHLIGHTS`
+jobs that persist structured candidate intervals. The current analyzer is
+deterministic and local only; AI/provider integration, publishing, smart
+scheduling, and social integrations remain out of scope; see
 [ROADMAP.md](ROADMAP.md).
 
 ## High-level architecture
@@ -48,8 +50,8 @@ Local Laptop       Cloud Worker
 - **Workers** — interchangeable compute resources (a laptop, a cloud VM,
   anything that can run the worker process). They register, heartbeat, poll
   for jobs, execute `SYSTEM_TEST` and `IMPORT_MEDIA`, optionally execute
-  `INSPECT_MEDIA` when FFprobe is available, and FFmpeg derivatives when
-  FFmpeg is available.
+  `INSPECT_MEDIA` when FFprobe is available, FFmpeg derivatives when FFmpeg is
+  available, and deterministic highlight analysis.
 
 ## Request flow
 
@@ -135,10 +137,11 @@ is built, its code lands in the matching package with a clear boundary.
 ## Job lifecycle and worker protocol
 
 Jobs are persisted in PostgreSQL with JSONB `payload` and `result` fields.
-`SYSTEM_TEST` accepts a bounded message and duration. `IMPORT_MEDIA` and
-`INSPECT_MEDIA` accept only an `assetId` reference; source URL, storage state,
-and inspection metadata live on the `MediaAsset`. No job type executes shell
-commands or arbitrary code.
+`SYSTEM_TEST` accepts a bounded message and duration. `IMPORT_MEDIA`,
+`INSPECT_MEDIA`, and `ANALYZE_HIGHLIGHTS` accept only an `assetId` reference;
+source URL, storage state, inspection metadata, and highlight candidates live
+in their own domain tables. No job type executes shell commands or arbitrary
+code.
 
 Allowed state transitions:
 
@@ -293,6 +296,39 @@ The transformation changes geometry only and preserves source duration within
 normal encoding/container tolerance. Standard FFmpeg autorotation behavior is
 relied on for common phone-video rotation metadata; a larger orientation
 subsystem is deferred until there is a real need.
+
+## Highlight analysis and candidates
+
+Phase 7A introduces `HighlightAnalysis` and `HighlightCandidate` as persisted
+domain concepts. An analysis belongs to one workspace and one inspected video
+asset, owns exactly one `ANALYZE_HIGHLIGHTS` job, and moves through:
+
+- `PENDING` when the browser requests analysis.
+- `RUNNING` when an assigned worker requests authorization.
+- `SUCCEEDED` when validated candidates are persisted atomically.
+- `FAILED` when terminal failure or exhausted retries occur.
+
+Candidates belong to an analysis and asset. They store `startMs`, `endMs`,
+`score`, `reason`, deterministic `rank`, and `createdAt`. A candidate is a
+recommendation only; it does not create or store media. When a user chooses a
+candidate, `POST /api/highlight-candidates/{id}/create-clip` converts
+`startMs` and `endMs - startMs` into the existing `CREATE_CLIP` service path.
+
+The Phase 7A analyzer abstraction is intentionally small:
+`HighlightAnalyzer.analyze(input) -> HighlightAnalysisResult`. The Java worker
+ships `DeterministicHighlightAnalyzer`, identified as `DETERMINISTIC_V1`,
+which proposes up to three intervals around fixed timeline percentages using
+only authorized asset duration metadata. It does not download media, call AI
+providers, transcribe audio, run vision models, or construct FFmpeg arguments.
+
+The backend treats worker/analyzer output as untrusted because later phases may
+replace the deterministic analyzer with an AI/provider implementation. It
+validates candidate count, interval bounds, duration limits, score range,
+reason length, workspace/job/asset ownership, legal job state, and stale worker
+ownership before replacing candidate rows and completing the job. Ranking is
+server-side: score descending with deterministic start/end/reason tie-breaks.
+Expired analysis leases are reconciled with the analysis domain state in the
+same lazy recovery path as imports, inspections, clips, and vertical presets.
 
 ## An important architectural rule: Robots are not workers
 

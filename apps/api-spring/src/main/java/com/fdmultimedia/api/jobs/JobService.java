@@ -5,6 +5,8 @@ import com.fdmultimedia.api.auth.security.AuthenticatedUser;
 import com.fdmultimedia.api.assets.MediaAsset;
 import com.fdmultimedia.api.assets.MediaAssetRepository;
 import com.fdmultimedia.api.assets.MediaAssetStatus;
+import com.fdmultimedia.api.highlights.HighlightAnalysisRepository;
+import com.fdmultimedia.api.highlights.HighlightAnalysisStatus;
 import com.fdmultimedia.api.workers.Worker;
 import com.fdmultimedia.api.workers.WorkerCredential;
 import com.fdmultimedia.api.workers.WorkerCredentialRepository;
@@ -32,6 +34,7 @@ public class JobService {
     private final AuthService authService;
     private final JobRepository jobs;
     private final MediaAssetRepository assets;
+    private final HighlightAnalysisRepository highlightAnalyses;
     private final WorkerRepository workers;
     private final WorkerCredentialRepository credentials;
     private final WorkerStatusService workerStatusService;
@@ -42,6 +45,7 @@ public class JobService {
             AuthService authService,
             JobRepository jobs,
             MediaAssetRepository assets,
+            HighlightAnalysisRepository highlightAnalyses,
             WorkerRepository workers,
             WorkerCredentialRepository credentials,
             WorkerStatusService workerStatusService,
@@ -50,6 +54,7 @@ public class JobService {
         this.authService = authService;
         this.jobs = jobs;
         this.assets = assets;
+        this.highlightAnalyses = highlightAnalyses;
         this.workers = workers;
         this.credentials = credentials;
         this.workerStatusService = workerStatusService;
@@ -190,6 +195,7 @@ public class JobService {
                     reconcileRecoveredImportAsset(job, now);
                     reconcileRecoveredInspectionAsset(job, now);
                     reconcileRecoveredProcessingAsset(job, now);
+                    reconcileRecoveredHighlightAnalysis(job, now);
                 });
     }
 
@@ -236,6 +242,22 @@ public class JobService {
                 asset.markFailed(job.getErrorCode(), job.getErrorMessage(), now);
             } else if (job.getStatus() == JobStatus.QUEUED) {
                 asset.markProcessingPendingForRetry(now);
+            }
+        });
+    }
+
+    private void reconcileRecoveredHighlightAnalysis(Job job, Instant now) {
+        if (job.getType() != JobType.ANALYZE_HIGHLIGHTS) {
+            return;
+        }
+        highlightAnalyses.findByAnalysisJobId(job.getId()).ifPresent(analysis -> {
+            if (analysis.getStatus() == HighlightAnalysisStatus.SUCCEEDED || analysis.getStatus() == HighlightAnalysisStatus.FAILED) {
+                return;
+            }
+            if (job.getStatus() == JobStatus.FAILED) {
+                analysis.markFailed(job.getErrorCode(), job.getErrorMessage(), now);
+            } else if (job.getStatus() == JobStatus.QUEUED) {
+                analysis.markPendingForRetry(now);
             }
         });
     }
@@ -293,6 +315,9 @@ public class JobService {
         }
         if (type == JobType.CREATE_SOCIAL_VERTICAL) {
             return validateDerivativePayload(payload);
+        }
+        if (type == JobType.ANALYZE_HIGHLIGHTS) {
+            return validateAssetReferencePayload(payload);
         }
         if (type != JobType.SYSTEM_TEST) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unsupported job type");

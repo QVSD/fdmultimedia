@@ -5,9 +5,9 @@ social-media content workflows, video processing workers running across
 multiple laptops/cloud machines, scheduling, AI-assisted content creation,
 publishing, analytics, and revenue tracking.
 
-## Phase 6C scope
+## Phase 7A scope
 
-This repository is currently at **Phase 6C: social vertical preset**. That means:
+This repository is currently at **Phase 7A: highlight candidates**. That means:
 
 - A clean monorepo layout (`apps/`, `workers/`, `infra/`, `docs/`).
 - A Spring Boot 21 modular monolith (`apps/api-spring`) with the package
@@ -18,7 +18,7 @@ This repository is currently at **Phase 6C: social vertical preset**. That means
 - Worker credentials, worker registration, heartbeat tracking, and a
   workspace-scoped Compute page. Worker status is derived from heartbeat age.
 - Centrally-created `SYSTEM_TEST`, `IMPORT_MEDIA`, `INSPECT_MEDIA`,
-  `CREATE_CLIP`, and `CREATE_SOCIAL_VERTICAL` jobs
+  `CREATE_CLIP`, `CREATE_SOCIAL_VERTICAL`, and `ANALYZE_HIGHLIGHTS` jobs
   with PostgreSQL-backed durable state, atomic worker claiming, leases,
   bounded retry, and result/error tracking.
 - A standalone Java 21 worker agent in `workers/java-agent` that persists a
@@ -33,6 +33,11 @@ This repository is currently at **Phase 6C: social vertical preset**. That means
   dashboard routes, a sidebar shell, a Compute page, a Jobs page, and a
   functional Content page for direct media imports, simple clip creation, and
   a fixed vertical 9:16 preset.
+- Persisted highlight analyses and candidate recommendations. Phase 7A uses a
+  deterministic local analyzer (`DETERMINISTIC_V1`) only; it does not call
+  OpenAI, Anthropic, Gemini, a local LLM, transcription, or vision models.
+  Users can review candidates and explicitly create clips through the existing
+  `CREATE_CLIP` pipeline.
 - Nginx as the single entry point, routing `/api/*` to the backend and
   everything else to the frontend.
 - Docker Compose to run the whole stack locally.
@@ -290,6 +295,21 @@ yet. The derivative becomes `READY`, then the existing automatic
 MinIO console is exposed for local development at **http://localhost:9001** (or
 `MINIO_CONSOLE_PORT`) using `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` from
 `.env`.
+
+Phase 7A adds `ANALYZE_HIGHLIGHTS`. A READY + INSPECTED video asset with known
+duration can be analyzed from the Content page. The API creates a
+`HighlightAnalysis` row in `PENDING`, queues one `ANALYZE_HIGHLIGHTS` job, and
+the worker completes it using a deterministic analyzer that proposes bounded
+candidate intervals around fixed timeline positions. Candidates are persisted
+as first-class `HighlightCandidate` rows with start/end, score, reason, and
+rank.
+
+The analyzer output is treated as untrusted by the backend. The server enforces
+workspace scope, asset readiness, `hasVideo`, known duration, max candidate
+count, candidate duration limits, score range, reason length, and deterministic
+rank ordering. A candidate is only a recommendation; no media is generated
+until a user clicks **Create Clip**, which reuses the existing clip API and
+therefore the same FFmpeg, storage, retry, inspection, and lineage flow.
 
 ## RabbitMQ management UI
 

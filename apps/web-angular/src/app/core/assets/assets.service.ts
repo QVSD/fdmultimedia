@@ -3,7 +3,7 @@ import { Injectable } from '@angular/core';
 import { Observable } from 'rxjs';
 
 import { environment } from '../../../environments/environment';
-import { CreateClipResponse, MediaAssetSummary, MediaImportResponse } from './asset.models';
+import { CreateClipResponse, HighlightAnalysisSummary, MediaAssetSummary, MediaImportResponse } from './asset.models';
 
 @Injectable({ providedIn: 'root' })
 export class AssetsService {
@@ -28,6 +28,29 @@ export class AssetsService {
   createSocialVertical(assetId: string): Observable<CreateClipResponse> {
     return this.http.post<CreateClipResponse>(
       `${environment.apiBaseUrl}/assets/${assetId}/social-vertical`,
+      {},
+      { withCredentials: true },
+    );
+  }
+
+  createHighlightAnalysis(assetId: string): Observable<HighlightAnalysisSummary> {
+    return this.http.post<HighlightAnalysisSummary>(
+      `${environment.apiBaseUrl}/assets/${assetId}/highlight-analyses`,
+      {},
+      { withCredentials: true },
+    );
+  }
+
+  listHighlightAnalyses(assetId: string): Observable<HighlightAnalysisSummary[]> {
+    return this.http.get<HighlightAnalysisSummary[]>(
+      `${environment.apiBaseUrl}/assets/${assetId}/highlight-analyses`,
+      { withCredentials: true },
+    );
+  }
+
+  createClipFromHighlightCandidate(candidateId: string): Observable<CreateClipResponse> {
+    return this.http.post<CreateClipResponse>(
+      `${environment.apiBaseUrl}/highlight-candidates/${candidateId}/create-clip`,
       {},
       { withCredentials: true },
     );

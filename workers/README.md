@@ -1,12 +1,14 @@
 # workers
 
-Phase 6C includes a standalone Java worker agent in `java-agent/`. It registers
+Phase 7A includes a standalone Java worker agent in `java-agent/`. It registers
 the current machine with the Spring control plane, sends periodic heartbeats,
 polls for work, executes the safe `SYSTEM_TEST` job type, and imports direct
 HTTP/HTTPS media files through `IMPORT_MEDIA`. When FFprobe is available, it
 also inspects stored originals through `INSPECT_MEDIA`. When FFmpeg is
 available, it creates controlled clip derivatives through `CREATE_CLIP` and
 fixed 1080x1920 social vertical derivatives through `CREATE_SOCIAL_VERTICAL`.
+It also advertises `ANALYZE_HIGHLIGHTS`, which uses a deterministic local
+analyzer and does not require FFmpeg, FFprobe, or any AI provider.
 
 The agent persists a random installation UUID locally and uses that as the
 machine identifier. It does not use MAC addresses or other hardware IDs.
@@ -45,7 +47,7 @@ The agent loop is:
 2. heartbeat in a dedicated loop
 3. poll `POST /api/worker-agent/jobs/claim`
 4. start and execute a claimed `SYSTEM_TEST`, `IMPORT_MEDIA`, `INSPECT_MEDIA`,
-   `CREATE_CLIP`, or `CREATE_SOCIAL_VERTICAL`
+   `CREATE_CLIP`, `CREATE_SOCIAL_VERTICAL`, or `ANALYZE_HIGHLIGHTS`
 5. report completion or failure
 
 When no jobs exist, polling backs off using `FDM_WORKER_JOB_POLL_SECONDS`.
@@ -120,3 +122,20 @@ rejected by the server because the preset requires video. The source object is
 never modified, retries target the same derived asset/storage key, and the
 normal automatic inspection job verifies the derivative afterward. AI or
 subject-aware reframing is intentionally deferred.
+
+`ANALYZE_HIGHLIGHTS` is enabled by default because Phase 7A uses only metadata
+provided by the API. The worker:
+
+1. asks the API for analysis authorization
+2. receives the analysis ID, asset ID, duration, candidate limits, and analyzer
+   identity
+3. runs `DeterministicHighlightAnalyzer`
+4. reports structured candidate intervals
+
+The deterministic analyzer proposes bounded intervals around fixed timeline
+positions and labels them `DETERMINISTIC_V1`. It does not download source
+media, execute shell commands, invoke FFmpeg, call OpenAI/Anthropic/Gemini, run
+local LLMs, transcribe audio, or use vision models. The server validates and
+ranks all candidate output before persistence. A candidate is only a
+recommendation; clip media is created later only when a user explicitly chooses
+**Create Clip**, which goes through the normal `CREATE_CLIP` pipeline.

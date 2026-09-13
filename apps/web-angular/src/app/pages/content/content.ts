@@ -4,7 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { EMPTY, Subscription, catchError, finalize, interval, startWith, switchMap } from 'rxjs';
 
 import { AssetsService } from '../../core/assets/assets.service';
-import { MediaAssetSummary } from '../../core/assets/asset.models';
+import { HighlightAnalysisSummary, HighlightCandidateSummary, MediaAssetSummary } from '../../core/assets/asset.models';
 
 type LoadState = 'loading' | 'ready' | 'error';
 
@@ -26,6 +26,11 @@ export class Content implements OnInit, OnDestroy {
   protected readonly clipErrors = signal<Record<string, string | null>>({});
   protected readonly verticalBusy = signal<Record<string, boolean>>({});
   protected readonly verticalErrors = signal<Record<string, string | null>>({});
+  protected readonly highlightAnalyses = signal<Record<string, HighlightAnalysisSummary | null>>({});
+  protected readonly highlightBusy = signal<Record<string, boolean>>({});
+  protected readonly highlightErrors = signal<Record<string, string | null>>({});
+  protected readonly candidateClipBusy = signal<Record<string, boolean>>({});
+  protected readonly candidateClipErrors = signal<Record<string, string | null>>({});
 
   private subscription?: Subscription;
 
@@ -47,6 +52,7 @@ export class Content implements OnInit, OnDestroy {
       .subscribe((assets) => {
         this.assets.set(assets);
         this.loadState.set('ready');
+        this.refreshHighlightAnalyses(assets);
       });
   }
 
@@ -139,6 +145,35 @@ export class Content implements OnInit, OnDestroy {
     return asset.status === 'READY' && asset.inspectionStatus === 'INSPECTED' && asset.hasVideo === true;
   }
 
+  protected canAnalyzeHighlights(asset: MediaAssetSummary): boolean {
+    return this.canCreateSocialVertical(asset) && asset.durationMs !== null && asset.durationMs > 0;
+  }
+
+  protected highlightAnalysis(asset: MediaAssetSummary): HighlightAnalysisSummary | null {
+    return this.highlightAnalyses()[asset.id] ?? null;
+  }
+
+  protected analysisLabel(analysis: HighlightAnalysisSummary): string {
+    switch (analysis.status) {
+      case 'PENDING':
+        return 'Pending';
+      case 'RUNNING':
+        return 'Analyzing';
+      case 'SUCCEEDED':
+        return 'Completed';
+      case 'FAILED':
+        return 'Failed';
+    }
+  }
+
+  protected timeMs(value: number): string {
+    return `${(value / 1000).toFixed(1)}s`;
+  }
+
+  protected score(value: number): string {
+    return `${Math.round(value * 100)}%`;
+  }
+
   protected clipStart(asset: MediaAssetSummary): number {
     return this.clipStarts()[asset.id] ?? 0;
   }
@@ -193,5 +228,56 @@ export class Content implements OnInit, OnDestroy {
         },
         error: () => this.verticalErrors.update((errors) => ({ ...errors, [asset.id]: 'Vertical preset could not be created.' })),
       });
+  }
+
+  protected findHighlights(asset: MediaAssetSummary): void {
+    this.highlightErrors.update((errors) => ({ ...errors, [asset.id]: null }));
+    if (!this.canAnalyzeHighlights(asset)) {
+      this.highlightErrors.update((errors) => ({ ...errors, [asset.id]: 'Asset must be inspected video with known duration.' }));
+      return;
+    }
+    this.highlightBusy.update((busy) => ({ ...busy, [asset.id]: true }));
+    this.assetsService
+      .createHighlightAnalysis(asset.id)
+      .pipe(finalize(() => this.highlightBusy.update((busy) => ({ ...busy, [asset.id]: false }))))
+      .subscribe({
+        next: (analysis) => {
+          this.highlightAnalyses.update((analyses) => ({ ...analyses, [asset.id]: analysis }));
+        },
+        error: () => this.highlightErrors.update((errors) => ({ ...errors, [asset.id]: 'Highlight analysis could not be started.' })),
+      });
+  }
+
+  protected createClipFromCandidate(candidate: HighlightCandidateSummary): void {
+    this.candidateClipErrors.update((errors) => ({ ...errors, [candidate.id]: null }));
+    this.candidateClipBusy.update((busy) => ({ ...busy, [candidate.id]: true }));
+    this.assetsService
+      .createClipFromHighlightCandidate(candidate.id)
+      .pipe(finalize(() => this.candidateClipBusy.update((busy) => ({ ...busy, [candidate.id]: false }))))
+      .subscribe({
+        next: (response) => {
+          this.assets.set([response.asset, ...this.assets().filter((existing) => existing.id !== response.asset.id)]);
+          this.loadState.set('ready');
+        },
+        error: () => this.candidateClipErrors.update((errors) => ({ ...errors, [candidate.id]: 'Clip could not be created from candidate.' })),
+      });
+  }
+
+  private refreshHighlightAnalyses(assets: MediaAssetSummary[]): void {
+    for (const asset of assets) {
+      if (!this.canAnalyzeHighlights(asset)) {
+        continue;
+      }
+      const current = this.highlightAnalyses()[asset.id];
+      if (current && current.status !== 'PENDING' && current.status !== 'RUNNING') {
+        continue;
+      }
+      this.assetsService
+        .listHighlightAnalyses(asset.id)
+        .pipe(catchError(() => EMPTY))
+        .subscribe((analyses) => {
+          this.highlightAnalyses.update((currentAnalyses) => ({ ...currentAnalyses, [asset.id]: analyses[0] ?? null }));
+        });
+    }
   }
 }

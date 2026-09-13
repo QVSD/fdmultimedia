@@ -1,6 +1,6 @@
 # Roadmap
 
-The repository is currently at Phase 6C. Completed phases are marked below;
+The repository is currently at Phase 7A. Completed phases are marked below;
 later phases are planned high-level direction and intentionally do not go into
 implementation detail before they are started.
 
@@ -26,12 +26,17 @@ implementation detail before they are started.
    assets; FFmpeg-capable workers produce immutable derived MP4 assets and
    automatic inspection runs on the result. *(complete)*
 8. **Social vertical preset** — users create immutable 1080x1920 center-cropped
-   derivatives from READY + INSPECTED video assets. *(current phase)*
-9. **Capabilities and processing prep** — broaden worker capability matching
+   derivatives from READY + INSPECTED video assets. *(complete)*
+9. **Highlight candidates** — create persisted highlight analyses and
+   deterministic candidate intervals that users can turn into existing
+   `CREATE_CLIP` jobs. No real AI provider is used yet. *(current phase)*
+10. **AI/provider highlight analysis** — add a real provider behind the
+   structured analyzer contract after the deterministic workflow is proven.
+11. **Capabilities and processing prep** — broaden worker capability matching
    for future media operations.
-10. **FFmpeg processing** — richer automated video processing pipelines.
-11. **Scheduler / load balancing** — deciding which worker runs which job.
-12. **Social account integrations** — connecting and publishing to external
+12. **FFmpeg processing** — richer automated video processing pipelines.
+13. **Scheduler / load balancing** — deciding which worker runs which job.
+14. **Social account integrations** — connecting and publishing to external
    platforms.
-13. **AI content** — AI-assisted content creation.
-14. **Analytics / revenue** — performance analytics and revenue tracking.
+15. **AI content** — AI-assisted content creation.
+16. **Analytics / revenue** — performance analytics and revenue tracking.

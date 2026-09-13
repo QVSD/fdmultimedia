@@ -21,6 +21,7 @@ public final class WorkerAgent {
         WorkerAgentClient client = new WorkerAgentClient(config.apiBaseUrl(), config.workerToken());
         SystemTestExecutor systemTestExecutor = new SystemTestExecutor();
         ImportMediaExecutor importMediaExecutor = new ImportMediaExecutor();
+        AnalyzeHighlightsExecutor analyzeHighlightsExecutor = new AnalyzeHighlightsExecutor(new DeterministicHighlightAnalyzer());
         boolean ffprobeAvailable = FfprobeSupport.isAvailable(config.ffprobePath());
         if (ffprobeAvailable) {
             System.err.println("FFprobe available at " + config.ffprobePath());
@@ -54,7 +55,7 @@ public final class WorkerAgent {
             shutdown.countDown();
         }));
         executor.submit(() -> heartbeatLoop(client, machineIdentifier, config));
-        executor.submit(() -> jobLoop(client, machineIdentifier, config, systemTestExecutor, importMediaExecutor, inspectMediaExecutor, clipExecutor, supportedJobTypes));
+        executor.submit(() -> jobLoop(client, machineIdentifier, config, systemTestExecutor, importMediaExecutor, inspectMediaExecutor, clipExecutor, analyzeHighlightsExecutor, supportedJobTypes));
         shutdown.await();
     }
 
@@ -78,6 +79,7 @@ public final class WorkerAgent {
             ImportMediaExecutor importMediaExecutor,
             InspectMediaExecutor inspectMediaExecutor,
             FfmpegClipExecutor clipExecutor,
+            AnalyzeHighlightsExecutor analyzeHighlightsExecutor,
             List<String> supportedJobTypes) {
         while (!Thread.currentThread().isInterrupted()) {
             try {
@@ -86,7 +88,7 @@ public final class WorkerAgent {
                     sleep(config.jobPollInterval());
                     continue;
                 }
-                executeClaimedJob(client, machineIdentifier, config.workerName(), systemTestExecutor, importMediaExecutor, inspectMediaExecutor, clipExecutor, job);
+                executeClaimedJob(client, machineIdentifier, config.workerName(), systemTestExecutor, importMediaExecutor, inspectMediaExecutor, clipExecutor, analyzeHighlightsExecutor, job);
             } catch (Exception ex) {
                 System.err.println("Worker job polling failed: " + ex.getMessage());
                 sleep(backoff(config.jobPollInterval()));
@@ -102,6 +104,7 @@ public final class WorkerAgent {
             ImportMediaExecutor importMediaExecutor,
             InspectMediaExecutor inspectMediaExecutor,
             FfmpegClipExecutor clipExecutor,
+            AnalyzeHighlightsExecutor analyzeHighlightsExecutor,
             ClaimedJob job) throws InterruptedException {
         try {
             client.started(job.jobId(), machineIdentifier);
@@ -113,6 +116,8 @@ public final class WorkerAgent {
                 executeClipJob(client, machineIdentifier, clipExecutor, job);
             } else if ("CREATE_SOCIAL_VERTICAL".equals(job.type()) && clipExecutor != null) {
                 executeSocialVerticalJob(client, machineIdentifier, clipExecutor, job);
+            } else if ("ANALYZE_HIGHLIGHTS".equals(job.type())) {
+                executeAnalyzeHighlightsJob(client, machineIdentifier, analyzeHighlightsExecutor, job);
             } else if ("SYSTEM_TEST".equals(job.type())) {
                 Map<String, Object> result = systemTestExecutor.execute(job, workerName);
                 client.complete(job.jobId(), machineIdentifier, result);
@@ -209,6 +214,27 @@ public final class WorkerAgent {
             reportSocialVerticalFailure(client, machineIdentifier, job, ex.code(), ex.getMessage(), ex.terminal());
         } catch (Exception ex) {
             reportSocialVerticalFailure(client, machineIdentifier, job, "CREATE_SOCIAL_VERTICAL_FAILED", ex.getMessage(), false);
+        } finally {
+            running.set(false);
+            renewer.interrupt();
+        }
+    }
+
+    private static void executeAnalyzeHighlightsJob(
+            WorkerAgentClient client,
+            String machineIdentifier,
+            AnalyzeHighlightsExecutor analyzeHighlightsExecutor,
+            ClaimedJob job) throws InterruptedException {
+        AtomicBoolean running = new AtomicBoolean(true);
+        Thread renewer = new Thread(() -> leaseRenewLoop(client, machineIdentifier, job, running), "fdm-job-lease-renewer");
+        renewer.setDaemon(true);
+        renewer.start();
+        try {
+            analyzeHighlightsExecutor.execute(client, job, machineIdentifier);
+        } catch (ImportFailureException ex) {
+            reportHighlightFailure(client, machineIdentifier, job, ex.code(), ex.getMessage(), ex.terminal());
+        } catch (Exception ex) {
+            reportHighlightFailure(client, machineIdentifier, job, "ANALYZE_HIGHLIGHTS_FAILED", ex.getMessage(), false);
         } finally {
             running.set(false);
             renewer.interrupt();
@@ -326,10 +352,38 @@ public final class WorkerAgent {
         }
     }
 
+    private static void reportHighlightFailure(
+            WorkerAgentClient client,
+            String machineIdentifier,
+            ClaimedJob job,
+            String code,
+            String message,
+            boolean terminal) {
+        Object assetId = job.payload().get("assetId");
+        try {
+            if (assetId == null) {
+                client.fail(job.jobId(), machineIdentifier, code, message, terminal);
+            } else {
+                HighlightAnalysisAuthorization authorization = client.authorizeHighlightAnalysis(job.jobId(), machineIdentifier);
+                client.failHighlightAnalysis(
+                        job.jobId(),
+                        machineIdentifier,
+                        authorization.analysisId(),
+                        java.util.UUID.fromString(String.valueOf(assetId)),
+                        code,
+                        message,
+                        terminal);
+            }
+        } catch (Exception reportFailure) {
+            System.err.println("Worker failed to report highlight analysis failure: " + reportFailure.getMessage());
+        }
+    }
+
     private static List<String> supportedJobTypes(boolean ffprobeAvailable, boolean ffmpegAvailable) {
         List<String> types = new ArrayList<>();
         types.add("SYSTEM_TEST");
         types.add("IMPORT_MEDIA");
+        types.add("ANALYZE_HIGHLIGHTS");
         if (ffprobeAvailable) {
             types.add("INSPECT_MEDIA");
         }

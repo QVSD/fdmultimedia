@@ -164,16 +164,17 @@ Useful worker environment variables:
 - `FFPROBE_PATH` — FFprobe executable path, default `ffprobe`.
 - `FFMPEG_PATH` — FFmpeg executable path, default `ffmpeg`.
 
-The Phase 6C worker registers, heartbeats, polls for a job, starts it, executes
+The Phase 7A worker registers, heartbeats, polls for a job, starts it, executes
 `SYSTEM_TEST`, `IMPORT_MEDIA`, `INSPECT_MEDIA`, `CREATE_CLIP`, or
-`CREATE_SOCIAL_VERTICAL`, renews active
+`CREATE_SOCIAL_VERTICAL`, or `ANALYZE_HIGHLIGHTS`, renews active
 media-job leases, and reports success or failure. `SYSTEM_TEST` is limited to a
 bounded message and sleep duration; `IMPORT_MEDIA` is limited to direct
 HTTP/HTTPS media-file ingestion; `INSPECT_MEDIA` is limited to read-only
 FFprobe metadata inspection of already stored originals; `CREATE_CLIP` is
 limited to controlled FFmpeg MP4 clip creation from a stored source asset; and
 `CREATE_SOCIAL_VERTICAL` is limited to the fixed 1080x1920 center-crop preset.
-The worker does not execute arbitrary commands.
+`ANALYZE_HIGHLIGHTS` uses a deterministic local analyzer and does not call any
+AI provider. The worker does not execute arbitrary commands.
 
 For media imports, the worker validates the URL, follows only bounded
 revalidated redirects, streams to a temporary file with size and timeout
@@ -258,3 +259,17 @@ Manual social vertical preset check:
    exists, and approximately the same duration as the source.
 7. Direct bucket access should remain forbidden. The preset is deterministic
    center crop only; subject-aware reframing is intentionally not implemented.
+
+Manual highlight candidate check:
+
+1. Start the Docker stack and a worker. FFmpeg is not required for analysis,
+   but it is required for the later candidate-to-clip step.
+2. Import and inspect a small video asset so it is `READY` + `INSPECTED`,
+   has `hasVideo=true`, and has a known duration.
+3. In Content, click **Find Highlights**. The API should create one
+   `HighlightAnalysis` and one `ANALYZE_HIGHLIGHTS` job.
+4. Confirm the analysis moves `PENDING -> RUNNING -> SUCCEEDED` and shows
+   candidates labelled `DETERMINISTIC_V1`.
+5. Click **Create Clip** on one candidate. This should create a normal
+   `CREATE_CLIP` job and derived clip asset, then automatic `INSPECT_MEDIA`.
+6. Confirm no media object is created merely by the analysis itself.

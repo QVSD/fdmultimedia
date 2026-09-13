@@ -62,7 +62,7 @@
 
 .content__table {
   width: 100%;
-  min-width: 980px;
+  min-width: 1180px;
   border-collapse: collapse;
   background: #ffffff;
 
@@ -86,6 +86,22 @@
     margin-top: 0.25rem;
     color: var(--color-text-muted);
     font-size: 0.85rem;
+  }
+}
+
+.content__table button {
+  min-height: 2rem;
+  border: 0;
+  border-radius: 6px;
+  padding: 0.35rem 0.6rem;
+  background: #111827;
+  color: #ffffff;
+  font-weight: 700;
+  cursor: pointer;
+
+  &:disabled {
+    cursor: wait;
+    opacity: 0.65;
   }
 }
 
@@ -160,6 +176,23 @@
       cursor: wait;
       opacity: 0.65;
     }
+  }
+}
+
+.content__highlights {
+  display: grid;
+  gap: 0.45rem;
+  min-width: 14rem;
+}
+
+.content__candidate {
+  display: grid;
+  gap: 0.25rem;
+  border-left: 3px solid #d1d5db;
+  padding-left: 0.6rem;
+
+  strong {
+    font-size: 0.85rem;
   }
 }
 
