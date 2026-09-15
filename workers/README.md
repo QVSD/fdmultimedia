@@ -1,6 +1,6 @@
 # workers
 
-Phase 7A includes a standalone Java worker agent in `java-agent/`. It registers
+Phase 7B1 includes a standalone Java worker agent in `java-agent/`. It registers
 the current machine with the Spring control plane, sends periodic heartbeats,
 polls for work, executes the safe `SYSTEM_TEST` job type, and imports direct
 HTTP/HTTPS media files through `IMPORT_MEDIA`. When FFprobe is available, it
@@ -9,6 +9,8 @@ available, it creates controlled clip derivatives through `CREATE_CLIP` and
 fixed 1080x1920 social vertical derivatives through `CREATE_SOCIAL_VERTICAL`.
 It also advertises `ANALYZE_HIGHLIGHTS`, which uses a deterministic local
 analyzer and does not require FFmpeg, FFprobe, or any AI provider.
+When FFmpeg and a configured local Whisper-compatible CLI are available, it also
+advertises `TRANSCRIBE_MEDIA`.
 
 The agent persists a random installation UUID locally and uses that as the
 machine identifier. It does not use MAC addresses or other hardware IDs.
@@ -38,6 +40,9 @@ FDM_WORKER_JOB_POLL_SECONDS=3 \
 FDM_WORKER_ID_FILE=.fdm-worker-id \
 FFPROBE_PATH=ffprobe \
 FFMPEG_PATH=ffmpeg \
+TRANSCRIPTION_RUNTIME=WHISPER_CLI \
+TRANSCRIPTION_COMMAND=whisper \
+TRANSCRIPTION_MODEL=base \
 java -jar target/worker-agent-0.1.0-SNAPSHOT.jar
 ```
 
@@ -47,7 +52,8 @@ The agent loop is:
 2. heartbeat in a dedicated loop
 3. poll `POST /api/worker-agent/jobs/claim`
 4. start and execute a claimed `SYSTEM_TEST`, `IMPORT_MEDIA`, `INSPECT_MEDIA`,
-   `CREATE_CLIP`, `CREATE_SOCIAL_VERTICAL`, or `ANALYZE_HIGHLIGHTS`
+   `CREATE_CLIP`, `CREATE_SOCIAL_VERTICAL`, `ANALYZE_HIGHLIGHTS`, or
+   `TRANSCRIBE_MEDIA`
 5. report completion or failure
 
 When no jobs exist, polling backs off using `FDM_WORKER_JOB_POLL_SECONDS`.
@@ -139,3 +145,33 @@ local LLMs, transcribe audio, or use vision models. The server validates and
 ranks all candidate output before persistence. A candidate is only a
 recommendation; clip media is created later only when a user explicitly chooses
 **Create Clip**, which goes through the normal `CREATE_CLIP` pipeline.
+
+`TRANSCRIBE_MEDIA` is enabled only when FFmpeg is available and the configured
+local transcription runtime is available. `TRANSCRIPTION_RUNTIME=WHISPER_CLI`
+uses the Python `whisper` CLI contract:
+
+```text
+whisper <audio.wav> --model <model> --output_format json --output_dir <dir> --fp16 False
+```
+
+`TRANSCRIPTION_RUNTIME=WHISPER_CPP` uses `whisper-cli` with a local
+`ggml-*.bin` model:
+
+```text
+whisper-cli -m <model.bin> -f <audio.wav> -l auto -oj -of <output-base> -np
+```
+
+The worker checks command availability with `--help`; the whisper.cpp runtime
+also requires the configured model path to exist. The worker:
+
+1. asks the API for transcription authorization
+2. downloads the assigned stored media through a short-lived presigned GET URL
+3. extracts mono 16 kHz PCM WAV audio with controlled FFmpeg arguments
+4. invokes the configured local Whisper-compatible CLI without a shell
+5. parses bounded structured JSON segments
+6. reports detected language and timestamped segments
+7. deletes source, audio, and provider temporary files
+
+The worker never receives permanent object-storage credentials and never stores
+transcripts in job results only; the API persists `MediaTranscript` and
+`TranscriptSegment` rows transactionally after validating provider output.

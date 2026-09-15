@@ -3,7 +3,7 @@ import { Injectable } from '@angular/core';
 import { Observable } from 'rxjs';
 
 import { environment } from '../../../environments/environment';
-import { CreateClipResponse, HighlightAnalysisSummary, MediaAssetSummary, MediaImportResponse } from './asset.models';
+import { CreateClipResponse, HighlightAnalysisSummary, MediaAssetSummary, MediaImportResponse, MediaTranscriptSummary } from './asset.models';
 
 @Injectable({ providedIn: 'root' })
 export class AssetsService {
@@ -44,6 +44,21 @@ export class AssetsService {
   listHighlightAnalyses(assetId: string): Observable<HighlightAnalysisSummary[]> {
     return this.http.get<HighlightAnalysisSummary[]>(
       `${environment.apiBaseUrl}/assets/${assetId}/highlight-analyses`,
+      { withCredentials: true },
+    );
+  }
+
+  createTranscript(assetId: string): Observable<MediaTranscriptSummary> {
+    return this.http.post<MediaTranscriptSummary>(
+      `${environment.apiBaseUrl}/assets/${assetId}/transcripts`,
+      {},
+      { withCredentials: true },
+    );
+  }
+
+  listTranscripts(assetId: string): Observable<MediaTranscriptSummary[]> {
+    return this.http.get<MediaTranscriptSummary[]>(
+      `${environment.apiBaseUrl}/assets/${assetId}/transcripts`,
       { withCredentials: true },
     );
   }

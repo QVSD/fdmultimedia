@@ -12,6 +12,12 @@
 - FFmpeg — optional for import/inspection-only development, required for
   workers to claim `CREATE_CLIP` and `CREATE_SOCIAL_VERTICAL` jobs. Set
   `FFMPEG_PATH` when the executable is not on `PATH`.
+- A local Whisper-compatible CLI — optional, required only for workers to claim
+  `TRANSCRIBE_MEDIA`. Set `TRANSCRIPTION_RUNTIME`, `TRANSCRIPTION_COMMAND`,
+  `TRANSCRIPTION_MODEL`, and optionally `TRANSCRIPTION_TIMEOUT_SECONDS`. Model
+  installation is explicit; the worker does not download model binaries during
+  startup. `WHISPER_CLI` targets the Python `whisper` CLI; `WHISPER_CPP`
+  targets `whisper-cli` with a local `ggml-*.bin` model path.
 
 ## Running everything
 
@@ -163,10 +169,16 @@ Useful worker environment variables:
 - `FDM_WORKER_JOB_POLL_SECONDS` — job polling interval, default 3 seconds.
 - `FFPROBE_PATH` — FFprobe executable path, default `ffprobe`.
 - `FFMPEG_PATH` — FFmpeg executable path, default `ffmpeg`.
+- `TRANSCRIPTION_RUNTIME` — `WHISPER_CLI` or `WHISPER_CPP`, default
+  `WHISPER_CLI`.
+- `TRANSCRIPTION_COMMAND` — local Whisper-compatible CLI, default `whisper`.
+- `TRANSCRIPTION_MODEL` — local model name/path passed to that CLI, default
+  `base`.
+- `TRANSCRIPTION_TIMEOUT_SECONDS` — inference timeout, default 900 seconds.
 
 The Phase 7A worker registers, heartbeats, polls for a job, starts it, executes
 `SYSTEM_TEST`, `IMPORT_MEDIA`, `INSPECT_MEDIA`, `CREATE_CLIP`, or
-`CREATE_SOCIAL_VERTICAL`, or `ANALYZE_HIGHLIGHTS`, renews active
+`CREATE_SOCIAL_VERTICAL`, `ANALYZE_HIGHLIGHTS`, or `TRANSCRIBE_MEDIA`, renews active
 media-job leases, and reports success or failure. `SYSTEM_TEST` is limited to a
 bounded message and sleep duration; `IMPORT_MEDIA` is limited to direct
 HTTP/HTTPS media-file ingestion; `INSPECT_MEDIA` is limited to read-only
@@ -174,7 +186,9 @@ FFprobe metadata inspection of already stored originals; `CREATE_CLIP` is
 limited to controlled FFmpeg MP4 clip creation from a stored source asset; and
 `CREATE_SOCIAL_VERTICAL` is limited to the fixed 1080x1920 center-crop preset.
 `ANALYZE_HIGHLIGHTS` uses a deterministic local analyzer and does not call any
-AI provider. The worker does not execute arbitrary commands.
+AI provider. `TRANSCRIBE_MEDIA` uses only a configured local transcription CLI
+with controlled invocation and structured JSON output. The worker does not
+execute arbitrary commands.
 
 For media imports, the worker validates the URL, follows only bounded
 revalidated redirects, streams to a temporary file with size and timeout
@@ -273,3 +287,18 @@ Manual highlight candidate check:
 5. Click **Create Clip** on one candidate. This should create a normal
    `CREATE_CLIP` job and derived clip asset, then automatic `INSPECT_MEDIA`.
 6. Confirm no media object is created merely by the analysis itself.
+
+Manual transcription check:
+
+1. Install FFmpeg and a local Whisper-compatible CLI/model. Confirm the CLI
+   works independently and set `$env:TRANSCRIPTION_RUNTIME`,
+   `$env:TRANSCRIPTION_COMMAND`, and `$env:TRANSCRIPTION_MODEL` before
+   starting the worker. For whisper.cpp, use `TRANSCRIPTION_RUNTIME=WHISPER_CPP`
+   and point `TRANSCRIPTION_MODEL` to the local `ggml-*.bin` file.
+2. Import and inspect a short owned media fixture with audible speech.
+3. In Content, click **Transcribe** on the READY + INSPECTED asset.
+4. Confirm the `TRANSCRIBE_MEDIA` job moves `QUEUED -> ASSIGNED -> RUNNING ->
+   SUCCEEDED` and the transcript becomes `SUCCEEDED`.
+5. Confirm timestamped segments are visible in Content and recognizably match
+   the spoken audio. Perfect accuracy is not required for development smoke
+   testing.

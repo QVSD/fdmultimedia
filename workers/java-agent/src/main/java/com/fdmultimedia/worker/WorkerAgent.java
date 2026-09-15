@@ -36,7 +36,17 @@ public final class WorkerAgent {
         }
         InspectMediaExecutor inspectMediaExecutor = ffprobeAvailable ? new InspectMediaExecutor(config.ffprobePath()) : null;
         FfmpegClipExecutor clipExecutor = ffmpegAvailable ? new FfmpegClipExecutor(config.ffmpegPath()) : null;
-        List<String> supportedJobTypes = supportedJobTypes(ffprobeAvailable, ffmpegAvailable);
+        TranscriptionProvider transcriptionProvider = transcriptionProvider(config);
+        boolean transcriptionAvailable = ffmpegAvailable && transcriptionProvider.isAvailable();
+        if (transcriptionAvailable) {
+            System.err.println("Transcription provider available: " + transcriptionProvider.providerName() + " model " + transcriptionProvider.modelName());
+        } else {
+            System.err.println("Transcription provider unavailable; TRANSCRIBE_MEDIA capability disabled");
+        }
+        TranscribeMediaExecutor transcribeMediaExecutor = transcriptionAvailable
+                ? new TranscribeMediaExecutor(config.ffmpegPath(), transcriptionProvider)
+                : null;
+        List<String> supportedJobTypes = supportedJobTypes(ffprobeAvailable, ffmpegAvailable, transcriptionAvailable);
 
         while (!Thread.currentThread().isInterrupted()) {
             try {
@@ -55,7 +65,7 @@ public final class WorkerAgent {
             shutdown.countDown();
         }));
         executor.submit(() -> heartbeatLoop(client, machineIdentifier, config));
-        executor.submit(() -> jobLoop(client, machineIdentifier, config, systemTestExecutor, importMediaExecutor, inspectMediaExecutor, clipExecutor, analyzeHighlightsExecutor, supportedJobTypes));
+        executor.submit(() -> jobLoop(client, machineIdentifier, config, systemTestExecutor, importMediaExecutor, inspectMediaExecutor, clipExecutor, analyzeHighlightsExecutor, transcribeMediaExecutor, supportedJobTypes));
         shutdown.await();
     }
 
@@ -80,6 +90,7 @@ public final class WorkerAgent {
             InspectMediaExecutor inspectMediaExecutor,
             FfmpegClipExecutor clipExecutor,
             AnalyzeHighlightsExecutor analyzeHighlightsExecutor,
+            TranscribeMediaExecutor transcribeMediaExecutor,
             List<String> supportedJobTypes) {
         while (!Thread.currentThread().isInterrupted()) {
             try {
@@ -88,7 +99,7 @@ public final class WorkerAgent {
                     sleep(config.jobPollInterval());
                     continue;
                 }
-                executeClaimedJob(client, machineIdentifier, config.workerName(), systemTestExecutor, importMediaExecutor, inspectMediaExecutor, clipExecutor, analyzeHighlightsExecutor, job);
+                executeClaimedJob(client, machineIdentifier, config.workerName(), systemTestExecutor, importMediaExecutor, inspectMediaExecutor, clipExecutor, analyzeHighlightsExecutor, transcribeMediaExecutor, job);
             } catch (Exception ex) {
                 System.err.println("Worker job polling failed: " + ex.getMessage());
                 sleep(backoff(config.jobPollInterval()));
@@ -105,6 +116,7 @@ public final class WorkerAgent {
             InspectMediaExecutor inspectMediaExecutor,
             FfmpegClipExecutor clipExecutor,
             AnalyzeHighlightsExecutor analyzeHighlightsExecutor,
+            TranscribeMediaExecutor transcribeMediaExecutor,
             ClaimedJob job) throws InterruptedException {
         try {
             client.started(job.jobId(), machineIdentifier);
@@ -118,6 +130,8 @@ public final class WorkerAgent {
                 executeSocialVerticalJob(client, machineIdentifier, clipExecutor, job);
             } else if ("ANALYZE_HIGHLIGHTS".equals(job.type())) {
                 executeAnalyzeHighlightsJob(client, machineIdentifier, analyzeHighlightsExecutor, job);
+            } else if ("TRANSCRIBE_MEDIA".equals(job.type()) && transcribeMediaExecutor != null) {
+                executeTranscribeMediaJob(client, machineIdentifier, transcribeMediaExecutor, job);
             } else if ("SYSTEM_TEST".equals(job.type())) {
                 Map<String, Object> result = systemTestExecutor.execute(job, workerName);
                 client.complete(job.jobId(), machineIdentifier, result);
@@ -235,6 +249,27 @@ public final class WorkerAgent {
             reportHighlightFailure(client, machineIdentifier, job, ex.code(), ex.getMessage(), ex.terminal());
         } catch (Exception ex) {
             reportHighlightFailure(client, machineIdentifier, job, "ANALYZE_HIGHLIGHTS_FAILED", ex.getMessage(), false);
+        } finally {
+            running.set(false);
+            renewer.interrupt();
+        }
+    }
+
+    private static void executeTranscribeMediaJob(
+            WorkerAgentClient client,
+            String machineIdentifier,
+            TranscribeMediaExecutor transcribeMediaExecutor,
+            ClaimedJob job) throws InterruptedException {
+        AtomicBoolean running = new AtomicBoolean(true);
+        Thread renewer = new Thread(() -> leaseRenewLoop(client, machineIdentifier, job, running), "fdm-job-lease-renewer");
+        renewer.setDaemon(true);
+        renewer.start();
+        try {
+            transcribeMediaExecutor.execute(client, job, machineIdentifier);
+        } catch (ImportFailureException ex) {
+            reportTranscriptionFailure(client, machineIdentifier, job, ex.code(), ex.getMessage(), ex.terminal());
+        } catch (Exception ex) {
+            reportTranscriptionFailure(client, machineIdentifier, job, "TRANSCRIBE_MEDIA_FAILED", ex.getMessage(), false);
         } finally {
             running.set(false);
             renewer.interrupt();
@@ -379,7 +414,29 @@ public final class WorkerAgent {
         }
     }
 
-    private static List<String> supportedJobTypes(boolean ffprobeAvailable, boolean ffmpegAvailable) {
+    private static void reportTranscriptionFailure(
+            WorkerAgentClient client,
+            String machineIdentifier,
+            ClaimedJob job,
+            String code,
+            String message,
+            boolean terminal) {
+        try {
+            TranscriptionAuthorization authorization = client.authorizeTranscription(job.jobId(), machineIdentifier);
+            client.failTranscription(
+                    job.jobId(),
+                    machineIdentifier,
+                    authorization.transcriptId(),
+                    authorization.assetId(),
+                    code,
+                    message,
+                    terminal);
+        } catch (Exception reportFailure) {
+            System.err.println("Worker failed to report transcription failure: " + reportFailure.getMessage());
+        }
+    }
+
+    private static List<String> supportedJobTypes(boolean ffprobeAvailable, boolean ffmpegAvailable, boolean transcriptionAvailable) {
         List<String> types = new ArrayList<>();
         types.add("SYSTEM_TEST");
         types.add("IMPORT_MEDIA");
@@ -391,7 +448,23 @@ public final class WorkerAgent {
             types.add("CREATE_CLIP");
             types.add("CREATE_SOCIAL_VERTICAL");
         }
+        if (transcriptionAvailable) {
+            types.add("TRANSCRIBE_MEDIA");
+        }
         return List.copyOf(types);
+    }
+
+    private static TranscriptionProvider transcriptionProvider(WorkerAgentConfig config) {
+        if ("WHISPER_CPP".equalsIgnoreCase(config.transcriptionRuntime())) {
+            return new WhisperCppCliProvider(
+                    config.transcriptionCommand(),
+                    config.transcriptionModel(),
+                    config.transcriptionTimeout());
+        }
+        return new LocalWhisperCliProvider(
+                config.transcriptionCommand(),
+                config.transcriptionModel(),
+                config.transcriptionTimeout());
     }
 
     private static Duration backoff(Duration heartbeatInterval) {

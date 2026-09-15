@@ -2,6 +2,7 @@ export type MediaAssetStatus = 'PENDING' | 'IMPORTING' | 'PROCESSING' | 'READY' 
 export type MediaInspectionStatus = 'NOT_REQUESTED' | 'PENDING' | 'INSPECTING' | 'INSPECTED' | 'FAILED';
 export type MediaDerivationType = 'ORIGINAL' | 'CLIP' | 'SOCIAL_VERTICAL';
 export type HighlightAnalysisStatus = 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED';
+export type TranscriptStatus = 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED';
 
 export interface MediaAssetSummary {
   id: string;
@@ -71,4 +72,31 @@ export interface HighlightAnalysisSummary {
   updatedAt: string;
   completedAt: string | null;
   candidates: HighlightCandidateSummary[];
+}
+
+export interface TranscriptSegmentSummary {
+  id: string;
+  sequence: number;
+  startMs: number;
+  endMs: number;
+  text: string;
+  confidence: number | null;
+}
+
+export interface MediaTranscriptSummary {
+  id: string;
+  assetId: string;
+  status: TranscriptStatus;
+  transcriptionJobId: string;
+  provider: string;
+  model: string;
+  detectedLanguage: string | null;
+  durationMs: number | null;
+  errorCode: string | null;
+  errorMessage: string | null;
+  createdAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
+  updatedAt: string;
+  segments: TranscriptSegmentSummary[];
 }

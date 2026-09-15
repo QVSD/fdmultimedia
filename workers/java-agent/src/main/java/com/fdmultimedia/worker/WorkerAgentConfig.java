@@ -11,6 +11,10 @@ record WorkerAgentConfig(
         String workerName,
         String ffprobePath,
         String ffmpegPath,
+        String transcriptionRuntime,
+        String transcriptionCommand,
+        String transcriptionModel,
+        Duration transcriptionTimeout,
         Path identityFile,
         Duration heartbeatInterval,
         Duration jobPollInterval) {
@@ -25,6 +29,14 @@ record WorkerAgentConfig(
         String workerName = environment.getOrDefault("FDM_WORKER_NAME", localHostname());
         String ffprobePath = environment.getOrDefault("FFPROBE_PATH", "ffprobe").trim();
         String ffmpegPath = environment.getOrDefault("FFMPEG_PATH", "ffmpeg").trim();
+        String transcriptionRuntime = environment.getOrDefault("TRANSCRIPTION_RUNTIME", "WHISPER_CLI").trim();
+        String transcriptionCommand = environment.getOrDefault("TRANSCRIPTION_COMMAND", "whisper").trim();
+        String transcriptionModel = environment.getOrDefault("TRANSCRIPTION_MODEL", "base").trim();
+        Duration transcriptionTimeout = Duration.ofSeconds(
+                Long.parseLong(environment.getOrDefault("TRANSCRIPTION_TIMEOUT_SECONDS", "900")));
+        if (transcriptionTimeout.isNegative() || transcriptionTimeout.isZero()) {
+            throw new IllegalArgumentException("TRANSCRIPTION_TIMEOUT_SECONDS must be greater than zero");
+        }
         Path identityFile = Path.of(environment.getOrDefault(
                 "FDM_WORKER_ID_FILE",
                 Path.of(System.getProperty("user.home"), ".fdmultimedia", "worker-id").toString()));
@@ -44,6 +56,10 @@ record WorkerAgentConfig(
                 workerName,
                 ffprobePath.isBlank() ? "ffprobe" : ffprobePath,
                 ffmpegPath.isBlank() ? "ffmpeg" : ffmpegPath,
+                transcriptionRuntime.isBlank() ? "WHISPER_CLI" : transcriptionRuntime,
+                transcriptionCommand.isBlank() ? "whisper" : transcriptionCommand,
+                transcriptionModel.isBlank() ? "base" : transcriptionModel,
+                transcriptionTimeout,
                 identityFile,
                 heartbeatInterval,
                 jobPollInterval);

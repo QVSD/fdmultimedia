@@ -4,7 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { EMPTY, Subscription, catchError, finalize, interval, startWith, switchMap } from 'rxjs';
 
 import { AssetsService } from '../../core/assets/assets.service';
-import { HighlightAnalysisSummary, HighlightCandidateSummary, MediaAssetSummary } from '../../core/assets/asset.models';
+import { HighlightAnalysisSummary, HighlightCandidateSummary, MediaAssetSummary, MediaTranscriptSummary } from '../../core/assets/asset.models';
 
 type LoadState = 'loading' | 'ready' | 'error';
 
@@ -31,6 +31,9 @@ export class Content implements OnInit, OnDestroy {
   protected readonly highlightErrors = signal<Record<string, string | null>>({});
   protected readonly candidateClipBusy = signal<Record<string, boolean>>({});
   protected readonly candidateClipErrors = signal<Record<string, string | null>>({});
+  protected readonly transcripts = signal<Record<string, MediaTranscriptSummary | null>>({});
+  protected readonly transcriptBusy = signal<Record<string, boolean>>({});
+  protected readonly transcriptErrors = signal<Record<string, string | null>>({});
 
   private subscription?: Subscription;
 
@@ -53,6 +56,7 @@ export class Content implements OnInit, OnDestroy {
         this.assets.set(assets);
         this.loadState.set('ready');
         this.refreshHighlightAnalyses(assets);
+        this.refreshTranscripts(assets);
       });
   }
 
@@ -149,6 +153,10 @@ export class Content implements OnInit, OnDestroy {
     return this.canCreateSocialVertical(asset) && asset.durationMs !== null && asset.durationMs > 0;
   }
 
+  protected canTranscribe(asset: MediaAssetSummary): boolean {
+    return asset.status === 'READY' && asset.inspectionStatus === 'INSPECTED' && asset.hasAudio === true && asset.durationMs !== null && asset.durationMs > 0;
+  }
+
   protected highlightAnalysis(asset: MediaAssetSummary): HighlightAnalysisSummary | null {
     return this.highlightAnalyses()[asset.id] ?? null;
   }
@@ -159,6 +167,23 @@ export class Content implements OnInit, OnDestroy {
         return 'Pending';
       case 'RUNNING':
         return 'Analyzing';
+      case 'SUCCEEDED':
+        return 'Completed';
+      case 'FAILED':
+        return 'Failed';
+    }
+  }
+
+  protected transcript(asset: MediaAssetSummary): MediaTranscriptSummary | null {
+    return this.transcripts()[asset.id] ?? null;
+  }
+
+  protected transcriptLabel(transcript: MediaTranscriptSummary): string {
+    switch (transcript.status) {
+      case 'PENDING':
+        return 'Pending';
+      case 'RUNNING':
+        return 'Transcribing';
       case 'SUCCEEDED':
         return 'Completed';
       case 'FAILED':
@@ -263,6 +288,24 @@ export class Content implements OnInit, OnDestroy {
       });
   }
 
+  protected transcribe(asset: MediaAssetSummary): void {
+    this.transcriptErrors.update((errors) => ({ ...errors, [asset.id]: null }));
+    if (!this.canTranscribe(asset)) {
+      this.transcriptErrors.update((errors) => ({ ...errors, [asset.id]: 'Asset must be inspected media with audio.' }));
+      return;
+    }
+    this.transcriptBusy.update((busy) => ({ ...busy, [asset.id]: true }));
+    this.assetsService
+      .createTranscript(asset.id)
+      .pipe(finalize(() => this.transcriptBusy.update((busy) => ({ ...busy, [asset.id]: false }))))
+      .subscribe({
+        next: (transcript) => {
+          this.transcripts.update((items) => ({ ...items, [asset.id]: transcript }));
+        },
+        error: () => this.transcriptErrors.update((errors) => ({ ...errors, [asset.id]: 'Transcription could not be started.' })),
+      });
+  }
+
   private refreshHighlightAnalyses(assets: MediaAssetSummary[]): void {
     for (const asset of assets) {
       if (!this.canAnalyzeHighlights(asset)) {
@@ -277,6 +320,24 @@ export class Content implements OnInit, OnDestroy {
         .pipe(catchError(() => EMPTY))
         .subscribe((analyses) => {
           this.highlightAnalyses.update((currentAnalyses) => ({ ...currentAnalyses, [asset.id]: analyses[0] ?? null }));
+        });
+    }
+  }
+
+  private refreshTranscripts(assets: MediaAssetSummary[]): void {
+    for (const asset of assets) {
+      if (!this.canTranscribe(asset)) {
+        continue;
+      }
+      const current = this.transcripts()[asset.id];
+      if (current && current.status !== 'PENDING' && current.status !== 'RUNNING') {
+        continue;
+      }
+      this.assetsService
+        .listTranscripts(asset.id)
+        .pipe(catchError(() => EMPTY))
+        .subscribe((transcripts) => {
+          this.transcripts.update((currentTranscripts) => ({ ...currentTranscripts, [asset.id]: transcripts[0] ?? null }));
         });
     }
   }

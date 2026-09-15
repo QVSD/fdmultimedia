@@ -1,4 +1,11 @@
-export type JobType = 'SYSTEM_TEST' | 'IMPORT_MEDIA' | 'INSPECT_MEDIA' | 'CREATE_CLIP' | 'CREATE_SOCIAL_VERTICAL';
+export type JobType =
+  | 'SYSTEM_TEST'
+  | 'IMPORT_MEDIA'
+  | 'INSPECT_MEDIA'
+  | 'CREATE_CLIP'
+  | 'CREATE_SOCIAL_VERTICAL'
+  | 'ANALYZE_HIGHLIGHTS'
+  | 'TRANSCRIBE_MEDIA';
 export type JobStatus = 'QUEUED' | 'ASSIGNED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED';
 
 export interface JobSummary {

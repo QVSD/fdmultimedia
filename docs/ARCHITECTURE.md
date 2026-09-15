@@ -1,8 +1,8 @@
 # Architecture
 
-## Phase 7A scope
+## Phase 7B1 scope
 
-Phase 7A adds persisted highlight candidates on top of the distributed job
+Phase 7B1 adds persisted speech transcripts on top of the distributed job
 pipeline. Authenticated users can submit direct HTTP/HTTPS media file URLs;
 the control plane creates a `MediaAsset` plus an `IMPORT_MEDIA` job, and a
 worker safely downloads, validates, checksums, uploads, and completes the
@@ -15,6 +15,10 @@ jobs that persist structured candidate intervals. The current analyzer is
 deterministic and local only; AI/provider integration, publishing, smart
 scheduling, and social integrations remain out of scope; see
 [ROADMAP.md](ROADMAP.md).
+Phase 7B1 does not replace that deterministic analyzer. Instead it adds
+`TRANSCRIBE_MEDIA`, `MediaTranscript`, and `TranscriptSegment` so transcript
+data survives independently for later semantic highlight selection, subtitles,
+search, summaries, chapters, and podcast workflows.
 
 ## High-level architecture
 
@@ -51,7 +55,8 @@ Local Laptop       Cloud Worker
   anything that can run the worker process). They register, heartbeat, poll
   for jobs, execute `SYSTEM_TEST` and `IMPORT_MEDIA`, optionally execute
   `INSPECT_MEDIA` when FFprobe is available, FFmpeg derivatives when FFmpeg is
-  available, and deterministic highlight analysis.
+  available, deterministic highlight analysis, and media transcription when a
+  configured local transcription provider is available.
 
 ## Request flow
 
@@ -138,7 +143,8 @@ is built, its code lands in the matching package with a clear boundary.
 
 Jobs are persisted in PostgreSQL with JSONB `payload` and `result` fields.
 `SYSTEM_TEST` accepts a bounded message and duration. `IMPORT_MEDIA`,
-`INSPECT_MEDIA`, and `ANALYZE_HIGHLIGHTS` accept only an `assetId` reference;
+`INSPECT_MEDIA`, `ANALYZE_HIGHLIGHTS`, and `TRANSCRIBE_MEDIA` accept only
+asset/transcript provider references;
 source URL, storage state, inspection metadata, and highlight candidates live
 in their own domain tables. No job type executes shell commands or arbitrary
 code.
@@ -329,6 +335,41 @@ ownership before replacing candidate rows and completing the job. Ranking is
 server-side: score descending with deterministic start/end/reason tie-breaks.
 Expired analysis leases are reconciled with the analysis domain state in the
 same lazy recovery path as imports, inspections, clips, and vertical presets.
+
+## Media transcripts
+
+Phase 7B1 introduces a reusable transcript domain:
+
+- `MediaTranscript` belongs to one workspace and asset, owns one
+  `TRANSCRIBE_MEDIA` job, and stores provider/model, status, detected language,
+  timing, and safe error information.
+- `TranscriptSegment` stores ordered timestamped text with optional confidence.
+
+Transcript lifecycle is `PENDING -> RUNNING -> SUCCEEDED` or `FAILED`.
+Retryable failures return the same transcript to `PENDING`; terminal failure
+marks that transcript `FAILED`. A retry never creates Transcript2/Transcript3
+for the same job. Active duplicate requests for the same asset/provider/model
+reuse the existing active transcript instead of creating duplicate expensive
+work.
+
+The server validates that the source asset is READY, INSPECTED, has audio, and
+has known positive duration. Worker completion is untrusted: the backend
+validates segment count, timestamp order, bounded overlap, `endMs <= duration`
+with a small tolerance, non-empty bounded text, total transcript text size, and
+confidence range before replacing segment rows and completing the job in one
+transaction. Stale workers are rejected through the existing row-locked job
+ownership checks.
+
+The first worker provider is a local Whisper-compatible CLI behind
+`TranscriptionProvider`. The Java worker is used because it already owns the
+hardened job loop, lease renewal, FFmpeg process handling, and presigned media
+download code. Python is not required by the server protocol and can be added
+later as another worker implementation. The worker supports the Python
+`whisper` CLI contract (`WHISPER_CLI`) and the native `whisper.cpp`
+`whisper-cli` JSON contract (`WHISPER_CPP`). The worker advertises
+`TRANSCRIBE_MEDIA` only when FFmpeg is available and the configured provider is
+available within a bounded timeout; the whisper.cpp adapter also requires the
+configured model file to exist. Startup never downloads models automatically.
 
 ## An important architectural rule: Robots are not workers
 

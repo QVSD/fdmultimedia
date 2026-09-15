@@ -29,7 +29,10 @@ implementation detail before they are started.
    derivatives from READY + INSPECTED video assets. *(complete)*
 9. **Highlight candidates** — create persisted highlight analyses and
    deterministic candidate intervals that users can turn into existing
-   `CREATE_CLIP` jobs. No real AI provider is used yet. *(current phase)*
+   `CREATE_CLIP` jobs. No real AI provider is used yet.
+7. **Speech transcription** — persisted `MediaTranscript` and
+   `TranscriptSegment` data through `TRANSCRIBE_MEDIA`, using a local
+   configurable transcription provider. *(current phase)*
 10. **AI/provider highlight analysis** — add a real provider behind the
    structured analyzer contract after the deterministic workflow is proven.
 11. **Capabilities and processing prep** — broaden worker capability matching

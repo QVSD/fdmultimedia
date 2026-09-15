@@ -2,7 +2,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { of, throwError } from 'rxjs';
 
 import { AssetsService } from '../../core/assets/assets.service';
-import { HighlightAnalysisSummary, MediaAssetSummary, MediaAssetStatus } from '../../core/assets/asset.models';
+import { HighlightAnalysisSummary, MediaAssetSummary, MediaAssetStatus, MediaTranscriptSummary } from '../../core/assets/asset.models';
 import { Content } from './content';
 
 describe('Content', () => {
@@ -17,6 +17,8 @@ describe('Content', () => {
     | 'createHighlightAnalysis'
     | 'listHighlightAnalyses'
     | 'createClipFromHighlightCandidate'
+    | 'createTranscript'
+    | 'listTranscripts'
   >;
 
   beforeEach(async () => {
@@ -34,6 +36,8 @@ describe('Content', () => {
       createHighlightAnalysis: vi.fn().mockReturnValue(of(analysis('PENDING'))),
       listHighlightAnalyses: vi.fn().mockReturnValue(of([analysis('SUCCEEDED')])),
       createClipFromHighlightCandidate: vi.fn().mockReturnValue(of({ asset: clipAsset() })),
+      createTranscript: vi.fn().mockReturnValue(of(transcript('PENDING'))),
+      listTranscripts: vi.fn().mockReturnValue(of([transcript('SUCCEEDED')])),
     };
 
     await TestBed.configureTestingModule({
@@ -67,6 +71,9 @@ describe('Content', () => {
     expect(text).toContain('Create Clip');
     expect(text).toContain('Make 9:16');
     expect(text).toContain('Find Highlights');
+    expect(text).toContain('Transcribe');
+    expect(text).toContain('LOCAL_WHISPER_CLI');
+    expect(text).toContain('Hello world');
     expect(text).toContain('Analyzer: DETERMINISTIC_V1');
     expect(text).toContain('Deterministic Phase 7A candidate');
     expect(text).toContain('UNSUPPORTED_MEDIA');
@@ -174,6 +181,16 @@ describe('Content', () => {
     expect(component['highlightAnalysis'](ready)?.status).toBe('PENDING');
   });
 
+  it('starts transcription for an inspected ready asset with audio', () => {
+    fixture.detectChanges();
+    const ready = component['assets']().find((item) => item.status === 'READY')!;
+
+    component['transcribe'](ready);
+
+    expect(assetsService.createTranscript).toHaveBeenCalledWith(ready.id);
+    expect(component['transcript'](ready)?.status).toBe('PENDING');
+  });
+
   it('creates a clip from a highlight candidate', () => {
     fixture.detectChanges();
     const ready = component['assets']().find((item) => item.status === 'READY')!;
@@ -274,6 +291,37 @@ describe('Content', () => {
               reason: 'Deterministic Phase 7A candidate',
               rank: 1,
               createdAt: '2026-09-10T08:01:10Z',
+            },
+          ]
+        : [],
+    };
+  }
+
+  function transcript(status: MediaTranscriptSummary['status']): MediaTranscriptSummary {
+    return {
+      id: 'transcript-1',
+      assetId: 'READY-asset',
+      status,
+      transcriptionJobId: 'transcription-job',
+      provider: 'LOCAL_WHISPER_CLI',
+      model: 'base',
+      detectedLanguage: status === 'SUCCEEDED' ? 'en' : null,
+      durationMs: status === 'SUCCEEDED' ? 12_000 : null,
+      errorCode: status === 'FAILED' ? 'TRANSCRIPTION_FAILED' : null,
+      errorMessage: status === 'FAILED' ? 'Transcription failed' : null,
+      createdAt: '2026-09-10T08:02:00Z',
+      startedAt: status === 'PENDING' ? null : '2026-09-10T08:02:01Z',
+      completedAt: status === 'SUCCEEDED' ? '2026-09-10T08:02:10Z' : null,
+      updatedAt: '2026-09-10T08:02:10Z',
+      segments: status === 'SUCCEEDED'
+        ? [
+            {
+              id: 'segment-1',
+              sequence: 1,
+              startMs: 0,
+              endMs: 2_000,
+              text: 'Hello world',
+              confidence: null,
             },
           ]
         : [],

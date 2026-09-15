@@ -14,6 +14,7 @@ import com.fdmultimedia.api.assets.MediaAsset;
 import com.fdmultimedia.api.assets.MediaAssetRepository;
 import com.fdmultimedia.api.assets.MediaAssetStatus;
 import com.fdmultimedia.api.highlights.HighlightAnalysisRepository;
+import com.fdmultimedia.api.transcripts.MediaTranscriptRepository;
 import com.fdmultimedia.api.users.AppUser;
 import com.fdmultimedia.api.workers.Worker;
 import com.fdmultimedia.api.workers.WorkerCredential;
@@ -48,6 +49,7 @@ class JobServiceTest {
     private final JobRepository jobs = mock(JobRepository.class);
     private final MediaAssetRepository assets = mock(MediaAssetRepository.class);
     private final HighlightAnalysisRepository highlightAnalyses = mock(HighlightAnalysisRepository.class);
+    private final MediaTranscriptRepository transcripts = mock(MediaTranscriptRepository.class);
     private final WorkerRepository workers = mock(WorkerRepository.class);
     private final WorkerCredentialRepository credentials = mock(WorkerCredentialRepository.class);
     private final JobProperties jobProperties = new JobProperties();
@@ -59,6 +61,7 @@ class JobServiceTest {
             jobs,
             assets,
             highlightAnalyses,
+            transcripts,
             workers,
             credentials,
             workerStatusService,

@@ -246,6 +246,38 @@ final class WorkerAgentClient {
         send("/worker-agent/highlights/" + jobId + "/fail", body, new TypeReference<Map<String, Object>>() {});
     }
 
+    TranscriptionAuthorization authorizeTranscription(UUID jobId, String machineIdentifier)
+            throws IOException, InterruptedException {
+        return send(
+                "/worker-agent/transcripts/" + jobId + "/authorization",
+                Map.of("machineIdentifier", machineIdentifier),
+                new TypeReference<TranscriptionAuthorization>() {});
+    }
+
+    void completeTranscription(UUID jobId, String machineIdentifier, TranscriptionAuthorization authorization, TranscriptionResult result)
+            throws IOException, InterruptedException {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("machineIdentifier", machineIdentifier);
+        body.put("transcriptId", authorization.transcriptId());
+        body.put("assetId", authorization.assetId());
+        body.put("detectedLanguage", result.detectedLanguage());
+        body.put("durationMs", result.durationMs());
+        body.put("segments", result.segments());
+        send("/worker-agent/transcripts/" + jobId + "/complete", body, new TypeReference<Map<String, Object>>() {});
+    }
+
+    void failTranscription(UUID jobId, String machineIdentifier, UUID transcriptId, UUID assetId, String errorCode, String errorMessage, boolean terminal)
+            throws IOException, InterruptedException {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("machineIdentifier", machineIdentifier);
+        body.put("transcriptId", transcriptId);
+        body.put("assetId", assetId);
+        body.put("errorCode", errorCode);
+        body.put("errorMessage", errorMessage);
+        body.put("terminal", terminal);
+        send("/worker-agent/transcripts/" + jobId + "/fail", body, new TypeReference<Map<String, Object>>() {});
+    }
+
     void upload(URI uploadUrl, Path path, String contentType) throws IOException, InterruptedException {
         HttpRequest request = HttpRequest.newBuilder(uploadUrl)
                 .timeout(Duration.ofMinutes(30))

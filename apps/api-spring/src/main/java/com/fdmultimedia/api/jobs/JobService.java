@@ -7,6 +7,8 @@ import com.fdmultimedia.api.assets.MediaAssetRepository;
 import com.fdmultimedia.api.assets.MediaAssetStatus;
 import com.fdmultimedia.api.highlights.HighlightAnalysisRepository;
 import com.fdmultimedia.api.highlights.HighlightAnalysisStatus;
+import com.fdmultimedia.api.transcripts.MediaTranscriptRepository;
+import com.fdmultimedia.api.transcripts.TranscriptStatus;
 import com.fdmultimedia.api.workers.Worker;
 import com.fdmultimedia.api.workers.WorkerCredential;
 import com.fdmultimedia.api.workers.WorkerCredentialRepository;
@@ -35,6 +37,7 @@ public class JobService {
     private final JobRepository jobs;
     private final MediaAssetRepository assets;
     private final HighlightAnalysisRepository highlightAnalyses;
+    private final MediaTranscriptRepository transcripts;
     private final WorkerRepository workers;
     private final WorkerCredentialRepository credentials;
     private final WorkerStatusService workerStatusService;
@@ -46,6 +49,7 @@ public class JobService {
             JobRepository jobs,
             MediaAssetRepository assets,
             HighlightAnalysisRepository highlightAnalyses,
+            MediaTranscriptRepository transcripts,
             WorkerRepository workers,
             WorkerCredentialRepository credentials,
             WorkerStatusService workerStatusService,
@@ -55,6 +59,7 @@ public class JobService {
         this.jobs = jobs;
         this.assets = assets;
         this.highlightAnalyses = highlightAnalyses;
+        this.transcripts = transcripts;
         this.workers = workers;
         this.credentials = credentials;
         this.workerStatusService = workerStatusService;
@@ -196,6 +201,7 @@ public class JobService {
                     reconcileRecoveredInspectionAsset(job, now);
                     reconcileRecoveredProcessingAsset(job, now);
                     reconcileRecoveredHighlightAnalysis(job, now);
+                    reconcileRecoveredTranscription(job, now);
                 });
     }
 
@@ -262,6 +268,22 @@ public class JobService {
         });
     }
 
+    private void reconcileRecoveredTranscription(Job job, Instant now) {
+        if (job.getType() != JobType.TRANSCRIBE_MEDIA) {
+            return;
+        }
+        transcripts.findByTranscriptionJobId(job.getId()).ifPresent(transcript -> {
+            if (transcript.getStatus() == TranscriptStatus.SUCCEEDED || transcript.getStatus() == TranscriptStatus.FAILED) {
+                return;
+            }
+            if (job.getStatus() == JobStatus.FAILED) {
+                transcript.markFailed(job.getErrorCode(), job.getErrorMessage(), now);
+            } else if (job.getStatus() == JobStatus.QUEUED) {
+                transcript.markPendingForRetry(now);
+            }
+        });
+    }
+
     private List<String> supportedTypeNames(WorkerJobClaimRequest request) {
         if (request.supportedJobTypes() == null || request.supportedJobTypes().isEmpty()) {
             return List.of(JobType.SYSTEM_TEST.name());
@@ -318,6 +340,9 @@ public class JobService {
         }
         if (type == JobType.ANALYZE_HIGHLIGHTS) {
             return validateAssetReferencePayload(payload);
+        }
+        if (type == JobType.TRANSCRIBE_MEDIA) {
+            return validateTranscriptionPayload(payload);
         }
         if (type != JobType.SYSTEM_TEST) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unsupported job type");
@@ -380,6 +405,23 @@ public class JobService {
         Map<String, Object> normalized = new LinkedHashMap<>();
         normalized.put("sourceAssetId", sourceAssetId);
         normalized.put("outputAssetId", outputAssetId);
+        return normalized;
+    }
+
+    private Map<String, Object> validateTranscriptionPayload(Map<String, Object> payload) {
+        String assetId = uuidString(payload.get("assetId"), "assetId");
+        String provider = stringValue(payload.get("provider"), "provider");
+        String model = stringValue(payload.get("model"), "model");
+        if (provider.isBlank() || provider.length() > 64) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "provider is invalid");
+        }
+        if (model.isBlank() || model.length() > 128) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "model is invalid");
+        }
+        Map<String, Object> normalized = new LinkedHashMap<>();
+        normalized.put("assetId", assetId);
+        normalized.put("provider", provider);
+        normalized.put("model", model);
         return normalized;
     }
 

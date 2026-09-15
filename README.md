@@ -5,9 +5,9 @@ social-media content workflows, video processing workers running across
 multiple laptops/cloud machines, scheduling, AI-assisted content creation,
 publishing, analytics, and revenue tracking.
 
-## Phase 7A scope
+## Phase 7B1 scope
 
-This repository is currently at **Phase 7A: highlight candidates**. That means:
+This repository is currently at **Phase 7B1: media transcription**. That means:
 
 - A clean monorepo layout (`apps/`, `workers/`, `infra/`, `docs/`).
 - A Spring Boot 21 modular monolith (`apps/api-spring`) with the package
@@ -35,9 +35,14 @@ This repository is currently at **Phase 7A: highlight candidates**. That means:
   a fixed vertical 9:16 preset.
 - Persisted highlight analyses and candidate recommendations. Phase 7A uses a
   deterministic local analyzer (`DETERMINISTIC_V1`) only; it does not call
-  OpenAI, Anthropic, Gemini, a local LLM, transcription, or vision models.
+  OpenAI, Anthropic, Gemini, a local LLM, or vision models.
   Users can review candidates and explicitly create clips through the existing
   `CREATE_CLIP` pipeline.
+- First-class media transcripts. A READY + INSPECTED asset with audio can
+  create a `TRANSCRIBE_MEDIA` job, producing a persisted `MediaTranscript`
+  plus timestamped `TranscriptSegment` rows. The transcript survives
+  independently from highlight analysis and is ready for later subtitles,
+  search, summaries, chapters, and semantic highlight selection.
 - Nginx as the single entry point, routing `/api/*` to the backend and
   everything else to the frontend.
 - Docker Compose to run the whole stack locally.
@@ -162,7 +167,13 @@ the same environment variables with `$env:FDM_API_BASE_URL` and
 if `ffprobe` is not on `PATH`; set `$env:FFMPEG_PATH` if `ffmpeg` is not on
 `PATH`. Without FFprobe the worker still registers and imports media, but it
 does not advertise `INSPECT_MEDIA`. Without FFmpeg it does not advertise
-`CREATE_CLIP` or `CREATE_SOCIAL_VERTICAL`.
+`CREATE_CLIP` or `CREATE_SOCIAL_VERTICAL`. For transcription, install a local
+Whisper-compatible CLI explicitly and set `$env:TRANSCRIPTION_RUNTIME`,
+`$env:TRANSCRIPTION_COMMAND`, and `$env:TRANSCRIPTION_MODEL`. The default
+runtime is `WHISPER_CLI` for the Python `whisper` CLI contract. Use
+`WHISPER_CPP` with `whisper-cli` and a local `ggml-*.bin` model path. Without a
+working transcription CLI/model, the worker still starts but does not advertise
+`TRANSCRIBE_MEDIA`.
 
 ## Jobs, media assets, and distributed execution
 
@@ -310,6 +321,19 @@ count, candidate duration limits, score range, reason length, and deterministic
 rank ordering. A candidate is only a recommendation; no media is generated
 until a user clicks **Create Clip**, which reuses the existing clip API and
 therefore the same FFmpeg, storage, retry, inspection, and lineage flow.
+
+Phase 7B1 adds `TRANSCRIBE_MEDIA`. The API derives workspace access from the
+session, requires the asset to be READY, INSPECTED, to contain audio, and to
+have known duration, then creates or reuses the active transcript for the same
+asset/provider/model. The worker gets only a short-lived presigned GET URL for
+the assigned asset, extracts mono 16 kHz PCM audio with controlled FFmpeg
+arguments, runs a configured local Whisper-compatible CLI, and submits
+structured `{language, segments[]}` output. The backend validates segment
+timestamps, text length, count, total size, ordering, and duration bounds before
+atomically persisting segments and marking the transcript `SUCCEEDED`.
+Set `APP_TRANSCRIPTION_PROVIDER` and `APP_TRANSCRIPTION_MODEL` for the API so
+the persisted transcript provider/model match the runtime advertised by local
+workers.
 
 ## RabbitMQ management UI
 

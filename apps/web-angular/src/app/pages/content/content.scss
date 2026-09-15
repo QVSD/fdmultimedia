@@ -185,6 +185,40 @@
   min-width: 14rem;
 }
 
+.content__transcript {
+  display: grid;
+  gap: 0.35rem;
+  min-width: 16rem;
+
+  details {
+    max-width: 22rem;
+  }
+
+  summary {
+    cursor: pointer;
+    font-weight: 700;
+  }
+}
+
+.content__segments {
+  max-height: 16rem;
+  overflow: auto;
+  padding-right: 0.4rem;
+
+  p {
+    margin: 0.55rem 0;
+    color: #374151;
+    font-size: 0.85rem;
+    line-height: 1.4;
+  }
+
+  strong {
+    display: block;
+    color: #111827;
+    font-size: 0.78rem;
+  }
+}
+
 .content__candidate {
   display: grid;
   gap: 0.25rem;

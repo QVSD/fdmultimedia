@@ -48,6 +48,7 @@
                 <th scope="col">Resolution</th>
                 <th scope="col">Codecs</th>
                 <th scope="col">Inspection</th>
+                <th scope="col">Transcript</th>
                 <th scope="col">Highlights</th>
                 <th scope="col">Clip</th>
                 <th scope="col">Vertical</th>
@@ -79,6 +80,43 @@
                     <span>{{ inspectionLabel(asset) }}</span>
                     @if (asset.inspectionErrorMessage) {
                       <span class="content__error">{{ asset.inspectionErrorCode }}: {{ asset.inspectionErrorMessage }}</span>
+                    }
+                  </td>
+                  <td>
+                    @if (canTranscribe(asset)) {
+                      <button type="button" (click)="transcribe(asset)" [disabled]="transcriptBusy()[asset.id]">
+                        {{ transcriptBusy()[asset.id] ? 'Starting...' : 'Transcribe' }}
+                      </button>
+                      @if (transcriptErrors()[asset.id]) {
+                        <span class="content__error">{{ transcriptErrors()[asset.id] }}</span>
+                      }
+                      @if (transcript(asset); as transcript) {
+                        <div class="content__transcript">
+                          <span>{{ transcriptLabel(transcript) }}</span>
+                          <span>{{ transcript.provider }} · {{ transcript.model }}</span>
+                          @if (transcript.detectedLanguage) {
+                            <span>Language: {{ transcript.detectedLanguage }}</span>
+                          }
+                          @if (transcript.errorMessage) {
+                            <span class="content__error">{{ transcript.errorCode }}: {{ transcript.errorMessage }}</span>
+                          }
+                          @if (transcript.status === 'SUCCEEDED') {
+                            <details>
+                              <summary>{{ transcript.segments.length }} segments</summary>
+                              <div class="content__segments">
+                                @for (segment of transcript.segments.slice(0, 200); track segment.id) {
+                                  <p>
+                                    <strong>{{ timeMs(segment.startMs) }}-{{ timeMs(segment.endMs) }}</strong>
+                                    {{ segment.text }}
+                                  </p>
+                                }
+                              </div>
+                            </details>
+                          }
+                        </div>
+                      }
+                    } @else {
+                      <span>-</span>
                     }
                   </td>
                   <td>
