@@ -335,6 +335,25 @@ Set `APP_TRANSCRIPTION_PROVIDER` and `APP_TRANSCRIPTION_MODEL` for the API so
 the persisted transcript provider/model match the runtime advertised by local
 workers.
 
+Phase 7B2 adds semantic highlight analysis behind the existing
+`ANALYZE_HIGHLIGHTS` job type. `DETERMINISTIC_V1` remains the default analyzer;
+clients may explicitly request `TRANSCRIPT_SEMANTIC_V1` for READY + INSPECTED
+video assets that have a successful transcript. Semantic workers advertise the
+analyzer only when a configured local provider is available. The first provider
+uses a local Ollama HTTP runtime and sends transcript windows only: no media
+objects, presigned URLs, storage keys, credentials, raw commands, or browser
+input are sent to the model. The backend validates that returned candidates are
+grounded in transcript segment windows before persisting them.
+
+Useful local semantic-highlight worker settings:
+
+```text
+SEMANTIC_HIGHLIGHT_RUNTIME=OLLAMA
+SEMANTIC_HIGHLIGHT_ENDPOINT=http://localhost:11434
+SEMANTIC_HIGHLIGHT_MODEL=llama3.2:1b
+SEMANTIC_HIGHLIGHT_TIMEOUT_SECONDS=180
+```
+
 ## RabbitMQ management UI
 
 Exposed for local development at **http://localhost:15672** (or whatever

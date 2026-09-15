@@ -123,9 +123,10 @@ public class JobService {
     public WorkerJobClaimResponse claim(WorkerPrincipal principal, WorkerJobClaimRequest request) {
         Worker worker = requireOnlineWorker(principal, request.machineIdentifier());
         List<String> supportedTypes = supportedTypeNames(request);
+        List<String> supportedHighlightAnalyzers = supportedHighlightAnalyzers(request);
         Instant now = Instant.now(clock);
         recoverExpiredLeases(worker.getWorkspace(), now);
-        return jobs.findNextQueuedForUpdate(worker.getWorkspace().getId(), supportedTypes)
+        return jobs.findNextQueuedForUpdate(worker.getWorkspace().getId(), supportedTypes, supportedHighlightAnalyzers)
                 .map(job -> {
                     job.claim(worker, now, now.plus(properties.getLeaseDuration()));
                     return new WorkerJobClaimResponse(
@@ -296,6 +297,18 @@ public class JobService {
         return supported.isEmpty() ? List.of(JobType.SYSTEM_TEST.name()) : supported;
     }
 
+    private List<String> supportedHighlightAnalyzers(WorkerJobClaimRequest request) {
+        if (request.supportedHighlightAnalyzers() == null || request.supportedHighlightAnalyzers().isEmpty()) {
+            return List.of("DETERMINISTIC_V1");
+        }
+        List<String> supported = request.supportedHighlightAnalyzers().stream()
+                .filter(value -> value != null && !value.isBlank())
+                .map(String::trim)
+                .distinct()
+                .toList();
+        return supported.isEmpty() ? List.of("DETERMINISTIC_V1") : supported;
+    }
+
     public Worker requireOnlineWorker(WorkerPrincipal principal, String machineIdentifier) {
         WorkerCredential credential = credentials.findById(principal.credentialId())
                 .filter(WorkerCredential::isEnabled)
@@ -339,7 +352,7 @@ public class JobService {
             return validateDerivativePayload(payload);
         }
         if (type == JobType.ANALYZE_HIGHLIGHTS) {
-            return validateAssetReferencePayload(payload);
+            return validateHighlightAnalysisPayload(payload);
         }
         if (type == JobType.TRANSCRIBE_MEDIA) {
             return validateTranscriptionPayload(payload);
@@ -373,6 +386,22 @@ public class JobService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "assetId must be a UUID");
         }
         return Map.of("assetId", assetId);
+    }
+
+    private Map<String, Object> validateHighlightAnalysisPayload(Map<String, Object> payload) {
+        String assetId = uuidString(payload.get("assetId"), "assetId");
+        String analyzerType = stringValue(payload.getOrDefault("analyzerType", "DETERMINISTIC_V1"), "analyzerType");
+        if (analyzerType.isBlank() || analyzerType.length() > 64) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "analyzerType is invalid");
+        }
+        Map<String, Object> normalized = new LinkedHashMap<>();
+        normalized.put("assetId", assetId);
+        normalized.put("analyzerType", analyzerType);
+        Object transcriptId = payload.get("transcriptId");
+        if (transcriptId != null) {
+            normalized.put("transcriptId", uuidString(transcriptId, "transcriptId"));
+        }
+        return normalized;
     }
 
     private Map<String, Object> validateCreateClipPayload(Map<String, Object> payload) {

@@ -1,6 +1,7 @@
 package com.fdmultimedia.api.highlights;
 
 import java.util.UUID;
+import java.util.List;
 
 public record WorkerHighlightAuthorizationResponse(
         UUID analysisId,
@@ -10,5 +11,7 @@ public record WorkerHighlightAuthorizationResponse(
         long minCandidateDurationMs,
         long maxCandidateDurationMs,
         String analyzerType,
-        String analyzerVersion) {
+        String analyzerVersion,
+        UUID transcriptId,
+        List<WorkerHighlightTranscriptSegmentResponse> transcriptSegments) {
 }

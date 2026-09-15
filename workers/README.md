@@ -175,3 +175,22 @@ also requires the configured model path to exist. The worker:
 The worker never receives permanent object-storage credentials and never stores
 transcripts in job results only; the API persists `MediaTranscript` and
 `TranscriptSegment` rows transactionally after validating provider output.
+
+`ANALYZE_HIGHLIGHTS` supports multiple analyzer identities. `DETERMINISTIC_V1`
+is always available and remains the default. `TRANSCRIPT_SEMANTIC_V1` is
+advertised only when a configured semantic provider is reachable at startup.
+The first provider uses local Ollama over HTTP:
+
+```text
+SEMANTIC_HIGHLIGHT_RUNTIME=OLLAMA
+SEMANTIC_HIGHLIGHT_ENDPOINT=http://localhost:11434
+SEMANTIC_HIGHLIGHT_MODEL=llama3.2:1b
+SEMANTIC_HIGHLIGHT_TIMEOUT_SECONDS=180
+```
+
+The worker sends transcript-derived windows to the provider and asks for
+structured candidate references. It does not send source media, presigned URLs,
+storage keys, worker credentials, MinIO credentials, or raw browser-provided
+commands/prompts. The API filters job claims by supported analyzer type and
+validates that returned semantic candidates are grounded in transcript segment
+timing before persistence.

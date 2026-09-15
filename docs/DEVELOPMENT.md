@@ -302,3 +302,35 @@ Manual transcription check:
 5. Confirm timestamped segments are visible in Content and recognizably match
    the spoken audio. Perfect accuracy is not required for development smoke
    testing.
+
+Manual semantic highlight check:
+
+1. Start a local Ollama runtime and pull a small local model, for example:
+
+   ```text
+   docker run -d --name fdm-ollama -p 11434:11434 -v fdm_ollama:/root/.ollama ollama/ollama:latest
+   docker exec fdm-ollama ollama pull llama3.2:1b
+   ```
+
+2. Start the Java worker with semantic highlight settings:
+
+   ```text
+   SEMANTIC_HIGHLIGHT_RUNTIME=OLLAMA
+   SEMANTIC_HIGHLIGHT_ENDPOINT=http://localhost:11434
+   SEMANTIC_HIGHLIGHT_MODEL=llama3.2:1b
+   ```
+
+3. Confirm worker startup logs that the semantic provider is available and the
+   worker advertises `TRANSCRIPT_SEMANTIC_V1` in addition to
+   `DETERMINISTIC_V1`.
+4. Use a READY + INSPECTED video asset with a `SUCCEEDED` transcript.
+5. In Content, click **Semantic Highlights**. The API should create an
+   `ANALYZE_HIGHLIGHTS` job with analyzer `TRANSCRIPT_SEMANTIC_V1`.
+6. Confirm the job reaches `SUCCEEDED`, candidates are persisted, and candidate
+   reasons are grounded in transcript text. The model may be locally small, so
+   quality only needs to be recognizably transcript-related for development
+   acceptance.
+
+The semantic provider receives transcript windows only. Do not send media URLs,
+storage keys, credentials, or arbitrary prompt material from browser input to a
+model provider.

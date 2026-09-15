@@ -33,10 +33,10 @@ export class AssetsService {
     );
   }
 
-  createHighlightAnalysis(assetId: string): Observable<HighlightAnalysisSummary> {
+  createHighlightAnalysis(assetId: string, analyzer = 'DETERMINISTIC_V1'): Observable<HighlightAnalysisSummary> {
     return this.http.post<HighlightAnalysisSummary>(
       `${environment.apiBaseUrl}/assets/${assetId}/highlight-analyses`,
-      {},
+      { analyzer },
       { withCredentials: true },
     );
   }

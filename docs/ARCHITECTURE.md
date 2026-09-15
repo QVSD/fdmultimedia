@@ -371,6 +371,35 @@ later as another worker implementation. The worker supports the Python
 available within a bounded timeout; the whisper.cpp adapter also requires the
 configured model file to exist. Startup never downloads models automatically.
 
+## Semantic highlight analysis
+
+Phase 7B2 extends the existing `ANALYZE_HIGHLIGHTS` job rather than creating a
+new queue. The default analyzer remains `DETERMINISTIC_V1` for Phase 7A
+compatibility. A client can request `TRANSCRIPT_SEMANTIC_V1`, which requires a
+READY + INSPECTED video asset, known duration, audio, and a `SUCCEEDED`
+transcript with persisted segments.
+
+Workers now advertise supported highlight analyzers separately from job types.
+The claim query filters `ANALYZE_HIGHLIGHTS` by the analyzer stored in job
+payload, so a worker that only supports `DETERMINISTIC_V1` cannot claim a
+semantic job. Legacy workers default to deterministic support only.
+
+Semantic analysis uses a provider boundary in the worker. The first provider is
+a local Ollama HTTP runtime configured with `SEMANTIC_HIGHLIGHT_RUNTIME=OLLAMA`,
+`SEMANTIC_HIGHLIGHT_ENDPOINT`, and `SEMANTIC_HIGHLIGHT_MODEL`. The provider
+receives transcript-derived windows and returns structured candidate references.
+It never receives media binaries, presigned URLs, storage keys, worker tokens,
+object-storage credentials, or arbitrary commands. The worker does not execute
+a shell for semantic analysis.
+
+The backend treats semantic output as untrusted. It verifies the worker owns the
+job, the transcript belongs to the same asset/workspace, candidate windows are
+inside the asset duration, and semantic candidates overlap transcript segments.
+Near-boundary suggestions can be snapped to transcript boundaries within a
+small tolerance; ungrounded suggestions are rejected. Candidate ranking remains
+server-side and candidate-to-clip still uses the existing `CREATE_CLIP`
+pipeline only after explicit user choice.
+
 ## An important architectural rule: Robots are not workers
 
 A **Robot** is a logical content-automation entity — think of it as "a

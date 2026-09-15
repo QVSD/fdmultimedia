@@ -124,6 +124,9 @@
                       <button type="button" (click)="findHighlights(asset)" [disabled]="highlightBusy()[asset.id]">
                         {{ highlightBusy()[asset.id] ? 'Starting...' : 'Find Highlights' }}
                       </button>
+                      <button type="button" (click)="findSemanticHighlights(asset)" [disabled]="highlightBusy()[asset.id] || !canAnalyzeSemanticHighlights(asset)">
+                        Semantic Highlights
+                      </button>
                       @if (highlightErrors()[asset.id]) {
                         <span class="content__error">{{ highlightErrors()[asset.id] }}</span>
                       }

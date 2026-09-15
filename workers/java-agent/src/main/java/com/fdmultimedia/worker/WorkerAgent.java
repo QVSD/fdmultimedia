@@ -3,6 +3,7 @@ package com.fdmultimedia.worker;
 import java.time.Duration;
 import java.util.Map;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -21,7 +22,17 @@ public final class WorkerAgent {
         WorkerAgentClient client = new WorkerAgentClient(config.apiBaseUrl(), config.workerToken());
         SystemTestExecutor systemTestExecutor = new SystemTestExecutor();
         ImportMediaExecutor importMediaExecutor = new ImportMediaExecutor();
-        AnalyzeHighlightsExecutor analyzeHighlightsExecutor = new AnalyzeHighlightsExecutor(new DeterministicHighlightAnalyzer());
+        Map<String, HighlightAnalyzer> highlightAnalyzers = new LinkedHashMap<>();
+        highlightAnalyzers.put("DETERMINISTIC_V1", new DeterministicHighlightAnalyzer());
+        HighlightAnalyzer semanticAnalyzer = semanticHighlightAnalyzer(config);
+        boolean semanticHighlightAvailable = semanticAnalyzer != null;
+        if (semanticHighlightAvailable) {
+            highlightAnalyzers.put("TRANSCRIPT_SEMANTIC_V1", semanticAnalyzer);
+            System.err.println("Semantic highlight provider available: " + config.semanticHighlightRuntime() + " model " + config.semanticHighlightModel());
+        } else {
+            System.err.println("Semantic highlight provider unavailable; TRANSCRIPT_SEMANTIC_V1 analyzer disabled");
+        }
+        AnalyzeHighlightsExecutor analyzeHighlightsExecutor = new AnalyzeHighlightsExecutor(highlightAnalyzers);
         boolean ffprobeAvailable = FfprobeSupport.isAvailable(config.ffprobePath());
         if (ffprobeAvailable) {
             System.err.println("FFprobe available at " + config.ffprobePath());
@@ -47,6 +58,7 @@ public final class WorkerAgent {
                 ? new TranscribeMediaExecutor(config.ffmpegPath(), transcriptionProvider)
                 : null;
         List<String> supportedJobTypes = supportedJobTypes(ffprobeAvailable, ffmpegAvailable, transcriptionAvailable);
+        List<String> supportedHighlightAnalyzers = supportedHighlightAnalyzers(semanticHighlightAvailable);
 
         while (!Thread.currentThread().isInterrupted()) {
             try {
@@ -65,7 +77,7 @@ public final class WorkerAgent {
             shutdown.countDown();
         }));
         executor.submit(() -> heartbeatLoop(client, machineIdentifier, config));
-        executor.submit(() -> jobLoop(client, machineIdentifier, config, systemTestExecutor, importMediaExecutor, inspectMediaExecutor, clipExecutor, analyzeHighlightsExecutor, transcribeMediaExecutor, supportedJobTypes));
+        executor.submit(() -> jobLoop(client, machineIdentifier, config, systemTestExecutor, importMediaExecutor, inspectMediaExecutor, clipExecutor, analyzeHighlightsExecutor, transcribeMediaExecutor, supportedJobTypes, supportedHighlightAnalyzers));
         shutdown.await();
     }
 
@@ -91,10 +103,11 @@ public final class WorkerAgent {
             FfmpegClipExecutor clipExecutor,
             AnalyzeHighlightsExecutor analyzeHighlightsExecutor,
             TranscribeMediaExecutor transcribeMediaExecutor,
-            List<String> supportedJobTypes) {
+            List<String> supportedJobTypes,
+            List<String> supportedHighlightAnalyzers) {
         while (!Thread.currentThread().isInterrupted()) {
             try {
-                ClaimedJob job = client.claim(machineIdentifier, supportedJobTypes);
+                ClaimedJob job = client.claim(machineIdentifier, supportedJobTypes, supportedHighlightAnalyzers);
                 if (!job.available()) {
                     sleep(config.jobPollInterval());
                     continue;
@@ -454,6 +467,15 @@ public final class WorkerAgent {
         return List.copyOf(types);
     }
 
+    private static List<String> supportedHighlightAnalyzers(boolean semanticHighlightAvailable) {
+        List<String> analyzers = new ArrayList<>();
+        analyzers.add("DETERMINISTIC_V1");
+        if (semanticHighlightAvailable) {
+            analyzers.add("TRANSCRIPT_SEMANTIC_V1");
+        }
+        return List.copyOf(analyzers);
+    }
+
     private static TranscriptionProvider transcriptionProvider(WorkerAgentConfig config) {
         if ("WHISPER_CPP".equalsIgnoreCase(config.transcriptionRuntime())) {
             return new WhisperCppCliProvider(
@@ -465,6 +487,17 @@ public final class WorkerAgent {
                 config.transcriptionCommand(),
                 config.transcriptionModel(),
                 config.transcriptionTimeout());
+    }
+
+    private static HighlightAnalyzer semanticHighlightAnalyzer(WorkerAgentConfig config) {
+        if (!"OLLAMA".equalsIgnoreCase(config.semanticHighlightRuntime())) {
+            return null;
+        }
+        OllamaSemanticHighlightAnalyzer analyzer = new OllamaSemanticHighlightAnalyzer(
+                config.semanticHighlightEndpoint(),
+                config.semanticHighlightModel(),
+                config.semanticHighlightTimeout());
+        return analyzer.isAvailable() ? analyzer : null;
     }
 
     private static Duration backoff(Duration heartbeatInterval) {

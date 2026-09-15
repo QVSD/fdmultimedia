@@ -153,6 +153,11 @@ export class Content implements OnInit, OnDestroy {
     return this.canCreateSocialVertical(asset) && asset.durationMs !== null && asset.durationMs > 0;
   }
 
+  protected canAnalyzeSemanticHighlights(asset: MediaAssetSummary): boolean {
+    const transcript = this.transcript(asset);
+    return this.canAnalyzeHighlights(asset) && transcript?.status === 'SUCCEEDED' && (transcript.segments?.length ?? 0) > 0;
+  }
+
   protected canTranscribe(asset: MediaAssetSummary): boolean {
     return asset.status === 'READY' && asset.inspectionStatus === 'INSPECTED' && asset.hasAudio === true && asset.durationMs !== null && asset.durationMs > 0;
   }
@@ -256,20 +261,28 @@ export class Content implements OnInit, OnDestroy {
   }
 
   protected findHighlights(asset: MediaAssetSummary): void {
+    this.startHighlightAnalysis(asset, 'DETERMINISTIC_V1', 'Asset must be inspected video with known duration.', 'Highlight analysis could not be started.');
+  }
+
+  protected findSemanticHighlights(asset: MediaAssetSummary): void {
+    this.startHighlightAnalysis(asset, 'TRANSCRIPT_SEMANTIC_V1', 'A completed transcript is required for semantic highlights.', 'Semantic highlight analysis could not be started.');
+  }
+
+  private startHighlightAnalysis(asset: MediaAssetSummary, analyzer: string, validationMessage: string, errorMessage: string): void {
     this.highlightErrors.update((errors) => ({ ...errors, [asset.id]: null }));
-    if (!this.canAnalyzeHighlights(asset)) {
-      this.highlightErrors.update((errors) => ({ ...errors, [asset.id]: 'Asset must be inspected video with known duration.' }));
+    if (analyzer === 'TRANSCRIPT_SEMANTIC_V1' ? !this.canAnalyzeSemanticHighlights(asset) : !this.canAnalyzeHighlights(asset)) {
+      this.highlightErrors.update((errors) => ({ ...errors, [asset.id]: validationMessage }));
       return;
     }
     this.highlightBusy.update((busy) => ({ ...busy, [asset.id]: true }));
     this.assetsService
-      .createHighlightAnalysis(asset.id)
+      .createHighlightAnalysis(asset.id, analyzer)
       .pipe(finalize(() => this.highlightBusy.update((busy) => ({ ...busy, [asset.id]: false }))))
       .subscribe({
         next: (analysis) => {
           this.highlightAnalyses.update((analyses) => ({ ...analyses, [asset.id]: analysis }));
         },
-        error: () => this.highlightErrors.update((errors) => ({ ...errors, [asset.id]: 'Highlight analysis could not be started.' })),
+        error: () => this.highlightErrors.update((errors) => ({ ...errors, [asset.id]: errorMessage })),
       });
   }
 

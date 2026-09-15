@@ -28,6 +28,10 @@ public interface JobRepository extends JpaRepository<Job, UUID> {
                     WHERE workspace_id = :workspaceId
                       AND status = 'QUEUED'
                       AND type IN (:types)
+                      AND (
+                        type <> 'ANALYZE_HIGHLIGHTS'
+                        OR COALESCE(payload ->> 'analyzerType', 'DETERMINISTIC_V1') IN (:highlightAnalyzers)
+                      )
                     ORDER BY queued_at ASC
                     LIMIT 1
                     FOR UPDATE SKIP LOCKED
@@ -35,7 +39,12 @@ public interface JobRepository extends JpaRepository<Job, UUID> {
             nativeQuery = true)
     Optional<Job> findNextQueuedForUpdate(
             @Param("workspaceId") UUID workspaceId,
-            @Param("types") List<String> types);
+            @Param("types") List<String> types,
+            @Param("highlightAnalyzers") List<String> highlightAnalyzers);
+
+    default Optional<Job> findNextQueuedForUpdate(UUID workspaceId, List<String> types) {
+        return findNextQueuedForUpdate(workspaceId, types, List.of("DETERMINISTIC_V1"));
+    }
 
     @Query(
             value = """

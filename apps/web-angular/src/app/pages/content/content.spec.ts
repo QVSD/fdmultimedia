@@ -177,8 +177,18 @@ describe('Content', () => {
 
     component['findHighlights'](ready);
 
-    expect(assetsService.createHighlightAnalysis).toHaveBeenCalledWith(ready.id);
+    expect(assetsService.createHighlightAnalysis).toHaveBeenCalledWith(ready.id, 'DETERMINISTIC_V1');
     expect(component['highlightAnalysis'](ready)?.status).toBe('PENDING');
+  });
+
+  it('starts semantic highlight analysis only when a transcript is complete', () => {
+    fixture.detectChanges();
+    const ready = component['assets']().find((item) => item.status === 'READY')!;
+
+    expect(component['canAnalyzeSemanticHighlights'](ready)).toBe(true);
+    component['findSemanticHighlights'](ready);
+
+    expect(assetsService.createHighlightAnalysis).toHaveBeenCalledWith(ready.id, 'TRANSCRIPT_SEMANTIC_V1');
   });
 
   it('starts transcription for an inspected ready asset with audio', () => {

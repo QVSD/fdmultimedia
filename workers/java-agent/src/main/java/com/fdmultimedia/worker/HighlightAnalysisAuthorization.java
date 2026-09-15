@@ -1,6 +1,7 @@
 package com.fdmultimedia.worker;
 
 import java.util.UUID;
+import java.util.List;
 
 record HighlightAnalysisAuthorization(
         UUID analysisId,
@@ -10,5 +11,29 @@ record HighlightAnalysisAuthorization(
         long minCandidateDurationMs,
         long maxCandidateDurationMs,
         String analyzerType,
-        String analyzerVersion) {
+        String analyzerVersion,
+        UUID transcriptId,
+        List<HighlightTranscriptSegment> transcriptSegments) {
+
+    HighlightAnalysisAuthorization(
+            UUID analysisId,
+            UUID assetId,
+            long durationMs,
+            int maxCandidates,
+            long minCandidateDurationMs,
+            long maxCandidateDurationMs,
+            String analyzerType,
+            String analyzerVersion) {
+        this(
+                analysisId,
+                assetId,
+                durationMs,
+                maxCandidates,
+                minCandidateDurationMs,
+                maxCandidateDurationMs,
+                analyzerType,
+                analyzerVersion,
+                null,
+                List.of());
+    }
 }

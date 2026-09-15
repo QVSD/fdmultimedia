@@ -1,6 +1,6 @@
 # Roadmap
 
-The repository is currently at Phase 7A. Completed phases are marked below;
+The repository is currently at Phase 7B2. Completed phases are marked below;
 later phases are planned high-level direction and intentionally do not go into
 implementation detail before they are started.
 
@@ -27,19 +27,21 @@ implementation detail before they are started.
    automatic inspection runs on the result. *(complete)*
 8. **Social vertical preset** — users create immutable 1080x1920 center-cropped
    derivatives from READY + INSPECTED video assets. *(complete)*
-9. **Highlight candidates** — create persisted highlight analyses and
+10. **Highlight candidates** — create persisted highlight analyses and
    deterministic candidate intervals that users can turn into existing
-   `CREATE_CLIP` jobs. No real AI provider is used yet.
-7. **Speech transcription** — persisted `MediaTranscript` and
+   `CREATE_CLIP` jobs. *(complete)*
+11. **Speech transcription** — persisted `MediaTranscript` and
    `TranscriptSegment` data through `TRANSCRIBE_MEDIA`, using a local
-   configurable transcription provider. *(current phase)*
-10. **AI/provider highlight analysis** — add a real provider behind the
-   structured analyzer contract after the deterministic workflow is proven.
-11. **Capabilities and processing prep** — broaden worker capability matching
+   configurable transcription provider. *(complete)*
+12. **Semantic highlight analysis** — add `TRANSCRIPT_SEMANTIC_V1` behind the
+   existing `ANALYZE_HIGHLIGHTS` job using persisted transcript segments and a
+   local provider boundary. Media, storage credentials, and raw commands are
+   not sent to the provider. *(current phase)*
+13. **Capabilities and processing prep** — broaden worker capability matching
    for future media operations.
-12. **FFmpeg processing** — richer automated video processing pipelines.
-13. **Scheduler / load balancing** — deciding which worker runs which job.
-14. **Social account integrations** — connecting and publishing to external
+14. **FFmpeg processing** — richer automated video processing pipelines.
+15. **Scheduler / load balancing** — deciding which worker runs which job.
+16. **Social account integrations** — connecting and publishing to external
    platforms.
-15. **AI content** — AI-assisted content creation.
-16. **Analytics / revenue** — performance analytics and revenue tracking.
+17. **AI content** — AI-assisted content creation.
+18. **Analytics / revenue** — performance analytics and revenue tracking.

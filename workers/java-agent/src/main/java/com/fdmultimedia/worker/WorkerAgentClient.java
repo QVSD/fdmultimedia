@@ -37,13 +37,18 @@ final class WorkerAgentClient {
         send("/worker-agent/heartbeat", Map.of("machineIdentifier", machineIdentifier), new TypeReference<Map<String, Object>>() {});
     }
 
-    ClaimedJob claim(String machineIdentifier, List<String> supportedJobTypes) throws IOException, InterruptedException {
+    ClaimedJob claim(String machineIdentifier, List<String> supportedJobTypes, List<String> supportedHighlightAnalyzers) throws IOException, InterruptedException {
         return send(
                 "/worker-agent/jobs/claim",
                 Map.of(
                         "machineIdentifier", machineIdentifier,
-                        "supportedJobTypes", supportedJobTypes),
+                        "supportedJobTypes", supportedJobTypes,
+                        "supportedHighlightAnalyzers", supportedHighlightAnalyzers),
                 new TypeReference<ClaimedJob>() {});
+    }
+
+    ClaimedJob claim(String machineIdentifier, List<String> supportedJobTypes) throws IOException, InterruptedException {
+        return claim(machineIdentifier, supportedJobTypes, List.of("DETERMINISTIC_V1"));
     }
 
     void started(UUID jobId, String machineIdentifier) throws IOException, InterruptedException {

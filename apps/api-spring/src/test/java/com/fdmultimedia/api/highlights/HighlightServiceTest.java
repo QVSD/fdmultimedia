@@ -28,6 +28,10 @@ import com.fdmultimedia.api.jobs.JobService;
 import com.fdmultimedia.api.jobs.JobStatus;
 import com.fdmultimedia.api.jobs.JobSummary;
 import com.fdmultimedia.api.jobs.JobType;
+import com.fdmultimedia.api.transcripts.MediaTranscript;
+import com.fdmultimedia.api.transcripts.MediaTranscriptRepository;
+import com.fdmultimedia.api.transcripts.TranscriptSegment;
+import com.fdmultimedia.api.transcripts.TranscriptSegmentRepository;
 import com.fdmultimedia.api.users.AppUser;
 import com.fdmultimedia.api.workers.Worker;
 import com.fdmultimedia.api.workers.WorkerCredential;
@@ -58,6 +62,8 @@ class HighlightServiceTest {
     private final MediaAssetRepository assets = mock(MediaAssetRepository.class);
     private final HighlightAnalysisRepository analyses = mock(HighlightAnalysisRepository.class);
     private final HighlightCandidateRepository candidates = mock(HighlightCandidateRepository.class);
+    private final MediaTranscriptRepository transcripts = mock(MediaTranscriptRepository.class);
+    private final TranscriptSegmentRepository transcriptSegments = mock(TranscriptSegmentRepository.class);
     private final JobService jobService = mock(JobService.class);
     private final MediaAssetService mediaAssetService = mock(MediaAssetService.class);
     private final HighlightProperties properties = new HighlightProperties();
@@ -66,6 +72,8 @@ class HighlightServiceTest {
             assets,
             analyses,
             candidates,
+            transcripts,
+            transcriptSegments,
             jobService,
             mediaAssetService,
             properties,
@@ -125,6 +133,44 @@ class HighlightServiceTest {
     }
 
     @Test
+    void semanticAnalysisRequiresSucceededTranscript() {
+        when(assets.findByWorkspaceAndId(workspace, asset.getId())).thenReturn(Optional.of(asset));
+        when(transcripts.findByWorkspaceAndAssetOrderByCreatedAtDesc(workspace, asset)).thenReturn(List.of());
+
+        assertThatThrownBy(() -> service.createAnalysis(
+                user,
+                asset.getId(),
+                new CreateHighlightAnalysisRequest("TRANSCRIPT_SEMANTIC_V1")))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting("reason")
+                .isEqualTo("TRANSCRIPT_REQUIRED");
+    }
+
+    @Test
+    void createsSemanticAnalysisWithTranscriptReference() {
+        MediaTranscript transcript = succeededTranscript();
+        when(assets.findByWorkspaceAndId(workspace, asset.getId())).thenReturn(Optional.of(asset));
+        when(transcripts.findByWorkspaceAndAssetOrderByCreatedAtDesc(workspace, asset)).thenReturn(List.of(transcript));
+        when(transcriptSegments.findByTranscriptOrderBySequenceAsc(transcript)).thenReturn(segments(transcript));
+        when(jobService.createForWorkspace(any(), any())).thenReturn(jobSummary(analysisJob));
+        when(jobService.getJobEntityForWorkspace(workspace, analysisJob.getId())).thenReturn(Optional.of(analysisJob));
+        when(analyses.save(any(HighlightAnalysis.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(candidates.findByAnalysisOrderByRankAsc(any())).thenReturn(List.of());
+
+        HighlightAnalysisSummary summary = service.createAnalysis(
+                user,
+                asset.getId(),
+                new CreateHighlightAnalysisRequest("TRANSCRIPT_SEMANTIC_V1"));
+
+        ArgumentCaptor<JobCreateRequest> request = ArgumentCaptor.forClass(JobCreateRequest.class);
+        verify(jobService).createForWorkspace(any(), request.capture());
+        assertThat(request.getValue().payload())
+                .containsEntry("analyzerType", "TRANSCRIPT_SEMANTIC_V1")
+                .containsEntry("transcriptId", transcript.getId().toString());
+        assertThat(summary.analyzerType()).isEqualTo("TRANSCRIPT_SEMANTIC_V1");
+    }
+
+    @Test
     void completesAnalysisWithValidatedRankedCandidates() {
         analysis.markRunning(NOW);
         analysisJob.claim(worker, NOW.minusSeconds(1), NOW.plusSeconds(20));
@@ -176,6 +222,74 @@ class HighlightServiceTest {
                 .isEqualTo(HttpStatus.BAD_REQUEST);
         assertThat(analysis.getStatus()).isEqualTo(HighlightAnalysisStatus.RUNNING);
         assertThat(analysisJob.getStatus()).isEqualTo(JobStatus.RUNNING);
+    }
+
+    @Test
+    void authorizesSemanticAnalysisWithTranscriptSegments() {
+        MediaTranscript transcript = succeededTranscript();
+        Job semanticJob = new Job(
+                workspace,
+                JobType.ANALYZE_HIGHLIGHTS,
+                Map.of(
+                        "assetId", asset.getId().toString(),
+                        "analyzerType", "TRANSCRIPT_SEMANTIC_V1",
+                        "transcriptId", transcript.getId().toString()),
+                3,
+                NOW);
+        HighlightAnalysis semantic = new HighlightAnalysis(workspace, asset, semanticJob, "TRANSCRIPT_SEMANTIC_V1", "1", NOW);
+        semanticJob.claim(worker, NOW.minusSeconds(1), NOW.plusSeconds(20));
+        when(jobService.requireOnlineWorker(workerPrincipal, "machine-1")).thenReturn(worker);
+        when(jobService.requireJobForWorkerWorkspace(worker, semanticJob.getId())).thenReturn(semanticJob);
+        when(analyses.findByAnalysisJobId(semanticJob.getId())).thenReturn(Optional.of(semantic));
+        when(transcripts.findByWorkspaceAndId(workspace, transcript.getId())).thenReturn(Optional.of(transcript));
+        when(transcriptSegments.findByTranscriptOrderBySequenceAsc(transcript)).thenReturn(segments(transcript));
+
+        WorkerHighlightAuthorizationResponse response = service.authorizeWorkerAnalysis(
+                workerPrincipal,
+                semanticJob.getId(),
+                "machine-1");
+
+        assertThat(response.analyzerType()).isEqualTo("TRANSCRIPT_SEMANTIC_V1");
+        assertThat(response.transcriptId()).isEqualTo(transcript.getId());
+        assertThat(response.transcriptSegments()).hasSize(2);
+        assertThat(semantic.getStatus()).isEqualTo(HighlightAnalysisStatus.RUNNING);
+    }
+
+    @Test
+    void semanticCompletionRejectsUngroundedCandidate() {
+        MediaTranscript transcript = succeededTranscript();
+        Job semanticJob = new Job(
+                workspace,
+                JobType.ANALYZE_HIGHLIGHTS,
+                Map.of(
+                        "assetId", asset.getId().toString(),
+                        "analyzerType", "TRANSCRIPT_SEMANTIC_V1",
+                        "transcriptId", transcript.getId().toString()),
+                3,
+                NOW);
+        HighlightAnalysis semantic = new HighlightAnalysis(workspace, asset, semanticJob, "TRANSCRIPT_SEMANTIC_V1", "1", NOW);
+        semantic.markRunning(NOW);
+        semanticJob.claim(worker, NOW.minusSeconds(1), NOW.plusSeconds(20));
+        semanticJob.start(worker, NOW, NOW.plusSeconds(20));
+        when(jobService.requireOnlineWorker(workerPrincipal, "machine-1")).thenReturn(worker);
+        when(jobService.requireJobForWorkerWorkspace(worker, semanticJob.getId())).thenReturn(semanticJob);
+        when(analyses.findByAnalysisJobId(semanticJob.getId())).thenReturn(Optional.of(semantic));
+        when(transcripts.findByWorkspaceAndId(workspace, transcript.getId())).thenReturn(Optional.of(transcript));
+        when(transcriptSegments.findByTranscriptOrderBySequenceAsc(transcript)).thenReturn(segments(transcript));
+
+        assertThatThrownBy(() -> service.completeWorkerAnalysis(
+                workerPrincipal,
+                semanticJob.getId(),
+                new WorkerHighlightCompletionRequest(
+                        "machine-1",
+                        semantic.getId(),
+                        asset.getId(),
+                        List.of(new WorkerHighlightCandidateRequest(15_000L, 19_000L, new BigDecimal("0.8"), "not grounded")))))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting("statusCode")
+                .isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(semantic.getStatus()).isEqualTo(HighlightAnalysisStatus.RUNNING);
+        assertThat(semanticJob.getStatus()).isEqualTo(JobStatus.RUNNING);
     }
 
     @Test
@@ -299,5 +413,24 @@ class HighlightServiceTest {
                 null,
                 null,
                 "fdm-worker/0.1.0");
+    }
+
+    private MediaTranscript succeededTranscript() {
+        Job transcriptionJob = new Job(
+                workspace,
+                JobType.TRANSCRIBE_MEDIA,
+                Map.of("assetId", asset.getId().toString(), "provider", "WHISPER_CPP", "model", "base"),
+                3,
+                NOW);
+        MediaTranscript transcript = new MediaTranscript(workspace, asset, transcriptionJob, "WHISPER_CPP", "base", NOW);
+        transcript.markRunning(NOW);
+        transcript.markSucceeded("ro", 20_000L, NOW);
+        return transcript;
+    }
+
+    private List<TranscriptSegment> segments(MediaTranscript transcript) {
+        return List.of(
+                new TranscriptSegment(transcript, 0, 0, 5_000, "Bun venit pe platforma multimedia.", null, NOW),
+                new TranscriptSegment(transcript, 1, 5_000, 10_000, "Acesta este un test semantic pentru clipuri.", null, NOW));
     }
 }

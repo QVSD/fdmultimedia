@@ -15,6 +15,10 @@ record WorkerAgentConfig(
         String transcriptionCommand,
         String transcriptionModel,
         Duration transcriptionTimeout,
+        String semanticHighlightRuntime,
+        URI semanticHighlightEndpoint,
+        String semanticHighlightModel,
+        Duration semanticHighlightTimeout,
         Path identityFile,
         Duration heartbeatInterval,
         Duration jobPollInterval) {
@@ -36,6 +40,14 @@ record WorkerAgentConfig(
                 Long.parseLong(environment.getOrDefault("TRANSCRIPTION_TIMEOUT_SECONDS", "900")));
         if (transcriptionTimeout.isNegative() || transcriptionTimeout.isZero()) {
             throw new IllegalArgumentException("TRANSCRIPTION_TIMEOUT_SECONDS must be greater than zero");
+        }
+        String semanticRuntime = environment.getOrDefault("SEMANTIC_HIGHLIGHT_RUNTIME", "OLLAMA").trim();
+        URI semanticEndpoint = normalizeBaseUrl(environment.getOrDefault("SEMANTIC_HIGHLIGHT_ENDPOINT", "http://localhost:11434"));
+        String semanticModel = environment.getOrDefault("SEMANTIC_HIGHLIGHT_MODEL", "llama3.2:3b").trim();
+        Duration semanticTimeout = Duration.ofSeconds(
+                Long.parseLong(environment.getOrDefault("SEMANTIC_HIGHLIGHT_TIMEOUT_SECONDS", "120")));
+        if (semanticTimeout.isNegative() || semanticTimeout.isZero()) {
+            throw new IllegalArgumentException("SEMANTIC_HIGHLIGHT_TIMEOUT_SECONDS must be greater than zero");
         }
         Path identityFile = Path.of(environment.getOrDefault(
                 "FDM_WORKER_ID_FILE",
@@ -60,6 +72,10 @@ record WorkerAgentConfig(
                 transcriptionCommand.isBlank() ? "whisper" : transcriptionCommand,
                 transcriptionModel.isBlank() ? "base" : transcriptionModel,
                 transcriptionTimeout,
+                semanticRuntime.isBlank() ? "OLLAMA" : semanticRuntime,
+                semanticEndpoint,
+                semanticModel.isBlank() ? "llama3.2:3b" : semanticModel,
+                semanticTimeout,
                 identityFile,
                 heartbeatInterval,
                 jobPollInterval);
