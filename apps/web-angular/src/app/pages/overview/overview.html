@@ -1,19 +1,82 @@
 <section class="overview">
-  <h1>Overview</h1>
-  <p class="lead">Media automation platform &mdash; Phase 6A media inspection.</p>
+  <header class="overview__header">
+    <div>
+      <h1>Overview</h1>
+      <p class="lead">Content workspace status, processing activity, and recent media.</p>
+    </div>
+  </header>
 
-  <div class="status-card" [class.status-card--online]="backendStatus() === 'online'"
-                            [class.status-card--offline]="backendStatus() === 'offline'">
-    @switch (backendStatus()) {
-      @case ('checking') {
-        <span>Checking backend&hellip;</span>
+  <div class="overview__metrics" aria-label="Workspace summary">
+    <article class="metric" [class.metric--good]="backendStatus() === 'online'" [class.metric--bad]="backendStatus() === 'offline'">
+      <span>System</span>
+      <strong>{{ systemLabel() }}</strong>
+    </article>
+    <article class="metric">
+      <span>Workers</span>
+      <strong>{{ onlineWorkers() }} online</strong>
+      <small>{{ workers().length }} total</small>
+    </article>
+    <article class="metric">
+      <span>Content</span>
+      <strong>{{ readyAssets() }} ready</strong>
+      <small>{{ assets().length }} total</small>
+    </article>
+    <article class="metric">
+      <span>Processing</span>
+      <strong>{{ processingAssets() + activeJobs() }} active</strong>
+      <small>{{ processingAssets() }} media · {{ activeJobs() }} jobs</small>
+    </article>
+    <article class="metric" [class.metric--bad]="attentionCount() > 0">
+      <span>Needs attention</span>
+      <strong>{{ attentionCount() }}</strong>
+      <small>{{ failedAssets() }} media · {{ failedJobs() }} jobs</small>
+    </article>
+  </div>
+
+  <div class="overview__grid">
+    <section class="panel">
+      <h2>Recent Content</h2>
+      @switch (assetsState()) {
+        @case ('loading') {
+          <p class="panel__state">Loading content...</p>
+        }
+        @case ('error') {
+          <p class="panel__state panel__state--error">Content could not be loaded.</p>
+        }
+        @case ('ready') {
+          @if (recentAssets().length === 0) {
+            <p class="panel__state">Import media to begin building clips and verticals.</p>
+          } @else {
+            <ul class="recent-list">
+              @for (asset of recentAssets(); track asset.id) {
+                <li>
+                  <strong>{{ assetTitle(asset) }}</strong>
+                  <span>{{ derivationLabel(asset) }} · {{ statusLabel(asset) }} · {{ asset.createdAt | date:'medium' }}</span>
+                </li>
+              }
+            </ul>
+          }
+        }
       }
-      @case ('online') {
-        <span>Backend: Online</span>
+    </section>
+
+    <section class="panel">
+      <h2>Compute</h2>
+      @switch (workersState()) {
+        @case ('loading') {
+          <p class="panel__state">Loading workers...</p>
+        }
+        @case ('error') {
+          <p class="panel__state panel__state--error">Worker fleet could not be loaded.</p>
+        }
+        @case ('ready') {
+          @if (workers().length === 0) {
+            <p class="panel__state">No workers are registered yet.</p>
+          } @else {
+            <p class="panel__state">{{ onlineWorkers() }} of {{ workers().length }} workers are online.</p>
+          }
+        }
       }
-      @case ('offline') {
-        <span>Backend: Offline</span>
-      }
-    }
+    </section>
   </div>
 </section>

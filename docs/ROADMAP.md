@@ -1,6 +1,6 @@
 # Roadmap
 
-The repository is currently at Phase 7B2. Completed phases are marked below;
+The repository is currently at Phase 8. Completed phases are marked below;
 later phases are planned high-level direction and intentionally do not go into
 implementation detail before they are started.
 
@@ -36,12 +36,16 @@ implementation detail before they are started.
 12. **Semantic highlight analysis** — add `TRANSCRIPT_SEMANTIC_V1` behind the
    existing `ANALYZE_HIGHLIGHTS` job using persisted transcript segments and a
    local provider boundary. Media, storage credentials, and raw commands are
-   not sent to the provider. *(current phase)*
-13. **Capabilities and processing prep** — broaden worker capability matching
+   not sent to the provider. *(complete)*
+13. **Product UI consolidation** — make Content the primary workflow surface,
+   hide unfinished placeholder areas from primary navigation, replace
+   engineering tables with asset summaries/details, and present transcripts,
+   highlights, clips, and vertical derivatives in product language. *(current phase)*
+14. **Capabilities and processing prep** — broaden worker capability matching
    for future media operations.
-14. **FFmpeg processing** — richer automated video processing pipelines.
-15. **Scheduler / load balancing** — deciding which worker runs which job.
-16. **Social account integrations** — connecting and publishing to external
+15. **FFmpeg processing** — richer automated video processing pipelines.
+16. **Scheduler / load balancing** — deciding which worker runs which job.
+17. **Social account integrations** — connecting and publishing to external
    platforms.
-17. **AI content** — AI-assisted content creation.
-18. **Analytics / revenue** — performance analytics and revenue tracking.
+18. **AI content** — AI-assisted content creation.
+19. **Analytics / revenue** — performance analytics and revenue tracking.

@@ -1,7 +1,7 @@
 <section class="content">
   <header>
     <h1>Content</h1>
-    <p class="content__lead">Import direct media files into private object storage.</p>
+    <p class="content__lead">Import media, understand it, find useful moments, and create derivatives.</p>
   </header>
 
   <form class="content__form" (ngSubmit)="importMedia()">
@@ -17,8 +17,9 @@
       />
     </label>
     <button type="submit" [disabled]="importing()">
-      {{ importing() ? 'Importing...' : 'Import Media' }}
+      {{ importing() ? 'Importing...' : 'Import' }}
     </button>
+    <p>HTTP and HTTPS media URLs are supported.</p>
   </form>
 
   @if (importError()) {
@@ -34,117 +35,142 @@
     }
     @case ('ready') {
       @if (assets().length === 0) {
-        <p class="content__state">No media assets have been imported yet.</p>
+        <p class="content__state">No media yet. Import a direct media URL to begin.</p>
       } @else {
-        <div class="content__table-wrap">
-          <table class="content__table">
-            <thead>
-              <tr>
-                <th scope="col">Asset</th>
-                <th scope="col">Status</th>
-                <th scope="col">Size</th>
-                <th scope="col">Type</th>
-                <th scope="col">Duration</th>
-                <th scope="col">Resolution</th>
-                <th scope="col">Codecs</th>
-                <th scope="col">Inspection</th>
-                <th scope="col">Transcript</th>
-                <th scope="col">Highlights</th>
-                <th scope="col">Clip</th>
-                <th scope="col">Vertical</th>
-                <th scope="col">Created</th>
-              </tr>
-            </thead>
-            <tbody>
-              @for (asset of assets(); track asset.id) {
-                <tr>
-                  <td>
-                    <strong>{{ asset.originalFilename || 'Direct URL media' }}</strong>
-                    <span>{{ shortUrl(asset) }}</span>
-                    <span>{{ lineage(asset) }}</span>
-                  </td>
-                  <td>
-                    <span [class]="'content__badge content__badge--' + asset.status.toLowerCase()">
-                      {{ asset.status }}
-                    </span>
-                    @if (asset.errorMessage) {
-                      <span class="content__error">{{ asset.errorCode }}: {{ asset.errorMessage }}</span>
+        <div class="asset-list">
+          @for (asset of assets(); track asset.id) {
+            <article class="asset-card" [class.asset-card--failed]="asset.status === 'FAILED'">
+              <div class="asset-card__summary">
+                <div class="asset-card__title">
+                  <span class="asset-card__kind">{{ derivationLabel(asset) }}</span>
+                  <h2>{{ assetTitle(asset) }}</h2>
+                  <p>{{ lineage(asset) }}</p>
+                </div>
+
+                <div class="asset-card__meta">
+                  <span [class]="'content__badge content__badge--' + asset.status.toLowerCase()">
+                    {{ statusLabel(asset) }}
+                  </span>
+                  <span>{{ mediaSummary(asset) }}</span>
+                  <span>{{ asset.createdAt | date:'medium' }}</span>
+                </div>
+
+                <div class="asset-card__actions" aria-label="Available actions">
+                  @if (canTranscribe(asset)) {
+                    <button type="button" (click)="transcribe(asset)" [disabled]="transcriptBusy()[asset.id]">
+                      {{ transcriptBusy()[asset.id] ? 'Transcribing...' : 'Transcribe' }}
+                    </button>
+                  }
+                  @if (canAnalyzeHighlights(asset)) {
+                    <button type="button" (click)="findHighlights(asset)" [disabled]="highlightBusy()[asset.id]">
+                      {{ highlightBusy()[asset.id] ? 'Finding...' : 'Find Highlights' }}
+                    </button>
+                    @if (canAnalyzeSemanticHighlights(asset)) {
+                      <button type="button" (click)="findSemanticHighlights(asset)" [disabled]="highlightBusy()[asset.id]">
+                        {{ highlightBusy()[asset.id] ? 'Finding...' : 'Transcript AI' }}
+                      </button>
+                    } @else if (asset.hasAudio === true) {
+                      <button type="button" disabled>Transcript AI needs transcript</button>
                     }
-                  </td>
-                  <td>{{ size(asset) }}</td>
-                  <td>{{ asset.contentType || '-' }}</td>
-                  <td>{{ duration(asset) }}</td>
-                  <td>{{ resolution(asset) }}</td>
-                  <td>{{ codecs(asset) }}</td>
-                  <td>
-                    <span>{{ inspectionLabel(asset) }}</span>
+                  }
+                  @if (canCreateSocialVertical(asset)) {
+                    <button type="button" (click)="createSocialVertical(asset)" [disabled]="verticalBusy()[asset.id]">
+                      {{ verticalBusy()[asset.id] ? 'Creating...' : 'Make 9:16' }}
+                    </button>
+                  }
+                  <button class="button-secondary" type="button" (click)="toggleAsset(asset)" [attr.aria-expanded]="isExpanded(asset)">
+                    {{ isExpanded(asset) ? 'Hide Details' : 'Details' }}
+                  </button>
+                </div>
+              </div>
+
+              @if (asset.errorMessage) {
+                <p class="content__error">{{ asset.errorCode }}: {{ asset.errorMessage }}</p>
+              }
+              @if (transcriptErrors()[asset.id]) {
+                <p class="content__error">{{ transcriptErrors()[asset.id] }}</p>
+              }
+              @if (highlightErrors()[asset.id]) {
+                <p class="content__error">{{ highlightErrors()[asset.id] }}</p>
+              }
+              @if (verticalErrors()[asset.id]) {
+                <p class="content__error">{{ verticalErrors()[asset.id] }}</p>
+              }
+
+              @if (isExpanded(asset)) {
+                <div class="asset-details">
+                  <section class="detail-panel">
+                    <h3>Overview</h3>
+                    <dl class="detail-grid">
+                      <div><dt>Status</dt><dd>{{ statusLabel(asset) }}</dd></div>
+                      <div><dt>Inspection</dt><dd>{{ inspectionStatusLabel(asset) }}</dd></div>
+                      <div><dt>Duration</dt><dd>{{ duration(asset) }}</dd></div>
+                      <div><dt>Resolution</dt><dd>{{ resolution(asset) }}</dd></div>
+                      <div><dt>Codecs</dt><dd>{{ codecs(asset) }}</dd></div>
+                      <div><dt>Type</dt><dd>{{ asset.contentType || '-' }}</dd></div>
+                      <div><dt>Size</dt><dd>{{ size(asset) }}</dd></div>
+                      <div><dt>Source</dt><dd>{{ shortUrl(asset) }}</dd></div>
+                      <div><dt>Lineage</dt><dd>{{ lineage(asset) }}</dd></div>
+                      <div><dt>Checksum</dt><dd>{{ asset.checksumSha256 || '-' }}</dd></div>
+                    </dl>
                     @if (asset.inspectionErrorMessage) {
-                      <span class="content__error">{{ asset.inspectionErrorCode }}: {{ asset.inspectionErrorMessage }}</span>
+                      <p class="content__error">{{ asset.inspectionErrorCode }}: {{ asset.inspectionErrorMessage }}</p>
                     }
-                  </td>
-                  <td>
-                    @if (canTranscribe(asset)) {
+                  </section>
+
+                  <section class="detail-panel">
+                    <h3>Transcript</h3>
+                    @if (transcript(asset); as currentTranscript) {
+                      <div class="content__transcript">
+                        <p>
+                          <strong>{{ transcriptLabel(currentTranscript) }}</strong>
+                          <span>{{ transcriptProviderLabel(currentTranscript) }}</span>
+                          <span>{{ currentTranscript.model }}</span>
+                        </p>
+                        @if (currentTranscript.errorMessage) {
+                          <p class="content__error">{{ currentTranscript.errorCode }}: {{ currentTranscript.errorMessage }}</p>
+                        }
+                        @if (currentTranscript.status === 'SUCCEEDED') {
+                          <div class="content__segments" aria-label="Transcript segments">
+                            @for (segment of currentTranscript.segments.slice(0, 200); track segment.id) {
+                              <p>
+                                <strong>{{ timeMs(segment.startMs) }} - {{ timeMs(segment.endMs) }}</strong>
+                                {{ segment.text }}
+                              </p>
+                            }
+                          </div>
+                        }
+                      </div>
+                    } @else if (canTranscribe(asset)) {
+                      <p class="content__muted">No transcript yet.</p>
                       <button type="button" (click)="transcribe(asset)" [disabled]="transcriptBusy()[asset.id]">
-                        {{ transcriptBusy()[asset.id] ? 'Starting...' : 'Transcribe' }}
+                        {{ transcriptBusy()[asset.id] ? 'Transcribing...' : 'Transcribe' }}
                       </button>
-                      @if (transcriptErrors()[asset.id]) {
-                        <span class="content__error">{{ transcriptErrors()[asset.id] }}</span>
-                      }
-                      @if (transcript(asset); as transcript) {
-                        <div class="content__transcript">
-                          <span>{{ transcriptLabel(transcript) }}</span>
-                          <span>{{ transcript.provider }} · {{ transcript.model }}</span>
-                          @if (transcript.detectedLanguage) {
-                            <span>Language: {{ transcript.detectedLanguage }}</span>
-                          }
-                          @if (transcript.errorMessage) {
-                            <span class="content__error">{{ transcript.errorCode }}: {{ transcript.errorMessage }}</span>
-                          }
-                          @if (transcript.status === 'SUCCEEDED') {
-                            <details>
-                              <summary>{{ transcript.segments.length }} segments</summary>
-                              <div class="content__segments">
-                                @for (segment of transcript.segments.slice(0, 200); track segment.id) {
-                                  <p>
-                                    <strong>{{ timeMs(segment.startMs) }}-{{ timeMs(segment.endMs) }}</strong>
-                                    {{ segment.text }}
-                                  </p>
-                                }
-                              </div>
-                            </details>
-                          }
-                        </div>
-                      }
                     } @else {
-                      <span>-</span>
+                      <p class="content__muted">Transcript is available for inspected media with audio.</p>
                     }
-                  </td>
-                  <td>
-                    @if (canAnalyzeHighlights(asset)) {
-                      <button type="button" (click)="findHighlights(asset)" [disabled]="highlightBusy()[asset.id]">
-                        {{ highlightBusy()[asset.id] ? 'Starting...' : 'Find Highlights' }}
-                      </button>
-                      <button type="button" (click)="findSemanticHighlights(asset)" [disabled]="highlightBusy()[asset.id] || !canAnalyzeSemanticHighlights(asset)">
-                        Semantic Highlights
-                      </button>
-                      @if (highlightErrors()[asset.id]) {
-                        <span class="content__error">{{ highlightErrors()[asset.id] }}</span>
-                      }
-                      @if (highlightAnalysis(asset); as analysis) {
-                        <div class="content__highlights">
+                  </section>
+
+                  <section class="detail-panel">
+                    <h3>Highlights</h3>
+                    @if (highlightAnalysis(asset); as analysis) {
+                      <div class="content__highlights">
+                        <p>
+                          <strong>{{ analyzerLabel(analysis.analyzerType) }}</strong>
                           <span>{{ analysisLabel(analysis) }}</span>
-                          <span>Analyzer: {{ analysis.analyzerType }}</span>
-                          @if (analysis.errorMessage) {
-                            <span class="content__error">{{ analysis.errorCode }}: {{ analysis.errorMessage }}</span>
-                          }
-                          @if (analysis.status === 'SUCCEEDED' && analysis.candidates.length === 0) {
-                            <span>No candidates found.</span>
-                          }
+                        </p>
+                        @if (analysis.errorMessage) {
+                          <p class="content__error">{{ analysis.errorCode }}: {{ analysis.errorMessage }}</p>
+                        }
+                        @if (analysis.status === 'SUCCEEDED' && analysis.candidates.length === 0) {
+                          <p class="content__muted">No candidates found.</p>
+                        }
+                        <div class="candidate-grid">
                           @for (candidate of analysis.candidates; track candidate.id) {
                             <div class="content__candidate">
-                              <strong>#{{ candidate.rank }} {{ timeMs(candidate.startMs) }}-{{ timeMs(candidate.endMs) }}</strong>
-                              <span>{{ timeMs(candidate.durationMs) }} · {{ score(candidate.score) }}</span>
-                              <span>{{ candidate.reason }}</span>
+                              <strong>#{{ candidate.rank }} {{ timeMs(candidate.startMs) }} - {{ timeMs(candidate.endMs) }}</strong>
+                              <span>{{ timeMs(candidate.durationMs) }} · Score {{ score(candidate.score) }}</span>
+                              <p>{{ candidate.reason }}</p>
                               <button
                                 type="button"
                                 (click)="createClipFromCandidate(candidate)"
@@ -158,16 +184,20 @@
                             </div>
                           }
                         </div>
-                      }
+                      </div>
+                    } @else if (canAnalyzeHighlights(asset)) {
+                      <p class="content__muted">No highlight analysis yet.</p>
                     } @else {
-                      <span>-</span>
+                      <p class="content__muted">Highlights are available for inspected video.</p>
                     }
-                  </td>
-                  <td>
+                  </section>
+
+                  <section class="detail-panel">
+                    <h3>Create</h3>
                     @if (canCreateClip(asset)) {
                       <form class="content__clip-form" (ngSubmit)="createClip(asset)">
                         <label>
-                          <span>Start ms</span>
+                          <span>Start</span>
                           <input
                             name="start-{{ asset.id }}"
                             type="number"
@@ -177,7 +207,7 @@
                           />
                         </label>
                         <label>
-                          <span>Duration ms</span>
+                          <span>Duration</span>
                           <input
                             name="duration-{{ asset.id }}"
                             type="number"
@@ -192,29 +222,20 @@
                         </button>
                       </form>
                       @if (clipErrors()[asset.id]) {
-                        <span class="content__error">{{ clipErrors()[asset.id] }}</span>
+                        <p class="content__error">{{ clipErrors()[asset.id] }}</p>
                       }
-                    } @else {
-                      <span>-</span>
                     }
-                  </td>
-                  <td>
                     @if (canCreateSocialVertical(asset)) {
                       <button type="button" (click)="createSocialVertical(asset)" [disabled]="verticalBusy()[asset.id]">
                         {{ verticalBusy()[asset.id] ? 'Creating...' : 'Make 9:16' }}
                       </button>
-                      @if (verticalErrors()[asset.id]) {
-                        <span class="content__error">{{ verticalErrors()[asset.id] }}</span>
-                      }
-                    } @else {
-                      <span>-</span>
+                      <p class="content__muted">Creates a 1080x1920 center-cropped derivative.</p>
                     }
-                  </td>
-                  <td>{{ asset.createdAt | date:'medium' }}</td>
-                </tr>
+                  </section>
+                </div>
               }
-            </tbody>
-          </table>
+            </article>
+          }
         </div>
       }
     }

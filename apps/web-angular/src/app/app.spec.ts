@@ -48,7 +48,15 @@ describe('App', () => {
     await fixture.whenStable();
     const compiled = fixture.nativeElement as HTMLElement;
     expect(compiled.querySelector('.sidebar__brand')?.textContent).toContain('FD Multimedia');
-    expect(compiled.querySelectorAll('.sidebar__link').length).toBe(8);
+    expect(compiled.querySelectorAll('.sidebar__link').length).toBe(5);
+    expect(compiled.textContent).toContain('Overview');
+    expect(compiled.textContent).toContain('Content');
+    expect(compiled.textContent).toContain('Compute');
+    expect(compiled.textContent).toContain('Jobs');
+    expect(compiled.textContent).toContain('Settings');
+    expect(compiled.textContent).not.toContain('Robots');
+    expect(compiled.textContent).not.toContain('Analytics');
+    expect(compiled.textContent).not.toContain('Revenue');
     expect(compiled.textContent).toContain('Owner');
     expect(compiled.textContent).toContain('FD Multimedia');
     expect(compiled.textContent).toContain('OWNER');

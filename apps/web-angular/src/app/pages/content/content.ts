@@ -34,6 +34,7 @@ export class Content implements OnInit, OnDestroy {
   protected readonly transcripts = signal<Record<string, MediaTranscriptSummary | null>>({});
   protected readonly transcriptBusy = signal<Record<string, boolean>>({});
   protected readonly transcriptErrors = signal<Record<string, string | null>>({});
+  protected readonly expandedAssets = signal<Record<string, boolean>>({});
 
   private subscription?: Subscription;
 
@@ -90,6 +91,81 @@ export class Content implements OnInit, OnDestroy {
     return asset.sourceUrl.length > 72 ? `${asset.sourceUrl.slice(0, 69)}...` : asset.sourceUrl;
   }
 
+  protected assetTitle(asset: MediaAssetSummary): string {
+    return asset.originalFilename || (asset.derivationType === 'ORIGINAL' ? 'Imported media' : this.derivationLabel(asset));
+  }
+
+  protected parentTitle(asset: MediaAssetSummary): string {
+    if (!asset.parentAssetId) {
+      return '';
+    }
+    const parent = this.assets().find((item) => item.id === asset.parentAssetId);
+    return parent ? this.assetTitle(parent) : asset.parentAssetId.slice(0, 8);
+  }
+
+  protected derivationLabel(asset: MediaAssetSummary): string {
+    if (asset.derivationType === 'CLIP') {
+      return 'Clip';
+    }
+    if (asset.derivationType === 'SOCIAL_VERTICAL') {
+      return 'Vertical';
+    }
+    return 'Original';
+  }
+
+  protected statusLabel(asset: MediaAssetSummary): string {
+    switch (asset.status) {
+      case 'PENDING':
+        return 'Waiting';
+      case 'IMPORTING':
+      case 'PROCESSING':
+        return 'Processing';
+      case 'READY':
+        return 'Ready';
+      case 'FAILED':
+        return 'Failed';
+    }
+  }
+
+  protected inspectionStatusLabel(asset: MediaAssetSummary): string {
+    switch (asset.inspectionStatus) {
+      case 'PENDING':
+        return 'Waiting for inspection';
+      case 'INSPECTING':
+        return 'Inspecting';
+      case 'INSPECTED':
+        return 'Inspected';
+      case 'FAILED':
+        return 'Inspection failed';
+      default:
+        return 'Not inspected';
+    }
+  }
+
+  protected analyzerLabel(analyzerType: string): string {
+    if (analyzerType === 'TRANSCRIPT_SEMANTIC_V1') {
+      return 'Transcript AI';
+    }
+    if (analyzerType === 'DETERMINISTIC_V1') {
+      return 'Baseline';
+    }
+    return analyzerType;
+  }
+
+  protected transcriptProviderLabel(transcript: MediaTranscriptSummary): string {
+    const language = transcript.detectedLanguage ? transcript.detectedLanguage.toUpperCase() : 'Language unknown';
+    const provider = transcript.provider.includes('WHISPER') ? 'Local Whisper' : transcript.provider;
+    return `${language} · ${provider}`;
+  }
+
+  protected mediaSummary(asset: MediaAssetSummary): string {
+    return [
+      this.duration(asset),
+      this.resolution(asset),
+      this.codecs(asset),
+    ].filter((value) => value !== '-').join(' · ') || 'Metadata pending';
+  }
+
   protected size(asset: MediaAssetSummary): string {
     if (asset.fileSizeBytes === null) {
       return '-';
@@ -133,12 +209,20 @@ export class Content implements OnInit, OnDestroy {
       return asset.sourceType === 'DERIVED' ? 'Derived asset' : 'Original asset';
     }
     if (asset.derivationType === 'SOCIAL_VERTICAL') {
-      return `Vertical of ${asset.parentAssetId.slice(0, 8)}`;
+      return `Vertical from ${this.parentTitle(asset)}`;
     }
     if (asset.derivationType !== 'CLIP') {
-      return `Derived from ${asset.parentAssetId.slice(0, 8)}`;
+      return `Derived from ${this.parentTitle(asset)}`;
     }
-    return `Clip of ${asset.parentAssetId.slice(0, 8)}`;
+    return `Clip from ${this.parentTitle(asset)}`;
+  }
+
+  protected isExpanded(asset: MediaAssetSummary): boolean {
+    return this.expandedAssets()[asset.id] ?? false;
+  }
+
+  protected toggleAsset(asset: MediaAssetSummary): void {
+    this.expandedAssets.update((items) => ({ ...items, [asset.id]: !(items[asset.id] ?? false) }));
   }
 
   protected canCreateClip(asset: MediaAssetSummary): boolean {

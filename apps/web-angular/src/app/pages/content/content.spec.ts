@@ -56,13 +56,15 @@ describe('Content', () => {
 
   it('renders media asset states and metadata', () => {
     fixture.detectChanges();
+    const ready = component['assets']().find((item) => item.status === 'READY')!;
+    component['toggleAsset'](ready);
+    fixture.detectChanges();
 
     const text = fixture.nativeElement.textContent as string;
-    expect(text).toContain('PENDING');
-    expect(text).toContain('IMPORTING');
-    expect(text).toContain('PROCESSING');
-    expect(text).toContain('READY');
-    expect(text).toContain('FAILED');
+    expect(text).toContain('Waiting');
+    expect(text).toContain('Processing');
+    expect(text).toContain('Ready');
+    expect(text).toContain('Failed');
     expect(text).toContain('video.mp4');
     expect(text).toContain('video/mp4');
     expect(text).toContain('1920x1080');
@@ -72,9 +74,9 @@ describe('Content', () => {
     expect(text).toContain('Make 9:16');
     expect(text).toContain('Find Highlights');
     expect(text).toContain('Transcribe');
-    expect(text).toContain('LOCAL_WHISPER_CLI');
+    expect(text).toContain('Local Whisper');
     expect(text).toContain('Hello world');
-    expect(text).toContain('Analyzer: DETERMINISTIC_V1');
+    expect(text).toContain('Baseline');
     expect(text).toContain('Deterministic Phase 7A candidate');
     expect(text).toContain('UNSUPPORTED_MEDIA');
   });
@@ -87,7 +89,7 @@ describe('Content', () => {
 
     fixture.detectChanges();
 
-    expect(fixture.nativeElement.textContent).toContain('No media assets have been imported yet.');
+    expect(fixture.nativeElement.textContent).toContain('No media yet. Import a direct media URL to begin.');
   });
 
   it('renders API error state', async () => {
@@ -118,7 +120,7 @@ describe('Content', () => {
       await vi.advanceTimersByTimeAsync(5000);
       fixture.detectChanges();
 
-      expect(fixture.nativeElement.textContent).toContain('READY');
+      expect(fixture.nativeElement.textContent).toContain('Ready');
       expect(assetsService.list).toHaveBeenCalledTimes(2);
     } finally {
       fixture.destroy();
@@ -168,7 +170,43 @@ describe('Content', () => {
 
     expect(assetsService.createSocialVertical).toHaveBeenCalledWith(ready.id);
     expect(component['assets']()[0].derivationType).toBe('SOCIAL_VERTICAL');
-    expect(component['lineage'](component['assets']()[0])).toBe('Vertical of READY-as');
+    expect(component['lineage'](component['assets']()[0])).toBe('Vertical from video.mp4');
+  });
+
+  it('renders asset details only after expansion', () => {
+    fixture.detectChanges();
+    const ready = component['assets']().find((item) => item.status === 'READY')!;
+
+    expect(fixture.nativeElement.textContent).not.toContain('Checksum');
+
+    component['toggleAsset'](ready);
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.textContent).toContain('Overview');
+    expect(fixture.nativeElement.textContent).toContain('Transcript');
+    expect(fixture.nativeElement.textContent).toContain('Highlights');
+    expect(fixture.nativeElement.textContent).toContain('Checksum');
+  });
+
+  it('humanizes semantic highlight labels and prerequisite state', () => {
+    vi.mocked(assetsService.listTranscripts).mockReturnValue(of([]));
+    fixture = TestBed.createComponent(Content);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+    const ready = component['assets']().find((item) => item.status === 'READY')!;
+
+    expect(component['canAnalyzeSemanticHighlights'](ready)).toBe(false);
+    expect(fixture.nativeElement.textContent).toContain('Transcript AI needs transcript');
+
+    component['transcripts'].set({ [ready.id]: transcript('SUCCEEDED') });
+    vi.mocked(assetsService.createHighlightAnalysis).mockReturnValue(of({
+      ...analysis('PENDING'),
+      analyzerType: 'TRANSCRIPT_SEMANTIC_V1',
+    }));
+
+    component['findSemanticHighlights'](ready);
+
+    expect(assetsService.createHighlightAnalysis).toHaveBeenCalledWith(ready.id, 'TRANSCRIPT_SEMANTIC_V1');
   });
 
   it('starts highlight analysis for an eligible asset', () => {

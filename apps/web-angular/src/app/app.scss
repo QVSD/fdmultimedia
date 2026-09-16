@@ -87,3 +87,41 @@
   padding: 2rem;
   background: #f9fafb;
 }
+
+@media (max-width: 840px) {
+  .shell {
+    flex-direction: column;
+  }
+
+  .sidebar {
+    width: auto;
+  }
+
+  .sidebar__context {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .sidebar__nav {
+    flex-direction: row;
+    overflow-x: auto;
+  }
+
+  .sidebar__link {
+    white-space: nowrap;
+  }
+
+  .sidebar__logout {
+    margin: 0.5rem;
+    align-self: flex-start;
+  }
+
+  .content {
+    padding: 1rem;
+  }
+}
+
+@media (max-width: 560px) {
+  .sidebar__context {
+    grid-template-columns: 1fr;
+  }
+}

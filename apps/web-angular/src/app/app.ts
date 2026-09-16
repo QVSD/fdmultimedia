@@ -22,12 +22,9 @@ export class App {
 
   protected readonly navItems: NavItem[] = [
     { path: '/', label: 'Overview' },
-    { path: '/compute', label: 'Compute' },
     { path: '/content', label: 'Content' },
-    { path: '/robots', label: 'Robots' },
+    { path: '/compute', label: 'Compute' },
     { path: '/jobs', label: 'Jobs' },
-    { path: '/analytics', label: 'Analytics' },
-    { path: '/revenue', label: 'Revenue' },
     { path: '/settings', label: 'Settings' },
   ];
   protected logout(): void {
