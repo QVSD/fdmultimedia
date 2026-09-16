@@ -42,6 +42,28 @@ public interface JobRepository extends JpaRepository<Job, UUID> {
             @Param("types") List<String> types,
             @Param("highlightAnalyzers") List<String> highlightAnalyzers);
 
+    @Query(
+            value = """
+                    SELECT *
+                    FROM jobs
+                    WHERE workspace_id = :workspaceId
+                      AND status = 'QUEUED'
+                      AND type IN (:types)
+                      AND (
+                        type <> 'ANALYZE_HIGHLIGHTS'
+                        OR COALESCE(payload ->> 'analyzerType', 'DETERMINISTIC_V1') IN (:highlightAnalyzers)
+                      )
+                    ORDER BY queued_at ASC, id ASC
+                    LIMIT :limit
+                    FOR UPDATE SKIP LOCKED
+                    """,
+            nativeQuery = true)
+    List<Job> findQueuedCandidatesForUpdate(
+            @Param("workspaceId") UUID workspaceId,
+            @Param("types") List<String> types,
+            @Param("highlightAnalyzers") List<String> highlightAnalyzers,
+            @Param("limit") int limit);
+
     default Optional<Job> findNextQueuedForUpdate(UUID workspaceId, List<String> types) {
         return findNextQueuedForUpdate(workspaceId, types, List.of("DETERMINISTIC_V1"));
     }

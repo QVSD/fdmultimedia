@@ -1,18 +1,21 @@
 # Architecture
 
-## Phase 9A scope
+## Phase 9B scope
 
-Phase 9A adds worker telemetry and scheduler-oriented execution history on top
-of the existing distributed job pipeline. It deliberately separates:
+Phase 9A added worker telemetry and scheduler-oriented execution history on
+top of the existing distributed job pipeline. Phase 9B begins using those
+inputs for conservative placement while preserving the same pull-based worker
+protocol and PostgreSQL row-locking queue. It deliberately separates:
 
 - **Capability** — whether a worker can execute a workload.
 - **Capacity** — how busy or resource-constrained the worker is right now.
 - **Performance history** — how previous attempts performed for similar
   workloads.
 
-Phase 9A collects those inputs. It does not implement weighted worker scoring,
-predictive placement, autoscaling, GPU scheduling, queue priority redesign, or
-RabbitMQ dispatch.
+Phase 9B uses capability, fresh capacity, memory/CPU telemetry when available,
+and bounded recent execution history. It does not implement predictive
+placement, autoscaling, GPU scheduling, queue priority redesign, or RabbitMQ
+dispatch.
 
 ## High-level architecture
 
@@ -162,14 +165,31 @@ with `FOR UPDATE SKIP LOCKED` and assigns it to the worker. That prevents two
 workers from claiming the same queued row concurrently without introducing a
 separate broker-level dispatch protocol.
 
-Phase 9A isolates capability eligibility behind `WorkerEligibilityService`.
-For now it normalizes the worker-reported supported job types and highlight
-analyzers, preserves legacy defaults (`SYSTEM_TEST` and `DETERMINISTIC_V1`),
-and feeds the existing locked claim query. It does not load all workers and
-assign in application memory, so the existing `FOR UPDATE SKIP LOCKED`
-concurrency guarantee remains intact. The current assignment strategy is best
-described as **CAPABILITY_FIRST_FIFO**: oldest queued eligible job, claimed by
-the first compatible online worker that polls.
+Capability eligibility is isolated behind `WorkerEligibilityService`. It
+normalizes the worker-reported supported job types and highlight analyzers,
+preserves legacy defaults (`SYSTEM_TEST` and `DETERMINISTIC_V1`), and feeds
+the locked queue lookup.
+
+Scheduling policy `TELEMETRY_AWARE_V1` is implemented in
+`WorkerSchedulingService`. A worker claim transaction recovers expired leases,
+locks a bounded FIFO window of compatible queued jobs with
+`FOR UPDATE SKIP LOCKED`, then chooses one locked candidate for the polling
+worker. This keeps the database concurrency guarantee intact; the server never
+does an unsafe load-all-workers / pick-one / update-later assignment.
+
+The scheduler uses:
+
+- explicit worker capacity (`maxActiveJobs`, default `1`)
+- fresh `activeJobs` telemetry as a hard capacity gate
+- memory pressure, with only dangerous low-memory states treated as a hard
+  rejection for non-starved heavier jobs
+- CPU load as a soft signal only when available
+- recent successful `executionMs` history after a minimum sample count
+- starvation protection so old queued jobs eventually bypass soft preferences
+
+Missing or stale telemetry degrades to FIFO rather than bricking a worker.
+Failure-rate scoring is intentionally deferred until the failure taxonomy is
+stable enough to avoid misleading scores.
 
 Claims set `lease_expires_at` and increment `attempt_count`. Starting and
 renewing a job refreshes the lease. The worker renews leases while long-running
@@ -179,7 +199,7 @@ workspace lazily recovers expired active jobs: retryable jobs return to
 `QUEUED`, while jobs that exhausted `max_attempts` become `FAILED`. This is
 deliberately simple and avoids a distributed scheduler in Phase 9A.
 
-## Worker telemetry and execution metrics
+## Worker telemetry, scheduling, and execution metrics
 
 Worker registration stores static metadata:
 
@@ -190,6 +210,7 @@ Worker registration stores static metadata:
 - total memory
 - optional GPU model/memory
 - agent version
+- maximum active jobs
 
 Heartbeat stores dynamic operational telemetry when the current agent can
 collect it cheaply:
@@ -201,19 +222,21 @@ collect it cheaply:
 - active job count
 - current supported job types and highlight analyzers
 - `lastTelemetryAt`
+- current maximum active jobs when reported by the agent
 
 Telemetry fields are optional and sanitized. Invalid CPU loads, negative
 memory, impossible available-memory values, or pathological active-job counts
 are nulled rather than making an otherwise valid heartbeat fail. Heartbeat
 requests without telemetry remain valid for rolling upgrades. Telemetry is
-fresh for `2 * worker.offline-threshold`; stale measurements are still stored
-for debugging but are not returned as current values in the Compute API.
+fresh for `app.scheduling.telemetry-freshness-window`; stale measurements are
+still stored for debugging but are not returned as current values in the
+Compute API.
 
 Telemetry is not security-authoritative. Worker machine authentication remains
 the security boundary; a worker can report inaccurate load, so telemetry is
 used only as future scheduling input.
 
-Phase 9A also records lightweight `JobExecutionMetric` rows when an attempt
+The control plane records lightweight `JobExecutionMetric` rows when an attempt
 succeeds, fails, or is recovered after lease expiry. The definitions are:
 
 - `queueWaitMs = assignedAt - queuedAt`
@@ -226,8 +249,10 @@ successful attempt is attributed to worker B. Retry/requeue transitions capture
 a snapshot before resetting job timestamps, so history is not accidentally
 rewritten by recovery. Workload hints are nullable and only use data the
 platform already has: media size/duration/dimensions, requested clip duration,
-or provider/model/analyzer identifiers. Phase 9A does not store every heartbeat
-forever and does not compute worker scores.
+or provider/model/analyzer identifiers. The scheduler only uses `executionMs`
+from successful attempts for Phase 9B performance history; queue wait is not
+used as a worker-performance signal. The platform still does not store every
+heartbeat forever.
 
 ## MediaAsset lifecycle and object storage
 

@@ -167,6 +167,8 @@ Useful worker environment variables:
 - `FDM_WORKER_ID_FILE` — local file that stores the generated installation ID.
 - `FDM_WORKER_HEARTBEAT_SECONDS` — heartbeat interval, default 10 seconds.
 - `FDM_WORKER_JOB_POLL_SECONDS` — job polling interval, default 3 seconds.
+- `WORKER_MAX_ACTIVE_JOBS` — reported execution capacity, default 1. The Java
+  worker avoids claim polling while its local active job count is at capacity.
 - `FFPROBE_PATH` — FFprobe executable path, default `ffprobe`.
 - `FFMPEG_PATH` — FFmpeg executable path, default `ffmpeg`.
 - `TRANSCRIPTION_RUNTIME` — `WHISPER_CLI` or `WHISPER_CPP`, default
@@ -176,7 +178,7 @@ Useful worker environment variables:
   `base`.
 - `TRANSCRIPTION_TIMEOUT_SECONDS` — inference timeout, default 900 seconds.
 
-The Phase 9A worker registers, heartbeats with lightweight telemetry, polls for
+The Phase 9B worker registers, heartbeats with lightweight telemetry, polls for
 a job, starts it, executes
 `SYSTEM_TEST`, `IMPORT_MEDIA`, `INSPECT_MEDIA`, `CREATE_CLIP`, or
 `CREATE_SOCIAL_VERTICAL`, `ANALYZE_HIGHLIGHTS`, or `TRANSCRIBE_MEDIA`, renews active
@@ -343,11 +345,16 @@ Manual telemetry check:
    capabilities, telemetry freshness, active jobs, CPU load when available,
    and available memory when available.
 3. Create a longer `SYSTEM_TEST` job. During execution, Compute should show
-   `1 active` for the worker, then return to `0 active` after completion.
+   `1 / 1 active` for the worker, then return to `0 / 1 active` after
+   completion.
 4. Stop the worker and wait past the offline threshold. The worker should
    become offline; stale telemetry should not be presented as current.
 
-Phase 9A records per-attempt execution metrics from server timestamps for
-success, failure, and lease-expiry recovery. These are scheduler inputs for a
-later phase. The current assignment strategy is still capability-first FIFO
-through PostgreSQL row locking, not smart scoring.
+Phase 9B records per-attempt execution metrics from server timestamps for
+success, failure, and lease-expiry recovery, then uses successful `executionMs`
+history after enough samples exist. Claiming still happens through PostgreSQL
+row locking: the API locks a bounded FIFO window of compatible jobs with
+`FOR UPDATE SKIP LOCKED`, scores those candidates for the polling worker, and
+claims one inside the same transaction. Missing telemetry or insufficient
+history falls back to FIFO; failure-rate scoring, predictive placement, and
+autoscaling remain deferred.

@@ -62,6 +62,9 @@ public class Worker {
     @Column(name = "agent_version", nullable = false)
     private String agentVersion;
 
+    @Column(name = "max_active_jobs", nullable = false)
+    private int maxActiveJobs = 1;
+
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "current_supported_job_types", columnDefinition = "jsonb")
     private List<String> currentSupportedJobTypes;
@@ -150,9 +153,13 @@ public class Worker {
             Instant now,
             WorkerTelemetryRequest telemetry,
             List<String> supportedJobTypes,
-            List<String> supportedHighlightAnalyzers) {
+            List<String> supportedHighlightAnalyzers,
+            Integer maxActiveJobs) {
         this.lastSeenAt = now;
         updateCapabilities(supportedJobTypes, supportedHighlightAnalyzers);
+        if (maxActiveJobs != null) {
+            this.maxActiveJobs = maxActiveJobs;
+        }
         updateTelemetry(telemetry, now);
         this.updatedAt = now;
     }
@@ -246,6 +253,10 @@ public class Worker {
 
     public String getAgentVersion() {
         return agentVersion;
+    }
+
+    public int getMaxActiveJobs() {
+        return maxActiveJobs;
     }
 
     public List<String> getCurrentSupportedJobTypes() {

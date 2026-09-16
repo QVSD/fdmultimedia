@@ -55,6 +55,15 @@ app:
     default-max-attempts: ${JOB_DEFAULT_MAX_ATTEMPTS:3}
     max-system-test-duration-ms: ${JOB_MAX_SYSTEM_TEST_DURATION_MS:10000}
     max-system-test-message-length: ${JOB_MAX_SYSTEM_TEST_MESSAGE_LENGTH:200}
+  scheduling:
+    policy-id: ${SCHEDULING_POLICY_ID:TELEMETRY_AWARE_V1}
+    candidate-limit: ${SCHEDULING_CANDIDATE_LIMIT:25}
+    telemetry-freshness-window: ${SCHEDULING_TELEMETRY_FRESHNESS_WINDOW:60s}
+    starvation-threshold: ${SCHEDULING_STARVATION_THRESHOLD:10m}
+    history-window: ${SCHEDULING_HISTORY_WINDOW:7d}
+    min-historical-samples: ${SCHEDULING_MIN_HISTORICAL_SAMPLES:3}
+    critical-memory-available-ratio: ${SCHEDULING_CRITICAL_MEMORY_AVAILABLE_RATIO:0.05}
+    history-reference-execution-ms: ${SCHEDULING_HISTORY_REFERENCE_EXECUTION_MS:60000}
   media:
     max-download-size-bytes: ${MEDIA_MAX_DOWNLOAD_SIZE_BYTES:524288000}
     connect-timeout: ${MEDIA_CONNECT_TIMEOUT:10s}

@@ -3,11 +3,12 @@ package com.fdmultimedia.api.workers;
 import com.fdmultimedia.api.auth.AuthService;
 import com.fdmultimedia.api.auth.security.AuthenticatedUser;
 import com.fdmultimedia.api.jobs.JobType;
+import com.fdmultimedia.api.jobs.WorkerSchedulingProperties;
+import com.fdmultimedia.api.jobs.WorkerSchedulingService;
 import com.fdmultimedia.api.workers.security.WorkerPrincipal;
 import com.fdmultimedia.api.workspaces.Workspace;
 import com.fdmultimedia.api.workspaces.WorkspaceMembership;
 import java.time.Clock;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -27,6 +28,8 @@ public class WorkerService {
     private final WorkerCredentialRepository credentials;
     private final WorkerStatusService statusService;
     private final WorkerProperties properties;
+    private final WorkerSchedulingProperties schedulingProperties;
+    private final WorkerSchedulingService schedulingService;
     private final Clock clock;
 
     public WorkerService(
@@ -35,12 +38,16 @@ public class WorkerService {
             WorkerCredentialRepository credentials,
             WorkerStatusService statusService,
             WorkerProperties properties,
+            WorkerSchedulingProperties schedulingProperties,
+            WorkerSchedulingService schedulingService,
             Clock clock) {
         this.authService = authService;
         this.workers = workers;
         this.credentials = credentials;
         this.statusService = statusService;
         this.properties = properties;
+        this.schedulingProperties = schedulingProperties;
+        this.schedulingService = schedulingService;
         this.clock = clock;
     }
 
@@ -74,7 +81,8 @@ public class WorkerService {
                 now,
                 sanitizeTelemetry(request.telemetry(), worker.getTotalMemoryBytes()),
                 sanitizeJobTypes(request.supportedJobTypes()),
-                sanitizeHighlightAnalyzers(request.supportedHighlightAnalyzers()));
+                sanitizeHighlightAnalyzers(request.supportedHighlightAnalyzers()),
+                sanitizeMaxActiveJobs(request.maxActiveJobs()));
         return new WorkerHeartbeatResponse(
                 worker.getId(),
                 statusService.statusFor(worker.getLastSeenAt()),
@@ -134,6 +142,9 @@ public class WorkerService {
                 worker.getGpuModel(),
                 worker.getGpuMemoryBytes(),
                 worker.getAgentVersion(),
+                worker.getMaxActiveJobs(),
+                schedulingProperties.getPolicyId(),
+                schedulingService.schedulingState(worker),
                 worker.getCurrentSupportedJobTypes(),
                 worker.getCurrentSupportedHighlightAnalyzers(),
                 telemetrySummary(worker),
@@ -176,6 +187,16 @@ public class WorkerService {
         return value;
     }
 
+    private Integer sanitizeMaxActiveJobs(Integer value) {
+        if (value == null) {
+            return null;
+        }
+        if (value < 1 || value > MAX_REPORTED_ACTIVE_JOBS) {
+            return null;
+        }
+        return value;
+    }
+
     private List<String> sanitizeJobTypes(List<JobType> supportedJobTypes) {
         if (supportedJobTypes == null) {
             return null;
@@ -205,8 +226,7 @@ public class WorkerService {
 
     private WorkerTelemetrySummary telemetrySummary(Worker worker) {
         Instant lastTelemetryAt = worker.getLastTelemetryAt();
-        boolean fresh = lastTelemetryAt != null
-                && !lastTelemetryAt.isBefore(Instant.now(clock).minus(telemetryFreshnessWindow()));
+        boolean fresh = schedulingService.hasFreshTelemetry(worker, Instant.now(clock));
         return new WorkerTelemetrySummary(
                 fresh ? worker.getSystemCpuLoad() : null,
                 fresh ? worker.getProcessCpuLoad() : null,
@@ -218,7 +238,4 @@ public class WorkerService {
                 fresh);
     }
 
-    private Duration telemetryFreshnessWindow() {
-        return properties.getOfflineThreshold().multipliedBy(2);
-    }
 }

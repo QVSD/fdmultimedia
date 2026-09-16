@@ -13,6 +13,9 @@ export interface WorkerSummary {
   gpuModel: string | null;
   gpuMemoryBytes: number | null;
   agentVersion: string;
+  maxActiveJobs: number;
+  schedulingPolicy: string;
+  schedulingState: string;
   supportedJobTypes: string[] | null;
   supportedHighlightAnalyzers: string[] | null;
   telemetry: WorkerTelemetry | null;

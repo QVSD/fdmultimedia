@@ -112,6 +112,7 @@ class WorkerAgentClientTest {
         assertTrue(body.get().contains("\"machineIdentifier\":\"machine-1\""));
         assertTrue(body.get().contains("\"activeJobs\":1"));
         assertTrue(body.get().contains("\"systemCpuLoad\":0.25"));
+        assertTrue(body.get().contains("\"maxActiveJobs\":1"));
         assertTrue(body.get().contains("\"supportedJobTypes\":[\"SYSTEM_TEST\",\"CREATE_CLIP\"]"));
         assertTrue(body.get().contains("\"supportedHighlightAnalyzers\":[\"DETERMINISTIC_V1\",\"TRANSCRIPT_SEMANTIC_V1\"]"));
     }

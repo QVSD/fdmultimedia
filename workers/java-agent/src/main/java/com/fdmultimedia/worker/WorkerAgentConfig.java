@@ -19,6 +19,7 @@ record WorkerAgentConfig(
         URI semanticHighlightEndpoint,
         String semanticHighlightModel,
         Duration semanticHighlightTimeout,
+        int maxActiveJobs,
         Path identityFile,
         Duration heartbeatInterval,
         Duration jobPollInterval) {
@@ -49,6 +50,10 @@ record WorkerAgentConfig(
         if (semanticTimeout.isNegative() || semanticTimeout.isZero()) {
             throw new IllegalArgumentException("SEMANTIC_HIGHLIGHT_TIMEOUT_SECONDS must be greater than zero");
         }
+        int maxActiveJobs = Integer.parseInt(environment.getOrDefault("WORKER_MAX_ACTIVE_JOBS", "1"));
+        if (maxActiveJobs < 1) {
+            throw new IllegalArgumentException("WORKER_MAX_ACTIVE_JOBS must be greater than zero");
+        }
         Path identityFile = Path.of(environment.getOrDefault(
                 "FDM_WORKER_ID_FILE",
                 Path.of(System.getProperty("user.home"), ".fdmultimedia", "worker-id").toString()));
@@ -76,6 +81,7 @@ record WorkerAgentConfig(
                 semanticEndpoint,
                 semanticModel.isBlank() ? "llama3.2:3b" : semanticModel,
                 semanticTimeout,
+                maxActiveJobs,
                 identityFile,
                 heartbeatInterval,
                 jobPollInterval);

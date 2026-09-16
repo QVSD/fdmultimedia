@@ -39,7 +39,9 @@ describe('Compute', () => {
     expect(text).toContain('Windows 11 / amd64');
     expect(text).toContain('23% · 16 logical cores');
     expect(text).toContain('9.2 GiB available / 32 GiB');
-    expect(text).toContain('1 active');
+    expect(text).toContain('1 / 1 active');
+    expect(text).toContain('At capacity');
+    expect(text).toContain('TELEMETRY_AWARE_V1');
     expect(text).toContain('CREATE_CLIP');
     expect(text).toContain('Highlights: TRANSCRIPT_SEMANTIC_V1');
   });
@@ -107,6 +109,9 @@ describe('Compute', () => {
       gpuModel: null,
       gpuMemoryBytes: null,
       agentVersion: 'fdm-worker/0.1.0',
+      maxActiveJobs: 1,
+      schedulingPolicy: 'TELEMETRY_AWARE_V1',
+      schedulingState: 'AT_CAPACITY',
       supportedJobTypes: ['SYSTEM_TEST', 'CREATE_CLIP'],
       supportedHighlightAnalyzers: ['DETERMINISTIC_V1', 'TRANSCRIPT_SEMANTIC_V1'],
       telemetry: {

@@ -43,6 +43,7 @@ Optional runtime tuning:
 FDM_WORKER_NAME=dragos-laptop \
 FDM_WORKER_HEARTBEAT_SECONDS=10 \
 FDM_WORKER_JOB_POLL_SECONDS=3 \
+WORKER_MAX_ACTIVE_JOBS=1 \
 FDM_WORKER_ID_FILE=.fdm-worker-id \
 FFPROBE_PATH=ffprobe \
 FFMPEG_PATH=ffmpeg \
@@ -64,6 +65,10 @@ The agent loop is:
 
 When no jobs exist, polling backs off using `FDM_WORKER_JOB_POLL_SECONDS`.
 Temporary server/network failures are logged and retried on the next poll.
+`WORKER_MAX_ACTIVE_JOBS` defaults to `1`. The current Java agent is still
+single-job-at-a-time, so it avoids claim polling while its local active job
+count is at capacity. The API also records that capacity and uses fresh
+heartbeat telemetry as a server-side scheduling guard.
 
 `SYSTEM_TEST` accepts only a bounded message and duration. It never executes
 shell commands, video processing, AI workloads, browser automation, publishing,
@@ -210,6 +215,10 @@ failure is logged locally and does not stop heartbeats or job execution.
 
 The control plane stores the latest telemetry only, with a freshness window
 defined server-side. It also records per-attempt execution metrics from server
-timestamps when jobs succeed, fail, or recover after lease expiry. Phase 9A
-does not make smart placement decisions yet: workers still claim compatible
-jobs through the existing PostgreSQL `FOR UPDATE SKIP LOCKED` queue path.
+timestamps when jobs succeed, fail, or recover after lease expiry. Phase 9B
+uses `TELEMETRY_AWARE_V1`: claims still use the PostgreSQL
+`FOR UPDATE SKIP LOCKED` queue path, but the API locks a bounded compatible
+candidate window and chooses a job for the polling worker using fresh capacity,
+memory/CPU telemetry when available, and recent execution history after enough
+samples exist. Missing telemetry falls back to FIFO; no predictive scheduler,
+GPU scheduler, or autoscaling is implemented yet.

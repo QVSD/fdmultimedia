@@ -5,10 +5,10 @@ social-media content workflows, video processing workers running across
 multiple laptops/cloud machines, scheduling, AI-assisted content creation,
 publishing, analytics, and revenue tracking.
 
-## Phase 9A scope
+## Phase 9B scope
 
-This repository is currently at **Phase 9A: worker telemetry and scheduling
-foundation**. That means:
+This repository is currently at **Phase 9B: telemetry-aware smart scheduling**.
+That means:
 
 - A clean monorepo layout (`apps/`, `workers/`, `infra/`, `docs/`).
 - A Spring Boot 21 modular monolith (`apps/api-spring`) with the package
@@ -18,7 +18,8 @@ foundation**. That means:
   roles. Future business resources can be scoped to `workspace_id`.
 - Worker credentials, worker registration, heartbeat tracking, current
   capability snapshots, lightweight telemetry, and a workspace-scoped Compute
-  page. Worker status is derived from heartbeat age.
+  page. Worker status is derived from heartbeat age; scheduling state is
+  derived from fresh capacity telemetry.
 - Centrally-created `SYSTEM_TEST`, `IMPORT_MEDIA`, `INSPECT_MEDIA`,
   `CREATE_CLIP`, `CREATE_SOCIAL_VERTICAL`, and `ANALYZE_HIGHLIGHTS` jobs
   with PostgreSQL-backed durable state, atomic worker claiming, leases,
@@ -49,8 +50,10 @@ foundation**. That means:
   everything else to the frontend.
 - Docker Compose to run the whole stack locally.
 - Scheduler-oriented execution metrics are recorded from server timestamps for
-  completed, failed, and lease-recovered attempts. These metrics are inputs for
-  a later scheduler; Phase 9A still uses capability-first FIFO claiming.
+  completed, failed, and lease-recovered attempts. Phase 9B uses those metrics,
+  fresh active-job capacity, CPU/memory telemetry when available, and
+  starvation protection to choose among locked compatible queued jobs while
+  preserving PostgreSQL `FOR UPDATE SKIP LOCKED` claim safety.
 
 No thumbnails, publishing, AI, social integrations, analytics, or billing are implemented yet — see
 [docs/ROADMAP.md](docs/ROADMAP.md) for what comes next and
@@ -189,7 +192,9 @@ Worker heartbeats also report cheap dynamic telemetry when available:
 - current capability snapshot
 
 Unavailable or invalid values are omitted/null. Telemetry is operational data
-only; it is not used for authorization and Phase 9A does not rank workers.
+only; it is not used for authorization. `WORKER_MAX_ACTIVE_JOBS` defaults to
+`1`; the Java worker avoids claim polling while it is locally at capacity, and
+the API enforces fresh reported capacity during scheduling.
 
 ## Jobs, media assets, and distributed execution
 
@@ -197,10 +202,13 @@ Phase 4 uses PostgreSQL as the durable job queue. Workers poll the control
 plane and claim jobs with a transactional `FOR UPDATE SKIP LOCKED` query, so
 one queued job is assigned to exactly one worker. RabbitMQ remains available
 in the stack but is reserved for a later event-driven dispatch optimization.
-Phase 9A keeps this atomic claim path unchanged. Eligibility is isolated behind
-a server-side boundary that answers which online workers can run a job based on
-reported capabilities and analyzer support; smart scoring is deferred to Phase
-9B.
+Phase 9B keeps this atomic claim path intact. Eligibility is isolated behind a
+server-side boundary that answers which online workers can run a job based on
+reported capabilities and analyzer support. Scheduling policy
+`TELEMETRY_AWARE_V1` then scores the locked compatible candidate window for the
+polling worker using capacity, fresh telemetry, bounded recent execution
+history, deterministic tie-breaking, and starvation protection. Missing/stale
+telemetry degrades to FIFO.
 
 The first executable job type is `SYSTEM_TEST`. It accepts:
 

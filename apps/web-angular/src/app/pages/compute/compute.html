@@ -63,6 +63,13 @@
                   <dd>{{ activeJobsLabel(worker) }}</dd>
                 </div>
                 <div>
+                  <dt>Scheduling</dt>
+                  <dd>
+                    {{ schedulingLabel(worker) }}
+                    <span>{{ worker.schedulingPolicy }}</span>
+                  </dd>
+                </div>
+                <div>
                   <dt>Telemetry</dt>
                   <dd>
                     {{ telemetryLabel(worker) }}

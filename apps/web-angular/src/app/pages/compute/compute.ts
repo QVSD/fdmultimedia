@@ -66,9 +66,26 @@ export class Compute implements OnInit, OnDestroy {
   protected activeJobsLabel(worker: WorkerSummary): string {
     const activeJobs = worker.telemetry?.activeJobs;
     if (activeJobs === null || activeJobs === undefined) {
-      return 'Unknown';
+      return `Unknown / ${worker.maxActiveJobs}`;
     }
-    return activeJobs === 1 ? '1 active' : `${activeJobs} active`;
+    return `${activeJobs} / ${worker.maxActiveJobs} active`;
+  }
+
+  protected schedulingLabel(worker: WorkerSummary): string {
+    switch (worker.schedulingState) {
+      case 'AVAILABLE':
+        return 'Available for claims';
+      case 'AT_CAPACITY':
+        return 'At capacity';
+      case 'MEMORY_PRESSURE':
+        return 'Memory pressure';
+      case 'TELEMETRY_STALE':
+        return 'Telemetry stale';
+      case 'TELEMETRY_UNAVAILABLE':
+        return 'Telemetry unavailable';
+      default:
+        return worker.schedulingState;
+    }
   }
 
   protected capabilities(worker: WorkerSummary): string[] {

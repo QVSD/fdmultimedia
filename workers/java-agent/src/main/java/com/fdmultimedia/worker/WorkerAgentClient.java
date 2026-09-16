@@ -37,13 +37,23 @@ final class WorkerAgentClient {
             String machineIdentifier,
             WorkerTelemetry telemetry,
             List<String> supportedJobTypes,
-            List<String> supportedHighlightAnalyzers) throws IOException, InterruptedException {
+            List<String> supportedHighlightAnalyzers,
+            int maxActiveJobs) throws IOException, InterruptedException {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("machineIdentifier", machineIdentifier);
         body.put("telemetry", telemetryBody(telemetry));
         body.put("supportedJobTypes", supportedJobTypes);
         body.put("supportedHighlightAnalyzers", supportedHighlightAnalyzers);
+        body.put("maxActiveJobs", maxActiveJobs);
         send("/worker-agent/heartbeat", body, new TypeReference<Map<String, Object>>() {});
+    }
+
+    void heartbeat(
+            String machineIdentifier,
+            WorkerTelemetry telemetry,
+            List<String> supportedJobTypes,
+            List<String> supportedHighlightAnalyzers) throws IOException, InterruptedException {
+        heartbeat(machineIdentifier, telemetry, supportedJobTypes, supportedHighlightAnalyzers, 1);
     }
 
     void heartbeat(String machineIdentifier) throws IOException, InterruptedException {

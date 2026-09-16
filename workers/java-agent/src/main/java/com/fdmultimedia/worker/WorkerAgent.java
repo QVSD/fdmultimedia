@@ -107,7 +107,7 @@ public final class WorkerAgent {
                 } catch (Exception ex) {
                     System.err.println("Worker telemetry collection failed: " + ex.getMessage());
                 }
-                client.heartbeat(machineIdentifier, telemetry, supportedJobTypes, supportedHighlightAnalyzers);
+                client.heartbeat(machineIdentifier, telemetry, supportedJobTypes, supportedHighlightAnalyzers, config.maxActiveJobs());
                 sleep(config.heartbeatInterval());
             } catch (Exception ex) {
                 System.err.println("Worker heartbeat failed: " + ex.getMessage());
@@ -131,6 +131,10 @@ public final class WorkerAgent {
             AtomicInteger activeJobs) {
         while (!Thread.currentThread().isInterrupted()) {
             try {
+                if (activeJobs.get() >= config.maxActiveJobs()) {
+                    sleep(config.jobPollInterval());
+                    continue;
+                }
                 ClaimedJob job = client.claim(machineIdentifier, supportedJobTypes, supportedHighlightAnalyzers);
                 if (!job.available()) {
                     sleep(config.jobPollInterval());

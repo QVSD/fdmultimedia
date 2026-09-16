@@ -10,7 +10,10 @@ import static org.mockito.Mockito.when;
 
 import com.fdmultimedia.api.auth.AuthService;
 import com.fdmultimedia.api.auth.security.AuthenticatedUser;
+import com.fdmultimedia.api.jobs.JobExecutionMetricRepository;
 import com.fdmultimedia.api.jobs.JobType;
+import com.fdmultimedia.api.jobs.WorkerSchedulingProperties;
+import com.fdmultimedia.api.jobs.WorkerSchedulingService;
 import com.fdmultimedia.api.users.AppUser;
 import com.fdmultimedia.api.workers.security.WorkerPrincipal;
 import com.fdmultimedia.api.workspaces.Workspace;
@@ -37,6 +40,11 @@ class WorkerServiceTest {
     private final WorkerRepository workers = mock(WorkerRepository.class);
     private final WorkerCredentialRepository credentials = mock(WorkerCredentialRepository.class);
     private final WorkerProperties properties = new WorkerProperties();
+    private final WorkerSchedulingProperties schedulingProperties = new WorkerSchedulingProperties();
+    private final WorkerSchedulingService schedulingService = new WorkerSchedulingService(
+            mock(JobExecutionMetricRepository.class),
+            schedulingProperties,
+            Clock.fixed(NOW, ZoneOffset.UTC));
     private final WorkerStatusService statusService =
             new WorkerStatusService(properties, Clock.fixed(NOW, ZoneOffset.UTC));
     private final WorkerService service = new WorkerService(
@@ -45,6 +53,8 @@ class WorkerServiceTest {
             credentials,
             statusService,
             properties,
+            schedulingProperties,
+            schedulingService,
             Clock.fixed(NOW, ZoneOffset.UTC));
 
     private Workspace workspace;
@@ -55,6 +65,7 @@ class WorkerServiceTest {
     void setUp() {
         properties.setHeartbeatInterval(Duration.ofSeconds(10));
         properties.setOfflineThreshold(Duration.ofSeconds(30));
+        schedulingProperties.setTelemetryFreshnessWindow(Duration.ofSeconds(60));
         workspace = new Workspace("FD Multimedia", "fd-multimedia");
         UUID credentialId = UUID.randomUUID();
         credential = new WorkerCredential(credentialId, workspace, "local-agent", "$2a$10$hash");
@@ -129,13 +140,15 @@ class WorkerServiceTest {
                         "machine-1",
                         new WorkerTelemetryRequest(0.25, 0.10, 8_589_934_592L, 134_217_728L, 536_870_912L, 1),
                         List.of(JobType.SYSTEM_TEST, JobType.CREATE_CLIP),
-                        List.of("DETERMINISTIC_V1", "TRANSCRIPT_SEMANTIC_V1")));
+                        List.of("DETERMINISTIC_V1", "TRANSCRIPT_SEMANTIC_V1"),
+                        2));
 
         assertThat(response.status()).isEqualTo(WorkerStatus.ONLINE);
         assertThat(existing.getCurrentSupportedJobTypes()).containsExactly("SYSTEM_TEST", "CREATE_CLIP");
         assertThat(existing.getCurrentSupportedHighlightAnalyzers()).containsExactly("DETERMINISTIC_V1", "TRANSCRIPT_SEMANTIC_V1");
         assertThat(existing.getSystemCpuLoad()).isEqualTo(0.25);
         assertThat(existing.getActiveJobs()).isEqualTo(1);
+        assertThat(existing.getMaxActiveJobs()).isEqualTo(2);
         assertThat(existing.getLastTelemetryAt()).isEqualTo(NOW);
     }
 
@@ -185,6 +198,8 @@ class WorkerServiceTest {
 
         assertThat(result).extracting(WorkerSummary::name).containsExactly("Node A", "Node B");
         assertThat(result).extracting(WorkerSummary::status).containsExactly(WorkerStatus.ONLINE, WorkerStatus.OFFLINE);
+        assertThat(result).extracting(WorkerSummary::maxActiveJobs).containsExactly(1, 1);
+        assertThat(result).extracting(WorkerSummary::schedulingPolicy).containsExactly("TELEMETRY_AWARE_V1", "TELEMETRY_AWARE_V1");
     }
 
     @Test
@@ -198,7 +213,8 @@ class WorkerServiceTest {
                 NOW.minusSeconds(120),
                 new WorkerTelemetryRequest(0.5, 0.2, 1024L, 512L, 2048L, 1),
                 List.of("SYSTEM_TEST"),
-                List.of("DETERMINISTIC_V1"));
+                List.of("DETERMINISTIC_V1"),
+                1);
         when(workers.findByWorkspaceOrderByNameAsc(workspace)).thenReturn(List.of(stale));
 
         WorkerSummary summary = service.listFor(principalUser).getFirst();
@@ -206,6 +222,7 @@ class WorkerServiceTest {
         assertThat(summary.telemetry().fresh()).isFalse();
         assertThat(summary.telemetry().systemCpuLoad()).isNull();
         assertThat(summary.telemetry().lastTelemetryAt()).isEqualTo(NOW.minusSeconds(120));
+        assertThat(summary.schedulingState()).isEqualTo("TELEMETRY_STALE");
     }
 
     private WorkerRegistrationRequest registration(String machineIdentifier, String name) {

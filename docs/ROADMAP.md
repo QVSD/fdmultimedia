@@ -1,6 +1,6 @@
 # Roadmap
 
-The repository is currently at Phase 9A. Completed phases are marked below;
+The repository is currently at Phase 9B. Completed phases are marked below;
 later phases are planned high-level direction and intentionally do not go into
 implementation detail before they are started.
 
@@ -43,9 +43,11 @@ implementation detail before they are started.
    highlights, clips, and vertical derivatives in product language. *(complete)*
 14. **Worker telemetry and scheduling foundation** — collect current Worker
    capacity telemetry, capability snapshots, and per-attempt execution metrics
-   while preserving capability-first FIFO claiming. *(current phase)*
-15. **Smart scheduler / load balancing** — use telemetry and execution history
-   to decide which eligible worker should run which job.
+   while preserving capability-first FIFO claiming. *(complete)*
+15. **Telemetry-aware scheduler / load balancing foundation** — use fresh
+   capacity telemetry, bounded execution history, memory/CPU signals, and
+   starvation protection to choose among locked compatible queued jobs without
+   replacing the PostgreSQL atomic claim model. *(current phase)*
 16. **FFmpeg processing** — richer automated video processing pipelines.
 17. **Social account integrations** — connecting and publishing to external
    platforms.

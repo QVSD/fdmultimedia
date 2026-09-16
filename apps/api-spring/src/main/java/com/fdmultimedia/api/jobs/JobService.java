@@ -42,8 +42,10 @@ public class JobService {
     private final WorkerCredentialRepository credentials;
     private final WorkerStatusService workerStatusService;
     private final WorkerEligibilityService eligibilityService;
+    private final WorkerSchedulingService schedulingService;
     private final JobExecutionMetricService executionMetrics;
     private final JobProperties properties;
+    private final WorkerSchedulingProperties schedulingProperties;
     private final Clock clock;
 
     public JobService(
@@ -56,8 +58,10 @@ public class JobService {
             WorkerCredentialRepository credentials,
             WorkerStatusService workerStatusService,
             WorkerEligibilityService eligibilityService,
+            WorkerSchedulingService schedulingService,
             JobExecutionMetricService executionMetrics,
             JobProperties properties,
+            WorkerSchedulingProperties schedulingProperties,
             Clock clock) {
         this.authService = authService;
         this.jobs = jobs;
@@ -68,8 +72,10 @@ public class JobService {
         this.credentials = credentials;
         this.workerStatusService = workerStatusService;
         this.eligibilityService = eligibilityService;
+        this.schedulingService = schedulingService;
         this.executionMetrics = executionMetrics;
         this.properties = properties;
+        this.schedulingProperties = schedulingProperties;
         this.clock = clock;
     }
 
@@ -131,10 +137,13 @@ public class JobService {
         WorkerEligibility eligibility = eligibilityService.eligibleCapabilities(request);
         Instant now = Instant.now(clock);
         recoverExpiredLeases(worker.getWorkspace(), now);
-        return jobs.findNextQueuedForUpdate(
+        List<Job> candidates = jobs.findQueuedCandidatesForUpdate(
                         worker.getWorkspace().getId(),
                         eligibility.supportedJobTypes(),
-                        eligibility.supportedHighlightAnalyzers())
+                        eligibility.supportedHighlightAnalyzers(),
+                        schedulingProperties.safeCandidateLimit());
+        JobSchedulingDecision decision = schedulingService.selectJob(worker, candidates, now);
+        return decision.job()
                 .map(job -> {
                     job.claim(worker, now, now.plus(properties.getLeaseDuration()));
                     return new WorkerJobClaimResponse(
