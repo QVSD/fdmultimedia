@@ -3,6 +3,8 @@ package com.fdmultimedia.api.assets;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -79,6 +81,28 @@ class MediaAssetServiceTest {
         worker = new Worker(workspace, credential, registration("machine-1"), NOW.minusSeconds(5));
         workerPrincipal = new WorkerPrincipal(credential);
         when(jobService.requireOnlineWorker(workerPrincipal, "machine-1")).thenReturn(worker);
+        doAnswer(invocation -> {
+            Job job = invocation.getArgument(0);
+            Worker assignedWorker = invocation.getArgument(1);
+            Map<String, Object> result = invocation.getArgument(2);
+            Instant now = invocation.getArgument(3);
+            job.complete(assignedWorker, result, now);
+            return null;
+        }).when(jobService).completeOwnedJob(any(Job.class), any(Worker.class), any(Map.class), any(Instant.class));
+        doAnswer(invocation -> {
+            Job job = invocation.getArgument(0);
+            Worker assignedWorker = invocation.getArgument(1);
+            String errorCode = invocation.getArgument(2);
+            String errorMessage = invocation.getArgument(3);
+            boolean terminal = invocation.getArgument(4);
+            Instant now = invocation.getArgument(5);
+            if (terminal) {
+                job.failTerminal(assignedWorker, errorCode, errorMessage, now);
+            } else {
+                job.fail(assignedWorker, errorCode, errorMessage, now);
+            }
+            return null;
+        }).when(jobService).failOwnedJob(any(Job.class), any(Worker.class), any(), any(), anyBoolean(), any(Instant.class));
         when(storage.bucket()).thenReturn("media-assets");
     }
 

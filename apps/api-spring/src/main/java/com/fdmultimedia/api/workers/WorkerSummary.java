@@ -1,6 +1,7 @@
 package com.fdmultimedia.api.workers;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 public record WorkerSummary(
@@ -16,6 +17,9 @@ public record WorkerSummary(
         String gpuModel,
         Long gpuMemoryBytes,
         String agentVersion,
+        List<String> supportedJobTypes,
+        List<String> supportedHighlightAnalyzers,
+        WorkerTelemetrySummary telemetry,
         Instant lastSeenAt,
         Instant registeredAt) {
 }

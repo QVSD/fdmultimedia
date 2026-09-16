@@ -11,7 +11,11 @@ import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 @Entity
 @Table(name = "workers")
@@ -57,6 +61,35 @@ public class Worker {
 
     @Column(name = "agent_version", nullable = false)
     private String agentVersion;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "current_supported_job_types", columnDefinition = "jsonb")
+    private List<String> currentSupportedJobTypes;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "current_supported_highlight_analyzers", columnDefinition = "jsonb")
+    private List<String> currentSupportedHighlightAnalyzers;
+
+    @Column(name = "system_cpu_load")
+    private Double systemCpuLoad;
+
+    @Column(name = "process_cpu_load")
+    private Double processCpuLoad;
+
+    @Column(name = "available_memory_bytes")
+    private Long availableMemoryBytes;
+
+    @Column(name = "jvm_heap_used_bytes")
+    private Long jvmHeapUsedBytes;
+
+    @Column(name = "jvm_heap_max_bytes")
+    private Long jvmHeapMaxBytes;
+
+    @Column(name = "active_jobs")
+    private Integer activeJobs;
+
+    @Column(name = "last_telemetry_at")
+    private Instant lastTelemetryAt;
 
     @Column(name = "last_seen_at", nullable = false)
     private Instant lastSeenAt;
@@ -113,9 +146,47 @@ public class Worker {
         this.updatedAt = now;
     }
 
-    public void heartbeat(Instant now) {
+    public void heartbeat(
+            Instant now,
+            WorkerTelemetryRequest telemetry,
+            List<String> supportedJobTypes,
+            List<String> supportedHighlightAnalyzers) {
         this.lastSeenAt = now;
+        updateCapabilities(supportedJobTypes, supportedHighlightAnalyzers);
+        updateTelemetry(telemetry, now);
         this.updatedAt = now;
+    }
+
+    private void updateCapabilities(List<String> supportedJobTypes, List<String> supportedHighlightAnalyzers) {
+        if (supportedJobTypes != null) {
+            this.currentSupportedJobTypes = copyStrings(supportedJobTypes);
+        }
+        if (supportedHighlightAnalyzers != null) {
+            this.currentSupportedHighlightAnalyzers = copyStrings(supportedHighlightAnalyzers);
+        }
+    }
+
+    private void updateTelemetry(WorkerTelemetryRequest telemetry, Instant now) {
+        if (telemetry == null) {
+            return;
+        }
+        this.systemCpuLoad = telemetry.systemCpuLoad();
+        this.processCpuLoad = telemetry.processCpuLoad();
+        this.availableMemoryBytes = telemetry.availableMemoryBytes();
+        this.jvmHeapUsedBytes = telemetry.jvmHeapUsedBytes();
+        this.jvmHeapMaxBytes = telemetry.jvmHeapMaxBytes();
+        this.activeJobs = telemetry.activeJobs();
+        this.lastTelemetryAt = now;
+    }
+
+    private List<String> copyStrings(List<String> values) {
+        List<String> normalized = new ArrayList<>();
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                normalized.add(value.trim());
+            }
+        }
+        return List.copyOf(normalized);
     }
 
     private String normalizeOptional(String value) {
@@ -175,6 +246,42 @@ public class Worker {
 
     public String getAgentVersion() {
         return agentVersion;
+    }
+
+    public List<String> getCurrentSupportedJobTypes() {
+        return currentSupportedJobTypes == null ? null : List.copyOf(currentSupportedJobTypes);
+    }
+
+    public List<String> getCurrentSupportedHighlightAnalyzers() {
+        return currentSupportedHighlightAnalyzers == null ? null : List.copyOf(currentSupportedHighlightAnalyzers);
+    }
+
+    public Double getSystemCpuLoad() {
+        return systemCpuLoad;
+    }
+
+    public Double getProcessCpuLoad() {
+        return processCpuLoad;
+    }
+
+    public Long getAvailableMemoryBytes() {
+        return availableMemoryBytes;
+    }
+
+    public Long getJvmHeapUsedBytes() {
+        return jvmHeapUsedBytes;
+    }
+
+    public Long getJvmHeapMaxBytes() {
+        return jvmHeapMaxBytes;
+    }
+
+    public Integer getActiveJobs() {
+        return activeJobs;
+    }
+
+    public Instant getLastTelemetryAt() {
+        return lastTelemetryAt;
     }
 
     public Instant getLastSeenAt() {

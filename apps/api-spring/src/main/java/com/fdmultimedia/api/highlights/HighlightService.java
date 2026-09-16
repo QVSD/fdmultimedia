@@ -254,7 +254,7 @@ public class HighlightService {
                 .toList();
         candidates.saveAll(rows);
         analysis.markSucceeded(now);
-        job.complete(worker, Map.of(
+        jobService.completeOwnedJob(job, worker, Map.of(
                 "analysisId", analysis.getId().toString(),
                 "assetId", asset.getId().toString(),
                 "candidateCount", rows.size()), now);
@@ -276,10 +276,10 @@ public class HighlightService {
         Instant now = Instant.now(clock);
         String message = safeErrorMessage(request.errorMessage());
         if (Boolean.TRUE.equals(request.terminal())) {
-            job.failTerminal(worker, request.errorCode(), message, now);
+            jobService.failOwnedJob(job, worker, request.errorCode(), message, true, now);
             analysis.markFailed(request.errorCode(), message, now);
         } else {
-            job.fail(worker, request.errorCode(), message, now);
+            jobService.failOwnedJob(job, worker, request.errorCode(), message, false, now);
             if (job.getStatus() == JobStatus.FAILED) {
                 analysis.markFailed(request.errorCode(), message, now);
             } else {

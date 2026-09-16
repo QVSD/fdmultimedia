@@ -2,11 +2,14 @@ package com.fdmultimedia.api.workers;
 
 import com.fdmultimedia.api.auth.AuthService;
 import com.fdmultimedia.api.auth.security.AuthenticatedUser;
+import com.fdmultimedia.api.jobs.JobType;
 import com.fdmultimedia.api.workers.security.WorkerPrincipal;
 import com.fdmultimedia.api.workspaces.Workspace;
 import com.fdmultimedia.api.workspaces.WorkspaceMembership;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
@@ -16,6 +19,8 @@ import org.springframework.web.server.ResponseStatusException;
 
 @Service
 public class WorkerService {
+
+    private static final int MAX_REPORTED_ACTIVE_JOBS = 10_000;
 
     private final AuthService authService;
     private final WorkerRepository workers;
@@ -65,7 +70,11 @@ public class WorkerService {
                 .filter(existing -> existing.getCredential().getId().equals(credential.getId()))
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT, "Worker is not registered"));
         Instant now = Instant.now(clock);
-        worker.heartbeat(now);
+        worker.heartbeat(
+                now,
+                sanitizeTelemetry(request.telemetry(), worker.getTotalMemoryBytes()),
+                sanitizeJobTypes(request.supportedJobTypes()),
+                sanitizeHighlightAnalyzers(request.supportedHighlightAnalyzers()));
         return new WorkerHeartbeatResponse(
                 worker.getId(),
                 statusService.statusFor(worker.getLastSeenAt()),
@@ -125,7 +134,91 @@ public class WorkerService {
                 worker.getGpuModel(),
                 worker.getGpuMemoryBytes(),
                 worker.getAgentVersion(),
+                worker.getCurrentSupportedJobTypes(),
+                worker.getCurrentSupportedHighlightAnalyzers(),
+                telemetrySummary(worker),
                 worker.getLastSeenAt(),
                 worker.getRegisteredAt());
+    }
+
+    private WorkerTelemetryRequest sanitizeTelemetry(WorkerTelemetryRequest telemetry, long totalMemoryBytes) {
+        if (telemetry == null) {
+            return null;
+        }
+        Long availableMemoryBytes = sanitizeNonNegativeLong(telemetry.availableMemoryBytes());
+        if (availableMemoryBytes != null && availableMemoryBytes > totalMemoryBytes) {
+            availableMemoryBytes = null;
+        }
+        return new WorkerTelemetryRequest(
+                sanitizeLoad(telemetry.systemCpuLoad()),
+                sanitizeLoad(telemetry.processCpuLoad()),
+                availableMemoryBytes,
+                sanitizeNonNegativeLong(telemetry.jvmHeapUsedBytes()),
+                sanitizeNonNegativeLong(telemetry.jvmHeapMaxBytes()),
+                sanitizeActiveJobs(telemetry.activeJobs()));
+    }
+
+    private Double sanitizeLoad(Double value) {
+        if (value == null || !Double.isFinite(value) || value < 0 || value > 1) {
+            return null;
+        }
+        return value;
+    }
+
+    private Long sanitizeNonNegativeLong(Long value) {
+        return value == null || value < 0 ? null : value;
+    }
+
+    private Integer sanitizeActiveJobs(Integer value) {
+        if (value == null || value < 0 || value > MAX_REPORTED_ACTIVE_JOBS) {
+            return null;
+        }
+        return value;
+    }
+
+    private List<String> sanitizeJobTypes(List<JobType> supportedJobTypes) {
+        if (supportedJobTypes == null) {
+            return null;
+        }
+        return supportedJobTypes.stream()
+                .filter(type -> type != null)
+                .map(Enum::name)
+                .distinct()
+                .toList();
+    }
+
+    private List<String> sanitizeHighlightAnalyzers(List<String> supportedHighlightAnalyzers) {
+        if (supportedHighlightAnalyzers == null) {
+            return null;
+        }
+        List<String> normalized = new ArrayList<>();
+        for (String analyzer : supportedHighlightAnalyzers) {
+            if (analyzer != null && !analyzer.isBlank()) {
+                String value = analyzer.trim();
+                if (value.length() <= 64 && !normalized.contains(value)) {
+                    normalized.add(value);
+                }
+            }
+        }
+        return List.copyOf(normalized);
+    }
+
+    private WorkerTelemetrySummary telemetrySummary(Worker worker) {
+        Instant lastTelemetryAt = worker.getLastTelemetryAt();
+        boolean fresh = lastTelemetryAt != null
+                && !lastTelemetryAt.isBefore(Instant.now(clock).minus(telemetryFreshnessWindow()));
+        return new WorkerTelemetrySummary(
+                fresh ? worker.getSystemCpuLoad() : null,
+                fresh ? worker.getProcessCpuLoad() : null,
+                fresh ? worker.getAvailableMemoryBytes() : null,
+                fresh ? worker.getJvmHeapUsedBytes() : null,
+                fresh ? worker.getJvmHeapMaxBytes() : null,
+                fresh ? worker.getActiveJobs() : null,
+                lastTelemetryAt,
+                fresh);
+    }
+
+    private Duration telemetryFreshnessWindow() {
+        return properties.getOfflineThreshold().multipliedBy(2);
     }
 }

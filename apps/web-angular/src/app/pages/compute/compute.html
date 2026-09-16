@@ -22,35 +22,65 @@
       @if (workers().length === 0) {
         <p class="compute__state">No worker nodes are registered yet.</p>
       } @else {
-        <div class="compute__table-wrap">
-          <table class="compute__table">
-            <thead>
-              <tr>
-                <th scope="col">Node</th>
-                <th scope="col">Status</th>
-                <th scope="col">System</th>
-                <th scope="col">CPU</th>
-                <th scope="col">Memory</th>
-                <th scope="col">GPU</th>
-                <th scope="col">Last seen</th>
-              </tr>
-            </thead>
-            <tbody>
-              @for (worker of workers(); track worker.id) {
-                <tr>
-                  <td>
-                    <strong>{{ worker.name }}</strong>
-                    <span>{{ worker.machineIdentifier }}</span>
-                  </td>
-                  <td>
-                    <span class="compute__badge" [class.compute__badge--offline]="worker.status === 'OFFLINE'">
-                      {{ worker.status }}
-                    </span>
-                  </td>
-                  <td>{{ worker.operatingSystem }} / {{ worker.architecture }}</td>
-                  <td>{{ worker.cpuModel }} ({{ worker.cpuLogicalCores }} cores)</td>
-                  <td>{{ formatBytes(worker.totalMemoryBytes) }}</td>
-                  <td>
+        <div class="compute__grid">
+          @for (worker of workers(); track worker.id) {
+            <article class="compute__card">
+              <header class="compute__card-header">
+                <div>
+                  <h2>{{ worker.name }}</h2>
+                  <p>{{ worker.machineIdentifier }}</p>
+                </div>
+                <span class="compute__badge" [class.compute__badge--offline]="worker.status === 'OFFLINE'">
+                  {{ worker.status }}
+                </span>
+              </header>
+
+              <dl class="compute__metrics">
+                <div>
+                  <dt>CPU</dt>
+                  <dd>
+                    @if (worker.telemetry?.fresh) {
+                      {{ formatPercent(worker.telemetry?.systemCpuLoad) }} · {{ worker.cpuLogicalCores }} logical cores
+                    } @else {
+                      {{ worker.cpuLogicalCores }} logical cores
+                    }
+                    <span>{{ worker.cpuModel }}</span>
+                  </dd>
+                </div>
+                <div>
+                  <dt>Memory</dt>
+                  <dd>
+                    @if (worker.telemetry?.fresh && worker.telemetry?.availableMemoryBytes !== null) {
+                      {{ formatBytes(worker.telemetry?.availableMemoryBytes ?? null) }} available / {{ formatBytes(worker.totalMemoryBytes) }}
+                    } @else {
+                      {{ formatBytes(worker.totalMemoryBytes) }} total
+                    }
+                    <span>JVM {{ formatBytes(worker.telemetry?.jvmHeapUsedBytes ?? null) }} / {{ formatBytes(worker.telemetry?.jvmHeapMaxBytes ?? null) }}</span>
+                  </dd>
+                </div>
+                <div>
+                  <dt>Jobs</dt>
+                  <dd>{{ activeJobsLabel(worker) }}</dd>
+                </div>
+                <div>
+                  <dt>Telemetry</dt>
+                  <dd>
+                    {{ telemetryLabel(worker) }}
+                    @if (worker.telemetry?.lastTelemetryAt) {
+                      <span>{{ worker.telemetry?.lastTelemetryAt | date:'medium' }}</span>
+                    }
+                  </dd>
+                </div>
+                <div>
+                  <dt>System</dt>
+                  <dd>
+                    {{ worker.operatingSystem }} / {{ worker.architecture }}
+                    <span>{{ worker.agentVersion }}</span>
+                  </dd>
+                </div>
+                <div>
+                  <dt>GPU</dt>
+                  <dd>
                     @if (worker.gpuModel) {
                       {{ worker.gpuModel }}
                       @if (worker.gpuMemoryBytes) {
@@ -59,12 +89,25 @@
                     } @else {
                       None reported
                     }
-                  </td>
-                  <td>{{ worker.lastSeenAt | date:'medium' }}</td>
-                </tr>
-              }
-            </tbody>
-          </table>
+                  </dd>
+                </div>
+              </dl>
+
+              <section class="compute__capabilities" aria-label="Worker capabilities">
+                @if (capabilities(worker).length > 0) {
+                  @for (capability of capabilities(worker); track capability) {
+                    <span>{{ capability }}</span>
+                  }
+                } @else {
+                  <p>Capabilities not reported yet.</p>
+                }
+              </section>
+
+              <footer class="compute__footer">
+                Last seen {{ worker.lastSeenAt | date:'medium' }}
+              </footer>
+            </article>
+          }
         </div>
       }
     }

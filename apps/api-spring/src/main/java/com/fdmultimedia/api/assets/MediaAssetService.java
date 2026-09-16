@@ -197,7 +197,7 @@ public class MediaAssetService {
         validateCompletionMetadata(request);
         Instant now = Instant.now(clock);
         asset.markReady(request.metadata(), request.storageBucket(), request.storageKey(), now);
-        job.complete(worker, Map.of(
+        jobService.completeOwnedJob(job, worker, Map.of(
                 "assetId", asset.getId().toString(),
                 "checksumSha256", request.checksumSha256(),
                 "fileSizeBytes", request.fileSizeBytes()), now);
@@ -295,7 +295,7 @@ public class MediaAssetService {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Stored clip size does not match completion metadata");
         }
         output.markReady(request.metadata(), storage.bucket(), key, now);
-        job.complete(worker, Map.of(
+        jobService.completeOwnedJob(job, worker, Map.of(
                 "sourceAssetId", source.getId().toString(),
                 "outputAssetId", output.getId().toString(),
                 "checksumSha256", request.checksumSha256(),
@@ -327,7 +327,7 @@ public class MediaAssetService {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Stored derivative size does not match completion metadata");
         }
         output.markReady(request.metadata(), storage.bucket(), key, now);
-        job.complete(worker, Map.of(
+        jobService.completeOwnedJob(job, worker, Map.of(
                 "sourceAssetId", source.getId().toString(),
                 "outputAssetId", output.getId().toString(),
                 "checksumSha256", request.checksumSha256(),
@@ -353,10 +353,10 @@ public class MediaAssetService {
         }
         Instant now = Instant.now(clock);
         if (Boolean.TRUE.equals(request.terminal())) {
-            job.failTerminal(worker, request.errorCode(), safeErrorMessage(request.errorMessage()), now);
+            jobService.failOwnedJob(job, worker, request.errorCode(), safeErrorMessage(request.errorMessage()), true, now);
             output.markFailed(request.errorCode(), safeErrorMessage(request.errorMessage()), now);
         } else {
-            job.fail(worker, request.errorCode(), safeErrorMessage(request.errorMessage()), now);
+            jobService.failOwnedJob(job, worker, request.errorCode(), safeErrorMessage(request.errorMessage()), false, now);
             if (job.getStatus() == JobStatus.FAILED) {
                 output.markFailed(request.errorCode(), safeErrorMessage(request.errorMessage()), now);
             } else {
@@ -383,10 +383,10 @@ public class MediaAssetService {
         }
         Instant now = Instant.now(clock);
         if (Boolean.TRUE.equals(request.terminal())) {
-            job.failTerminal(worker, request.errorCode(), safeErrorMessage(request.errorMessage()), now);
+            jobService.failOwnedJob(job, worker, request.errorCode(), safeErrorMessage(request.errorMessage()), true, now);
             output.markFailed(request.errorCode(), safeErrorMessage(request.errorMessage()), now);
         } else {
-            job.fail(worker, request.errorCode(), safeErrorMessage(request.errorMessage()), now);
+            jobService.failOwnedJob(job, worker, request.errorCode(), safeErrorMessage(request.errorMessage()), false, now);
             if (job.getStatus() == JobStatus.FAILED) {
                 output.markFailed(request.errorCode(), safeErrorMessage(request.errorMessage()), now);
             } else {
@@ -409,10 +409,10 @@ public class MediaAssetService {
         }
         Instant now = Instant.now(clock);
         if (request.terminal()) {
-            job.failTerminal(worker, request.errorCode(), safeErrorMessage(request.errorMessage()), now);
+            jobService.failOwnedJob(job, worker, request.errorCode(), safeErrorMessage(request.errorMessage()), true, now);
             asset.markFailed(request.errorCode(), safeErrorMessage(request.errorMessage()), now);
         } else {
-            job.fail(worker, request.errorCode(), safeErrorMessage(request.errorMessage()), now);
+            jobService.failOwnedJob(job, worker, request.errorCode(), safeErrorMessage(request.errorMessage()), false, now);
             if (job.getStatus() == JobStatus.FAILED) {
                 asset.markFailed(request.errorCode(), safeErrorMessage(request.errorMessage()), now);
             } else {
@@ -459,7 +459,7 @@ public class MediaAssetService {
         validateInspectionMetadata(request.metadata());
         Instant now = Instant.now(clock);
         asset.markInspected(request.metadata(), now);
-        job.complete(worker, Map.of(
+        jobService.completeOwnedJob(job, worker, Map.of(
                 "assetId", asset.getId().toString(),
                 "inspected", true), now);
         return toSummary(asset);
@@ -478,10 +478,10 @@ public class MediaAssetService {
         }
         Instant now = Instant.now(clock);
         if (Boolean.TRUE.equals(request.terminal())) {
-            job.failTerminal(worker, request.errorCode(), safeErrorMessage(request.errorMessage()), now);
+            jobService.failOwnedJob(job, worker, request.errorCode(), safeErrorMessage(request.errorMessage()), true, now);
             asset.markInspectionFailed(request.errorCode(), safeErrorMessage(request.errorMessage()), now);
         } else {
-            job.fail(worker, request.errorCode(), safeErrorMessage(request.errorMessage()), now);
+            jobService.failOwnedJob(job, worker, request.errorCode(), safeErrorMessage(request.errorMessage()), false, now);
             if (job.getStatus() == JobStatus.FAILED) {
                 asset.markInspectionFailed(request.errorCode(), safeErrorMessage(request.errorMessage()), now);
             } else {

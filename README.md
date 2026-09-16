@@ -5,9 +5,10 @@ social-media content workflows, video processing workers running across
 multiple laptops/cloud machines, scheduling, AI-assisted content creation,
 publishing, analytics, and revenue tracking.
 
-## Phase 7B1 scope
+## Phase 9A scope
 
-This repository is currently at **Phase 7B1: media transcription**. That means:
+This repository is currently at **Phase 9A: worker telemetry and scheduling
+foundation**. That means:
 
 - A clean monorepo layout (`apps/`, `workers/`, `infra/`, `docs/`).
 - A Spring Boot 21 modular monolith (`apps/api-spring`) with the package
@@ -15,8 +16,9 @@ This repository is currently at **Phase 7B1: media transcription**. That means:
   RabbitMQ connectivity, and secure session-based authentication.
 - Users, workspaces, and workspace memberships with OWNER/ADMIN/MEMBER
   roles. Future business resources can be scoped to `workspace_id`.
-- Worker credentials, worker registration, heartbeat tracking, and a
-  workspace-scoped Compute page. Worker status is derived from heartbeat age.
+- Worker credentials, worker registration, heartbeat tracking, current
+  capability snapshots, lightweight telemetry, and a workspace-scoped Compute
+  page. Worker status is derived from heartbeat age.
 - Centrally-created `SYSTEM_TEST`, `IMPORT_MEDIA`, `INSPECT_MEDIA`,
   `CREATE_CLIP`, `CREATE_SOCIAL_VERTICAL`, and `ANALYZE_HIGHLIGHTS` jobs
   with PostgreSQL-backed durable state, atomic worker claiming, leases,
@@ -46,6 +48,9 @@ This repository is currently at **Phase 7B1: media transcription**. That means:
 - Nginx as the single entry point, routing `/api/*` to the backend and
   everything else to the frontend.
 - Docker Compose to run the whole stack locally.
+- Scheduler-oriented execution metrics are recorded from server timestamps for
+  completed, failed, and lease-recovered attempts. These metrics are inputs for
+  a later scheduler; Phase 9A still uses capability-first FIFO claiming.
 
 No thumbnails, publishing, AI, social integrations, analytics, or billing are implemented yet — see
 [docs/ROADMAP.md](docs/ROADMAP.md) for what comes next and
@@ -175,12 +180,27 @@ runtime is `WHISPER_CLI` for the Python `whisper` CLI contract. Use
 working transcription CLI/model, the worker still starts but does not advertise
 `TRANSCRIBE_MEDIA`.
 
+Worker heartbeats also report cheap dynamic telemetry when available:
+
+- system CPU load and process CPU load as `0..1`
+- available system memory
+- JVM heap used/max
+- active jobs currently executing on that worker
+- current capability snapshot
+
+Unavailable or invalid values are omitted/null. Telemetry is operational data
+only; it is not used for authorization and Phase 9A does not rank workers.
+
 ## Jobs, media assets, and distributed execution
 
 Phase 4 uses PostgreSQL as the durable job queue. Workers poll the control
 plane and claim jobs with a transactional `FOR UPDATE SKIP LOCKED` query, so
 one queued job is assigned to exactly one worker. RabbitMQ remains available
 in the stack but is reserved for a later event-driven dispatch optimization.
+Phase 9A keeps this atomic claim path unchanged. Eligibility is isolated behind
+a server-side boundary that answers which online workers can run a job based on
+reported capabilities and analyzer support; smart scoring is deferred to Phase
+9B.
 
 The first executable job type is `SYSTEM_TEST`. It accepts:
 
@@ -208,6 +228,19 @@ ASSIGNED/RUNNING -> FAILED     (max attempts exhausted)
 lease; if a worker disappears, the next claim operation recovers expired
 leases and either requeues the job or marks it `FAILED` when attempts are
 exhausted.
+
+For scheduler preparation, the API records one execution metric per attempt
+when an attempt succeeds, fails, or is recovered after lease expiry:
+
+- `queueWaitMs = assignedAt - queuedAt`
+- `executionMs = finishedAt - startedAt` when the worker acknowledged start
+- `totalLatencyMs = finishedAt - queuedAt`
+- job type, worker, attempt, outcome, and safe workload hints such as media
+  size/duration/dimensions or provider/model/analyzer identifiers when those
+  already exist in platform data
+
+The history is intentionally lightweight and is not a high-volume telemetry
+time series.
 
 Phase 5 adds `IMPORT_MEDIA`. A user submits a direct HTTP/HTTPS media file URL
 from Content. The API derives the workspace from the session, creates a

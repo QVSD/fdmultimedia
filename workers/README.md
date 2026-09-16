@@ -1,6 +1,6 @@
 # workers
 
-Phase 7B1 includes a standalone Java worker agent in `java-agent/`. It registers
+Phase 9A includes a standalone Java worker agent in `java-agent/`. It registers
 the current machine with the Spring control plane, sends periodic heartbeats,
 polls for work, executes the safe `SYSTEM_TEST` job type, and imports direct
 HTTP/HTTPS media files through `IMPORT_MEDIA`. When FFprobe is available, it
@@ -14,6 +14,12 @@ advertises `TRANSCRIBE_MEDIA`.
 
 The agent persists a random installation UUID locally and uses that as the
 machine identifier. It does not use MAC addresses or other hardware IDs.
+Registration reports static machine metadata such as OS, architecture, logical
+CPU cores, total memory, optional GPU metadata, and agent version. Heartbeats
+report dynamic telemetry when the JVM/OS exposes it cheaply: CPU load,
+available memory, JVM heap, active job count, and current capability snapshots.
+Unavailable telemetry is sent as null/omitted; no subprocess benchmarks are run
+per heartbeat.
 
 Build and test:
 
@@ -194,3 +200,16 @@ storage keys, worker credentials, MinIO credentials, or raw browser-provided
 commands/prompts. The API filters job claims by supported analyzer type and
 validates that returned semantic candidates are grounded in transcript segment
 timing before persistence.
+
+## Telemetry and scheduling inputs
+
+The worker reports active jobs as the real number it is executing. The current
+Java agent is single-job-at-a-time, so this is normally `0` or `1`; the field is
+designed so future agents can report higher concurrency. Telemetry collection
+failure is logged locally and does not stop heartbeats or job execution.
+
+The control plane stores the latest telemetry only, with a freshness window
+defined server-side. It also records per-attempt execution metrics from server
+timestamps when jobs succeed, fail, or recover after lease expiry. Phase 9A
+does not make smart placement decisions yet: workers still claim compatible
+jobs through the existing PostgreSQL `FOR UPDATE SKIP LOCKED` queue path.

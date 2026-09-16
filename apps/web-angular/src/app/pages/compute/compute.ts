@@ -48,4 +48,32 @@ export class Compute implements OnInit, OnDestroy {
     const gib = bytes / 1024 / 1024 / 1024;
     return `${gib.toFixed(gib >= 10 ? 0 : 1)} GiB`;
   }
+
+  protected formatPercent(value: number | null | undefined): string {
+    if (value === null || value === undefined) {
+      return 'Unavailable';
+    }
+    return `${Math.round(value * 100)}%`;
+  }
+
+  protected telemetryLabel(worker: WorkerSummary): string {
+    if (!worker.telemetry?.lastTelemetryAt) {
+      return 'Telemetry unavailable';
+    }
+    return worker.telemetry.fresh ? 'Telemetry current' : 'Telemetry stale';
+  }
+
+  protected activeJobsLabel(worker: WorkerSummary): string {
+    const activeJobs = worker.telemetry?.activeJobs;
+    if (activeJobs === null || activeJobs === undefined) {
+      return 'Unknown';
+    }
+    return activeJobs === 1 ? '1 active' : `${activeJobs} active`;
+  }
+
+  protected capabilities(worker: WorkerSummary): string[] {
+    const jobTypes = worker.supportedJobTypes ?? [];
+    const analyzers = worker.supportedHighlightAnalyzers ?? [];
+    return [...jobTypes, ...analyzers.map((analyzer) => `Highlights: ${analyzer}`)];
+  }
 }

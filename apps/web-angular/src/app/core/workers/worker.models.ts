@@ -13,6 +13,20 @@ export interface WorkerSummary {
   gpuModel: string | null;
   gpuMemoryBytes: number | null;
   agentVersion: string;
+  supportedJobTypes: string[] | null;
+  supportedHighlightAnalyzers: string[] | null;
+  telemetry: WorkerTelemetry | null;
   lastSeenAt: string;
   registeredAt: string;
+}
+
+export interface WorkerTelemetry {
+  systemCpuLoad: number | null;
+  processCpuLoad: number | null;
+  availableMemoryBytes: number | null;
+  jvmHeapUsedBytes: number | null;
+  jvmHeapMaxBytes: number | null;
+  activeJobs: number | null;
+  lastTelemetryAt: string | null;
+  fresh: boolean;
 }

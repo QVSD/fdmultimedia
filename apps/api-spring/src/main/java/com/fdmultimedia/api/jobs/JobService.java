@@ -41,6 +41,8 @@ public class JobService {
     private final WorkerRepository workers;
     private final WorkerCredentialRepository credentials;
     private final WorkerStatusService workerStatusService;
+    private final WorkerEligibilityService eligibilityService;
+    private final JobExecutionMetricService executionMetrics;
     private final JobProperties properties;
     private final Clock clock;
 
@@ -53,6 +55,8 @@ public class JobService {
             WorkerRepository workers,
             WorkerCredentialRepository credentials,
             WorkerStatusService workerStatusService,
+            WorkerEligibilityService eligibilityService,
+            JobExecutionMetricService executionMetrics,
             JobProperties properties,
             Clock clock) {
         this.authService = authService;
@@ -63,6 +67,8 @@ public class JobService {
         this.workers = workers;
         this.credentials = credentials;
         this.workerStatusService = workerStatusService;
+        this.eligibilityService = eligibilityService;
+        this.executionMetrics = executionMetrics;
         this.properties = properties;
         this.clock = clock;
     }
@@ -122,11 +128,13 @@ public class JobService {
     @Transactional
     public WorkerJobClaimResponse claim(WorkerPrincipal principal, WorkerJobClaimRequest request) {
         Worker worker = requireOnlineWorker(principal, request.machineIdentifier());
-        List<String> supportedTypes = supportedTypeNames(request);
-        List<String> supportedHighlightAnalyzers = supportedHighlightAnalyzers(request);
+        WorkerEligibility eligibility = eligibilityService.eligibleCapabilities(request);
         Instant now = Instant.now(clock);
         recoverExpiredLeases(worker.getWorkspace(), now);
-        return jobs.findNextQueuedForUpdate(worker.getWorkspace().getId(), supportedTypes, supportedHighlightAnalyzers)
+        return jobs.findNextQueuedForUpdate(
+                        worker.getWorkspace().getId(),
+                        eligibility.supportedJobTypes(),
+                        eligibility.supportedHighlightAnalyzers())
                 .map(job -> {
                     job.claim(worker, now, now.plus(properties.getLeaseDuration()));
                     return new WorkerJobClaimResponse(
@@ -158,7 +166,8 @@ public class JobService {
         Worker worker = requireOnlineWorker(principal, request.machineIdentifier());
         Job job = requireJobForWorkerWorkspace(worker, jobId);
         try {
-            job.complete(worker, sanitizeResult(request.result()), Instant.now(clock));
+            Instant now = Instant.now(clock);
+            completeOwnedJob(job, worker, sanitizeResult(request.result()), now);
             return toSummary(job);
         } catch (IllegalStateException ex) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, ex.getMessage());
@@ -170,15 +179,43 @@ public class JobService {
         Worker worker = requireOnlineWorker(principal, request.machineIdentifier());
         Job job = requireJobForWorkerWorkspace(worker, jobId);
         try {
-            if (Boolean.TRUE.equals(request.terminal())) {
-                job.failTerminal(worker, request.errorCode(), safeErrorMessage(request.errorMessage()), Instant.now(clock));
-            } else {
-                job.fail(worker, request.errorCode(), safeErrorMessage(request.errorMessage()), Instant.now(clock));
-            }
+            Instant now = Instant.now(clock);
+            failOwnedJob(
+                    job,
+                    worker,
+                    request.errorCode(),
+                    safeErrorMessage(request.errorMessage()),
+                    Boolean.TRUE.equals(request.terminal()),
+                    now);
             return toSummary(job);
         } catch (IllegalStateException ex) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, ex.getMessage());
         }
+    }
+
+    public void completeOwnedJob(Job job, Worker worker, Map<String, Object> result, Instant now) {
+        job.complete(worker, sanitizeResult(result), now);
+        executionMetrics.record(job, worker, JobExecutionOutcome.SUCCEEDED, now);
+    }
+
+    public void failOwnedJob(
+            Job job,
+            Worker worker,
+            String errorCode,
+            String errorMessage,
+            boolean terminal,
+            Instant now) {
+        JobExecutionSnapshot snapshot = JobExecutionSnapshot.from(job);
+        if (terminal) {
+            job.failTerminal(worker, errorCode, safeErrorMessage(errorMessage), now);
+            executionMetrics.record(job, snapshot, JobExecutionOutcome.FAILED, now);
+            return;
+        }
+        job.fail(worker, errorCode, safeErrorMessage(errorMessage), now);
+        JobExecutionOutcome outcome = job.getStatus() == JobStatus.FAILED
+                ? JobExecutionOutcome.FAILED
+                : JobExecutionOutcome.RETRYABLE_FAILED;
+        executionMetrics.record(job, snapshot, outcome, now);
     }
 
     @Transactional
@@ -197,7 +234,9 @@ public class JobService {
     private void recoverExpiredLeases(Workspace workspace, Instant now) {
         jobs.findExpiredLeasesForUpdate(workspace.getId(), now)
                 .forEach(job -> {
+                    JobExecutionSnapshot snapshot = JobExecutionSnapshot.from(job);
                     job.recoverExpiredLease(now);
+                    executionMetrics.record(job, snapshot, JobExecutionOutcome.LEASE_EXPIRED, now);
                     reconcileRecoveredImportAsset(job, now);
                     reconcileRecoveredInspectionAsset(job, now);
                     reconcileRecoveredProcessingAsset(job, now);
@@ -283,30 +322,6 @@ public class JobService {
                 transcript.markPendingForRetry(now);
             }
         });
-    }
-
-    private List<String> supportedTypeNames(WorkerJobClaimRequest request) {
-        if (request.supportedJobTypes() == null || request.supportedJobTypes().isEmpty()) {
-            return List.of(JobType.SYSTEM_TEST.name());
-        }
-        List<String> supported = request.supportedJobTypes().stream()
-                .filter(type -> type != null)
-                .map(Enum::name)
-                .distinct()
-                .toList();
-        return supported.isEmpty() ? List.of(JobType.SYSTEM_TEST.name()) : supported;
-    }
-
-    private List<String> supportedHighlightAnalyzers(WorkerJobClaimRequest request) {
-        if (request.supportedHighlightAnalyzers() == null || request.supportedHighlightAnalyzers().isEmpty()) {
-            return List.of("DETERMINISTIC_V1");
-        }
-        List<String> supported = request.supportedHighlightAnalyzers().stream()
-                .filter(value -> value != null && !value.isBlank())
-                .map(String::trim)
-                .distinct()
-                .toList();
-        return supported.isEmpty() ? List.of("DETERMINISTIC_V1") : supported;
     }
 
     public Worker requireOnlineWorker(WorkerPrincipal principal, String machineIdentifier) {

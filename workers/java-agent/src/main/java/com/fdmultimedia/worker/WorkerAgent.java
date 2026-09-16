@@ -9,6 +9,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public final class WorkerAgent {
 
@@ -59,6 +60,8 @@ public final class WorkerAgent {
                 : null;
         List<String> supportedJobTypes = supportedJobTypes(ffprobeAvailable, ffmpegAvailable, transcriptionAvailable);
         List<String> supportedHighlightAnalyzers = supportedHighlightAnalyzers(semanticHighlightAvailable);
+        AtomicInteger activeJobs = new AtomicInteger(0);
+        WorkerTelemetryCollector telemetryCollector = new WorkerTelemetryCollector();
 
         while (!Thread.currentThread().isInterrupted()) {
             try {
@@ -76,15 +79,35 @@ public final class WorkerAgent {
             executor.shutdownNow();
             shutdown.countDown();
         }));
-        executor.submit(() -> heartbeatLoop(client, machineIdentifier, config));
-        executor.submit(() -> jobLoop(client, machineIdentifier, config, systemTestExecutor, importMediaExecutor, inspectMediaExecutor, clipExecutor, analyzeHighlightsExecutor, transcribeMediaExecutor, supportedJobTypes, supportedHighlightAnalyzers));
+        executor.submit(() -> heartbeatLoop(
+                client,
+                machineIdentifier,
+                config,
+                telemetryCollector,
+                activeJobs,
+                supportedJobTypes,
+                supportedHighlightAnalyzers));
+        executor.submit(() -> jobLoop(client, machineIdentifier, config, systemTestExecutor, importMediaExecutor, inspectMediaExecutor, clipExecutor, analyzeHighlightsExecutor, transcribeMediaExecutor, supportedJobTypes, supportedHighlightAnalyzers, activeJobs));
         shutdown.await();
     }
 
-    private static void heartbeatLoop(WorkerAgentClient client, String machineIdentifier, WorkerAgentConfig config) {
+    private static void heartbeatLoop(
+            WorkerAgentClient client,
+            String machineIdentifier,
+            WorkerAgentConfig config,
+            WorkerTelemetryCollector telemetryCollector,
+            AtomicInteger activeJobs,
+            List<String> supportedJobTypes,
+            List<String> supportedHighlightAnalyzers) {
         while (!Thread.currentThread().isInterrupted()) {
             try {
-                client.heartbeat(machineIdentifier);
+                WorkerTelemetry telemetry = null;
+                try {
+                    telemetry = telemetryCollector.collect(activeJobs);
+                } catch (Exception ex) {
+                    System.err.println("Worker telemetry collection failed: " + ex.getMessage());
+                }
+                client.heartbeat(machineIdentifier, telemetry, supportedJobTypes, supportedHighlightAnalyzers);
                 sleep(config.heartbeatInterval());
             } catch (Exception ex) {
                 System.err.println("Worker heartbeat failed: " + ex.getMessage());
@@ -104,7 +127,8 @@ public final class WorkerAgent {
             AnalyzeHighlightsExecutor analyzeHighlightsExecutor,
             TranscribeMediaExecutor transcribeMediaExecutor,
             List<String> supportedJobTypes,
-            List<String> supportedHighlightAnalyzers) {
+            List<String> supportedHighlightAnalyzers,
+            AtomicInteger activeJobs) {
         while (!Thread.currentThread().isInterrupted()) {
             try {
                 ClaimedJob job = client.claim(machineIdentifier, supportedJobTypes, supportedHighlightAnalyzers);
@@ -112,7 +136,12 @@ public final class WorkerAgent {
                     sleep(config.jobPollInterval());
                     continue;
                 }
-                executeClaimedJob(client, machineIdentifier, config.workerName(), systemTestExecutor, importMediaExecutor, inspectMediaExecutor, clipExecutor, analyzeHighlightsExecutor, transcribeMediaExecutor, job);
+                activeJobs.incrementAndGet();
+                try {
+                    executeClaimedJob(client, machineIdentifier, config.workerName(), systemTestExecutor, importMediaExecutor, inspectMediaExecutor, clipExecutor, analyzeHighlightsExecutor, transcribeMediaExecutor, job);
+                } finally {
+                    activeJobs.decrementAndGet();
+                }
             } catch (Exception ex) {
                 System.err.println("Worker job polling failed: " + ex.getMessage());
                 sleep(backoff(config.jobPollInterval()));

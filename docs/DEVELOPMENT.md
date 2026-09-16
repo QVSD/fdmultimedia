@@ -176,7 +176,8 @@ Useful worker environment variables:
   `base`.
 - `TRANSCRIPTION_TIMEOUT_SECONDS` — inference timeout, default 900 seconds.
 
-The Phase 7A worker registers, heartbeats, polls for a job, starts it, executes
+The Phase 9A worker registers, heartbeats with lightweight telemetry, polls for
+a job, starts it, executes
 `SYSTEM_TEST`, `IMPORT_MEDIA`, `INSPECT_MEDIA`, `CREATE_CLIP`, or
 `CREATE_SOCIAL_VERTICAL`, `ANALYZE_HIGHLIGHTS`, or `TRANSCRIBE_MEDIA`, renews active
 media-job leases, and reports success or failure. `SYSTEM_TEST` is limited to a
@@ -334,3 +335,19 @@ Manual semantic highlight check:
 The semantic provider receives transcript windows only. Do not send media URLs,
 storage keys, credentials, or arbitrary prompt material from browser input to a
 model provider.
+
+Manual telemetry check:
+
+1. Start the Docker stack and a Java worker.
+2. Open Compute. The worker should show static metadata, agent version,
+   capabilities, telemetry freshness, active jobs, CPU load when available,
+   and available memory when available.
+3. Create a longer `SYSTEM_TEST` job. During execution, Compute should show
+   `1 active` for the worker, then return to `0 active` after completion.
+4. Stop the worker and wait past the offline threshold. The worker should
+   become offline; stale telemetry should not be presented as current.
+
+Phase 9A records per-attempt execution metrics from server timestamps for
+success, failure, and lease-expiry recovery. These are scheduler inputs for a
+later phase. The current assignment strategy is still capability-first FIFO
+through PostgreSQL row locking, not smart scoring.

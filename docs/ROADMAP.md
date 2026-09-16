@@ -1,6 +1,6 @@
 # Roadmap
 
-The repository is currently at Phase 8. Completed phases are marked below;
+The repository is currently at Phase 9A. Completed phases are marked below;
 later phases are planned high-level direction and intentionally do not go into
 implementation detail before they are started.
 
@@ -40,11 +40,13 @@ implementation detail before they are started.
 13. **Product UI consolidation** — make Content the primary workflow surface,
    hide unfinished placeholder areas from primary navigation, replace
    engineering tables with asset summaries/details, and present transcripts,
-   highlights, clips, and vertical derivatives in product language. *(current phase)*
-14. **Capabilities and processing prep** — broaden worker capability matching
-   for future media operations.
-15. **FFmpeg processing** — richer automated video processing pipelines.
-16. **Scheduler / load balancing** — deciding which worker runs which job.
+   highlights, clips, and vertical derivatives in product language. *(complete)*
+14. **Worker telemetry and scheduling foundation** — collect current Worker
+   capacity telemetry, capability snapshots, and per-attempt execution metrics
+   while preserving capability-first FIFO claiming. *(current phase)*
+15. **Smart scheduler / load balancing** — use telemetry and execution history
+   to decide which eligible worker should run which job.
+16. **FFmpeg processing** — richer automated video processing pipelines.
 17. **Social account integrations** — connecting and publishing to external
    platforms.
 18. **AI content** — AI-assisted content creation.

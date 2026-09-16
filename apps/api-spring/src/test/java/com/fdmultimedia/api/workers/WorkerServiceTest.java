@@ -10,6 +10,7 @@ import static org.mockito.Mockito.when;
 
 import com.fdmultimedia.api.auth.AuthService;
 import com.fdmultimedia.api.auth.security.AuthenticatedUser;
+import com.fdmultimedia.api.jobs.JobType;
 import com.fdmultimedia.api.users.AppUser;
 import com.fdmultimedia.api.workers.security.WorkerPrincipal;
 import com.fdmultimedia.api.workspaces.Workspace;
@@ -114,6 +115,50 @@ class WorkerServiceTest {
 
         assertThat(existing.getLastSeenAt()).isEqualTo(NOW);
         assertThat(response.status()).isEqualTo(WorkerStatus.ONLINE);
+        assertThat(existing.getLastTelemetryAt()).isNull();
+    }
+
+    @Test
+    void heartbeatAcceptsTelemetryAndCapabilities() {
+        Worker existing = new Worker(workspace, credential, registration("machine-1", "Node A"), NOW.minusSeconds(20));
+        when(workers.findByWorkspaceAndMachineIdentifier(workspace, "machine-1")).thenReturn(Optional.of(existing));
+
+        WorkerHeartbeatResponse response = service.heartbeat(
+                principal,
+                new WorkerHeartbeatRequest(
+                        "machine-1",
+                        new WorkerTelemetryRequest(0.25, 0.10, 8_589_934_592L, 134_217_728L, 536_870_912L, 1),
+                        List.of(JobType.SYSTEM_TEST, JobType.CREATE_CLIP),
+                        List.of("DETERMINISTIC_V1", "TRANSCRIPT_SEMANTIC_V1")));
+
+        assertThat(response.status()).isEqualTo(WorkerStatus.ONLINE);
+        assertThat(existing.getCurrentSupportedJobTypes()).containsExactly("SYSTEM_TEST", "CREATE_CLIP");
+        assertThat(existing.getCurrentSupportedHighlightAnalyzers()).containsExactly("DETERMINISTIC_V1", "TRANSCRIPT_SEMANTIC_V1");
+        assertThat(existing.getSystemCpuLoad()).isEqualTo(0.25);
+        assertThat(existing.getActiveJobs()).isEqualTo(1);
+        assertThat(existing.getLastTelemetryAt()).isEqualTo(NOW);
+    }
+
+    @Test
+    void heartbeatSanitizesInvalidTelemetryWithoutRejectingHeartbeat() {
+        Worker existing = new Worker(workspace, credential, registration("machine-1", "Node A"), NOW.minusSeconds(20));
+        when(workers.findByWorkspaceAndMachineIdentifier(workspace, "machine-1")).thenReturn(Optional.of(existing));
+
+        service.heartbeat(
+                principal,
+                new WorkerHeartbeatRequest(
+                        "machine-1",
+                        new WorkerTelemetryRequest(2.0, Double.NaN, existing.getTotalMemoryBytes() + 1, -1L, 1024L, -3),
+                        List.of(JobType.SYSTEM_TEST),
+                        List.of("DETERMINISTIC_V1")));
+
+        assertThat(existing.getLastSeenAt()).isEqualTo(NOW);
+        assertThat(existing.getSystemCpuLoad()).isNull();
+        assertThat(existing.getProcessCpuLoad()).isNull();
+        assertThat(existing.getAvailableMemoryBytes()).isNull();
+        assertThat(existing.getJvmHeapUsedBytes()).isNull();
+        assertThat(existing.getJvmHeapMaxBytes()).isEqualTo(1024L);
+        assertThat(existing.getActiveJobs()).isNull();
     }
 
     @Test
@@ -140,6 +185,27 @@ class WorkerServiceTest {
 
         assertThat(result).extracting(WorkerSummary::name).containsExactly("Node A", "Node B");
         assertThat(result).extracting(WorkerSummary::status).containsExactly(WorkerStatus.ONLINE, WorkerStatus.OFFLINE);
+    }
+
+    @Test
+    void staleTelemetryIsNotReturnedAsCurrent() {
+        AppUser user = new AppUser("owner@example.com", "$2a$10$hash", "Owner");
+        AuthenticatedUser principalUser = new AuthenticatedUser(user);
+        when(authService.currentMembershipFor(principalUser))
+                .thenReturn(new WorkspaceMembership(workspace, user, WorkspaceRole.OWNER));
+        Worker stale = new Worker(workspace, credential, registration("machine-1", "Node A"), NOW.minusSeconds(5));
+        stale.heartbeat(
+                NOW.minusSeconds(120),
+                new WorkerTelemetryRequest(0.5, 0.2, 1024L, 512L, 2048L, 1),
+                List.of("SYSTEM_TEST"),
+                List.of("DETERMINISTIC_V1"));
+        when(workers.findByWorkspaceOrderByNameAsc(workspace)).thenReturn(List.of(stale));
+
+        WorkerSummary summary = service.listFor(principalUser).getFirst();
+
+        assertThat(summary.telemetry().fresh()).isFalse();
+        assertThat(summary.telemetry().systemCpuLoad()).isNull();
+        assertThat(summary.telemetry().lastTelemetryAt()).isEqualTo(NOW.minusSeconds(120));
     }
 
     private WorkerRegistrationRequest registration(String machineIdentifier, String name) {

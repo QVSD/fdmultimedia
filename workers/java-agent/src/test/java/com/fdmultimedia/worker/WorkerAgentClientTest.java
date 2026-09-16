@@ -86,4 +86,33 @@ class WorkerAgentClientTest {
         assertTrue(body.get().contains("\"machineIdentifier\":\"machine-1\""));
         assertTrue(body.get().contains("\"supportedJobTypes\":[\"SYSTEM_TEST\",\"IMPORT_MEDIA\",\"INSPECT_MEDIA\"]"));
     }
+
+    @Test
+    void heartbeatReportsTelemetryAndCapabilities() throws Exception {
+        AtomicReference<String> body = new AtomicReference<>();
+        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/api/worker-agent/heartbeat", exchange -> {
+            body.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+            byte[] response = "{}".getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.start();
+        WorkerAgentClient client = new WorkerAgentClient(
+                java.net.URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/api/"),
+                "WorkerToken credential.secret");
+
+        client.heartbeat(
+                "machine-1",
+                new WorkerTelemetry(0.25, 0.10, 1024L, 256L, 2048L, 1),
+                List.of("SYSTEM_TEST", "CREATE_CLIP"),
+                List.of("DETERMINISTIC_V1", "TRANSCRIPT_SEMANTIC_V1"));
+
+        assertTrue(body.get().contains("\"machineIdentifier\":\"machine-1\""));
+        assertTrue(body.get().contains("\"activeJobs\":1"));
+        assertTrue(body.get().contains("\"systemCpuLoad\":0.25"));
+        assertTrue(body.get().contains("\"supportedJobTypes\":[\"SYSTEM_TEST\",\"CREATE_CLIP\"]"));
+        assertTrue(body.get().contains("\"supportedHighlightAnalyzers\":[\"DETERMINISTIC_V1\",\"TRANSCRIPT_SEMANTIC_V1\"]"));
+    }
 }

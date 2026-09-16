@@ -33,6 +33,19 @@ final class WorkerAgentClient {
         send("/worker-agent/register", registrationBody(machineInfo), new TypeReference<Map<String, Object>>() {});
     }
 
+    void heartbeat(
+            String machineIdentifier,
+            WorkerTelemetry telemetry,
+            List<String> supportedJobTypes,
+            List<String> supportedHighlightAnalyzers) throws IOException, InterruptedException {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("machineIdentifier", machineIdentifier);
+        body.put("telemetry", telemetryBody(telemetry));
+        body.put("supportedJobTypes", supportedJobTypes);
+        body.put("supportedHighlightAnalyzers", supportedHighlightAnalyzers);
+        send("/worker-agent/heartbeat", body, new TypeReference<Map<String, Object>>() {});
+    }
+
     void heartbeat(String machineIdentifier) throws IOException, InterruptedException {
         send("/worker-agent/heartbeat", Map.of("machineIdentifier", machineIdentifier), new TypeReference<Map<String, Object>>() {});
     }
@@ -320,6 +333,20 @@ final class WorkerAgentClient {
         body.put("gpuModel", info.gpuModel());
         body.put("gpuMemoryBytes", info.gpuMemoryBytes());
         body.put("agentVersion", info.agentVersion());
+        return body;
+    }
+
+    private Map<String, Object> telemetryBody(WorkerTelemetry telemetry) {
+        if (telemetry == null) {
+            return null;
+        }
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("systemCpuLoad", telemetry.systemCpuLoad());
+        body.put("processCpuLoad", telemetry.processCpuLoad());
+        body.put("availableMemoryBytes", telemetry.availableMemoryBytes());
+        body.put("jvmHeapUsedBytes", telemetry.jvmHeapUsedBytes());
+        body.put("jvmHeapMaxBytes", telemetry.jvmHeapMaxBytes());
+        body.put("activeJobs", telemetry.activeJobs());
         return body;
     }
 

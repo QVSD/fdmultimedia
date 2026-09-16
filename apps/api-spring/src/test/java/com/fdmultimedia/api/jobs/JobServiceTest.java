@@ -56,6 +56,8 @@ class JobServiceTest {
     private final WorkerProperties workerProperties = new WorkerProperties();
     private final WorkerStatusService workerStatusService =
             new WorkerStatusService(workerProperties, Clock.fixed(NOW, ZoneOffset.UTC));
+    private final WorkerEligibilityService eligibilityService = new WorkerEligibilityService();
+    private final JobExecutionMetricService executionMetrics = mock(JobExecutionMetricService.class);
     private final JobService service = new JobService(
             authService,
             jobs,
@@ -65,6 +67,8 @@ class JobServiceTest {
             workers,
             credentials,
             workerStatusService,
+            eligibilityService,
+            executionMetrics,
             jobProperties,
             Clock.fixed(NOW, ZoneOffset.UTC));
 
@@ -272,6 +276,7 @@ class JobServiceTest {
         assertThat(summary.status()).isEqualTo(JobStatus.SUCCEEDED);
         assertThat(summary.result()).containsEntry("message", "done");
         assertThat(summary.leaseExpiresAt()).isNull();
+        verify(executionMetrics).record(job, worker, JobExecutionOutcome.SUCCEEDED, NOW);
     }
 
     @Test
@@ -298,6 +303,7 @@ class JobServiceTest {
 
         assertThat(firstFailure.status()).isEqualTo(JobStatus.QUEUED);
         assertThat(firstFailure.attemptCount()).isEqualTo(1);
+        verify(executionMetrics).record(any(Job.class), any(JobExecutionSnapshot.class), any(JobExecutionOutcome.class), any(Instant.class));
 
         Job exhausted = job();
         exhausted.claim(worker, NOW.minusSeconds(5), NOW.plusSeconds(20));
@@ -325,6 +331,7 @@ class JobServiceTest {
 
         assertThat(expired.getStatus()).isEqualTo(JobStatus.QUEUED);
         assertThat(expired.getErrorCode()).isEqualTo("LEASE_EXPIRED");
+        verify(executionMetrics).record(expired, new JobExecutionSnapshot(worker, 1, NOW, NOW.minusSeconds(60), null), JobExecutionOutcome.LEASE_EXPIRED, NOW);
     }
 
     @Test

@@ -162,7 +162,7 @@ public class TranscriptService {
                 .toList();
         segments.saveAll(rows);
         transcript.markSucceeded(safeShort(request.detectedLanguage(), 32), request.durationMs(), now);
-        job.complete(worker, Map.of(
+        jobService.completeOwnedJob(job, worker, Map.of(
                 "transcriptId", transcript.getId().toString(),
                 "assetId", asset.getId().toString(),
                 "segmentCount", rows.size()), now);
@@ -184,10 +184,10 @@ public class TranscriptService {
         Instant now = Instant.now(clock);
         String message = safeErrorMessage(request.errorMessage());
         if (Boolean.TRUE.equals(request.terminal())) {
-            job.failTerminal(worker, request.errorCode(), message, now);
+            jobService.failOwnedJob(job, worker, request.errorCode(), message, true, now);
             transcript.markFailed(request.errorCode(), message, now);
         } else {
-            job.fail(worker, request.errorCode(), message, now);
+            jobService.failOwnedJob(job, worker, request.errorCode(), message, false, now);
             if (job.getStatus() == JobStatus.FAILED) {
                 transcript.markFailed(request.errorCode(), message, now);
             } else {

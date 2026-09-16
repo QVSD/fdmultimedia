@@ -1,24 +1,18 @@
 # Architecture
 
-## Phase 7B1 scope
+## Phase 9A scope
 
-Phase 7B1 adds persisted speech transcripts on top of the distributed job
-pipeline. Authenticated users can submit direct HTTP/HTTPS media file URLs;
-the control plane creates a `MediaAsset` plus an `IMPORT_MEDIA` job, and a
-worker safely downloads, validates, checksums, uploads, and completes the
-import. Once the asset is READY, the API creates an `INSPECT_MEDIA` job so an
-FFprobe-capable worker can inspect the stored original. READY + INSPECTED
-assets can then be used as immutable sources for `CREATE_CLIP`, which creates
-new clip assets, or `CREATE_SOCIAL_VERTICAL`, which creates 1080x1920
-center-cropped derivatives. Phase 7A can also create `ANALYZE_HIGHLIGHTS`
-jobs that persist structured candidate intervals. The current analyzer is
-deterministic and local only; AI/provider integration, publishing, smart
-scheduling, and social integrations remain out of scope; see
-[ROADMAP.md](ROADMAP.md).
-Phase 7B1 does not replace that deterministic analyzer. Instead it adds
-`TRANSCRIBE_MEDIA`, `MediaTranscript`, and `TranscriptSegment` so transcript
-data survives independently for later semantic highlight selection, subtitles,
-search, summaries, chapters, and podcast workflows.
+Phase 9A adds worker telemetry and scheduler-oriented execution history on top
+of the existing distributed job pipeline. It deliberately separates:
+
+- **Capability** — whether a worker can execute a workload.
+- **Capacity** — how busy or resource-constrained the worker is right now.
+- **Performance history** — how previous attempts performed for similar
+  workloads.
+
+Phase 9A collects those inputs. It does not implement weighted worker scoring,
+predictive placement, autoscaling, GPU scheduling, queue priority redesign, or
+RabbitMQ dispatch.
 
 ## High-level architecture
 
@@ -46,7 +40,7 @@ Local Laptop       Cloud Worker
 - **Postgres** — system of record for the control plane, media asset metadata,
   and the durable job queue.
 - **RabbitMQ** — available infrastructure reserved for a later event-driven
-  dispatch optimization. Phase 6A intentionally continues to use PostgreSQL row locking
+  dispatch optimization. The platform intentionally continues to use PostgreSQL row locking
   because the database must remain the source of truth for job state anyway.
 - **MinIO / S3-compatible storage** — private object storage for imported
   media binaries. The local stack uses MinIO; the storage abstraction can point
@@ -168,13 +162,72 @@ with `FOR UPDATE SKIP LOCKED` and assigns it to the worker. That prevents two
 workers from claiming the same queued row concurrently without introducing a
 separate broker-level dispatch protocol.
 
+Phase 9A isolates capability eligibility behind `WorkerEligibilityService`.
+For now it normalizes the worker-reported supported job types and highlight
+analyzers, preserves legacy defaults (`SYSTEM_TEST` and `DETERMINISTIC_V1`),
+and feeds the existing locked claim query. It does not load all workers and
+assign in application memory, so the existing `FOR UPDATE SKIP LOCKED`
+concurrency guarantee remains intact. The current assignment strategy is best
+described as **CAPABILITY_FIRST_FIFO**: oldest queued eligible job, claimed by
+the first compatible online worker that polls.
+
 Claims set `lease_expires_at` and increment `attempt_count`. Starting and
 renewing a job refreshes the lease. The worker renews leases while long-running
 imports are active, so legitimate downloads do not look abandoned. If a laptop
 disappears after claim/start and stops renewing, the next claim for that
 workspace lazily recovers expired active jobs: retryable jobs return to
 `QUEUED`, while jobs that exhausted `max_attempts` become `FAILED`. This is
-deliberately simple and avoids a distributed scheduler in Phase 6A.
+deliberately simple and avoids a distributed scheduler in Phase 9A.
+
+## Worker telemetry and execution metrics
+
+Worker registration stores static metadata:
+
+- machine identifier
+- worker name
+- operating system and architecture
+- CPU model and logical cores
+- total memory
+- optional GPU model/memory
+- agent version
+
+Heartbeat stores dynamic operational telemetry when the current agent can
+collect it cheaply:
+
+- system CPU load (`0..1`) when the JVM/OS exposes it
+- process CPU load (`0..1`) when available
+- available system memory
+- JVM heap used and max
+- active job count
+- current supported job types and highlight analyzers
+- `lastTelemetryAt`
+
+Telemetry fields are optional and sanitized. Invalid CPU loads, negative
+memory, impossible available-memory values, or pathological active-job counts
+are nulled rather than making an otherwise valid heartbeat fail. Heartbeat
+requests without telemetry remain valid for rolling upgrades. Telemetry is
+fresh for `2 * worker.offline-threshold`; stale measurements are still stored
+for debugging but are not returned as current values in the Compute API.
+
+Telemetry is not security-authoritative. Worker machine authentication remains
+the security boundary; a worker can report inaccurate load, so telemetry is
+used only as future scheduling input.
+
+Phase 9A also records lightweight `JobExecutionMetric` rows when an attempt
+succeeds, fails, or is recovered after lease expiry. The definitions are:
+
+- `queueWaitMs = assignedAt - queuedAt`
+- `executionMs = finishedAt - startedAt` when the worker acknowledged start
+- `totalLatencyMs = finishedAt - queuedAt`
+
+Metrics are per attempt. When a lease expires on worker A and the job later
+succeeds on worker B, the expired attempt is attributed to worker A and the
+successful attempt is attributed to worker B. Retry/requeue transitions capture
+a snapshot before resetting job timestamps, so history is not accidentally
+rewritten by recovery. Workload hints are nullable and only use data the
+platform already has: media size/duration/dimensions, requested clip duration,
+or provider/model/analyzer identifiers. Phase 9A does not store every heartbeat
+forever and does not compute worker scores.
 
 ## MediaAsset lifecycle and object storage
 
