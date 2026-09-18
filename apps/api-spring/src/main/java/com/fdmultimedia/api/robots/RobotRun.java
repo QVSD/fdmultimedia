@@ -54,9 +54,16 @@ public class RobotRun {
     @Column(name = "finished_at")
     private Instant finishedAt;
 
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "source_asset_id", nullable = false)
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "source_asset_id")
     private MediaAsset sourceAsset;
+
+    @Column(name = "content_source_id")
+    private UUID contentSourceId;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "selection_policy")
+    private RobotSelectionPolicy selectionPolicy;
 
     @Column(name = "highlight_analysis_id")
     private UUID highlightAnalysisId;
@@ -82,13 +89,27 @@ public class RobotRun {
     protected RobotRun() {
     }
 
+    /** EXISTING_ASSET convenience constructor — Phase 11C shape, unchanged. */
     public RobotRun(Workspace workspace, Robot robot, RobotRunTriggerType triggerType, MediaAsset sourceAsset, Instant now) {
+        this(workspace, robot, triggerType, sourceAsset, null, null, now);
+    }
+
+    public RobotRun(
+            Workspace workspace,
+            Robot robot,
+            RobotRunTriggerType triggerType,
+            MediaAsset sourceAsset,
+            UUID contentSourceId,
+            RobotSelectionPolicy selectionPolicy,
+            Instant now) {
         this.id = UUID.randomUUID();
         this.workspace = workspace;
         this.robot = robot;
         this.triggerType = triggerType;
         this.status = RobotRunStatus.RUNNING;
         this.sourceAsset = sourceAsset;
+        this.contentSourceId = contentSourceId;
+        this.selectionPolicy = selectionPolicy;
         this.startedAt = now;
         this.createdAt = now;
     }
@@ -160,6 +181,8 @@ public class RobotRun {
     public Instant getStartedAt() { return startedAt; }
     public Instant getFinishedAt() { return finishedAt; }
     public MediaAsset getSourceAsset() { return sourceAsset; }
+    public UUID getContentSourceId() { return contentSourceId; }
+    public RobotSelectionPolicy getSelectionPolicy() { return selectionPolicy; }
     public UUID getHighlightAnalysisId() { return highlightAnalysisId; }
     public UUID getHighlightCandidateId() { return highlightCandidateId; }
     public UUID getContentDraftId() { return contentDraftId; }

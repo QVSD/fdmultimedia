@@ -1,6 +1,6 @@
 # Roadmap
 
-The repository is currently at Phase 11C. Completed phases are marked below;
+The repository is currently at Phase 11D. Completed phases are marked below;
 later phases are planned high-level direction and intentionally do not go into
 implementation detail before they are started.
 
@@ -148,9 +148,34 @@ implementation detail before they are started.
    already-imported assets — no arbitrary URL ingestion or scraping. The
    Content page's Provenance panel now shows when a draft was created by a
    Robot run. *(complete)*
-22. **FFmpeg processing** — richer automated video processing pipelines.
-23. **Additional platform integrations** — TikTok, YouTube, or other real
+22. **Dynamic content sources & selection policies (Phase 11D)** — a
+   workspace-scoped `ContentSource` (type `MEDIA_LIBRARY` only) is a
+   controlled pool of explicitly associated workspace `MediaAsset`s a Robot
+   may select from, instead of being permanently tied to one fixed asset —
+   never a URL feed, an RSS reader, or any form of autonomous web access.
+   `Robot` gained a `sourcePolicy` (`EXISTING_ASSET`, the unchanged Phase
+   11C shape, or `CONTENT_SOURCE`) plus a deterministic `selectionPolicy`
+   (`OLDEST_UNPROCESSED`/`NEWEST_UNPROCESSED`, ordered by when an asset
+   joined that source, never AI ranking or prediction of any kind). Only
+   `ORIGINAL` assets may become source input — a generated clip or vertical
+   derivative can never recursively feed back in. Selection happens in one
+   PostgreSQL query (eligibility + ordering + per-Robot exclusion of every
+   asset that Robot has ever selected before, regardless of that run's
+   outcome), with a DB-level partial unique index as defense in depth so
+   the same Robot can never dynamically select the same asset twice while a
+   different Robot sharing the same source freely may. An empty-but-active
+   source produces a real, auditable `RobotRun` terminal with
+   `NO_ELIGIBLE_SOURCE`; a paused source rejects before any run is even
+   created. `RobotRunOrchestrator` needed exactly one change — reading the
+   run's own selected `sourceAssetId` instead of the Robot's fixed one — so
+   the entire downstream highlight/draft/schedule pipeline stays completely
+   unaware a ContentSource was ever involved. The Content page gained a
+   Sources tab and an "Add to Source" action on original assets; the Robots
+   page's create form gained a source-type switch with a human-readable
+   selection-policy label. *(complete)*
+23. **FFmpeg processing** — richer automated video processing pipelines.
+24. **Additional platform integrations** — TikTok, YouTube, or other real
    platforms behind the same provider-boundary pattern Instagram
    established in Phase 10B.
-24. **AI content** — AI-assisted content creation.
-25. **Analytics / revenue** — performance analytics and revenue tracking.
+25. **AI content** — AI-assisted content creation.
+26. **Analytics / revenue** — performance analytics and revenue tracking.

@@ -10,6 +10,8 @@ import com.fdmultimedia.api.assets.MediaAssetStatus;
 import com.fdmultimedia.api.assets.MediaInspectionStatus;
 import com.fdmultimedia.api.auth.AuthService;
 import com.fdmultimedia.api.auth.security.AuthenticatedUser;
+import com.fdmultimedia.api.contentsources.ContentSource;
+import com.fdmultimedia.api.contentsources.ContentSourceRepository;
 import com.fdmultimedia.api.publishschedules.PublishScheduleProperties;
 import com.fdmultimedia.api.workspaces.Workspace;
 import com.fdmultimedia.api.workspaces.WorkspaceMembership;
@@ -33,6 +35,7 @@ public class RobotService {
     private final RobotRepository robots;
     private final MediaAssetRepository assets;
     private final SocialAccountRepository socialAccounts;
+    private final ContentSourceRepository contentSources;
     private final RobotProperties properties;
     private final PublishScheduleProperties publishScheduleProperties;
     private final RobotAutomationDispatchService dispatchService;
@@ -44,6 +47,7 @@ public class RobotService {
             RobotRepository robots,
             MediaAssetRepository assets,
             SocialAccountRepository socialAccounts,
+            ContentSourceRepository contentSources,
             RobotProperties properties,
             PublishScheduleProperties publishScheduleProperties,
             RobotAutomationDispatchService dispatchService,
@@ -53,6 +57,7 @@ public class RobotService {
         this.robots = robots;
         this.assets = assets;
         this.socialAccounts = socialAccounts;
+        this.contentSources = contentSources;
         this.properties = properties;
         this.publishScheduleProperties = publishScheduleProperties;
         this.dispatchService = dispatchService;
@@ -66,9 +71,7 @@ public class RobotService {
         Workspace workspace = membership.getWorkspace();
         String name = validateName(request.name());
         String description = validateDescription(request.description());
-        MediaAsset source = assets.findByWorkspaceAndId(workspace, request.sourceAssetId())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Source asset not found"));
-        validateSourceEligibility(source);
+        SourceConfig sourceConfig = resolveSourceConfig(workspace, request.sourcePolicy(), request.sourceAssetId(), request.contentSourceId(), request.selectionPolicy());
         SocialAccount account = resolveAndValidateAccount(workspace, request.autonomyMode(), request.targetSocialAccountId());
         Integer cadenceHours = validateCadence(request.cadenceType(), request.cadenceIntervalHours());
         Integer delayMinutes = validateScheduleDelay(request.autonomyMode(), request.scheduleDelayMinutes());
@@ -76,9 +79,44 @@ public class RobotService {
 
         Instant now = Instant.now(clock);
         Robot robot = new Robot(
-                workspace, name, description, request.autonomyMode(), source, account,
-                request.cadenceType(), cadenceHours, delayMinutes, maxRunsPerDay, membership.getUser(), now);
+                workspace, name, description, request.autonomyMode(),
+                sourceConfig.sourcePolicy(), sourceConfig.sourceAsset(), sourceConfig.contentSource(), sourceConfig.selectionPolicy(),
+                account, request.cadenceType(), cadenceHours, delayMinutes, maxRunsPerDay, membership.getUser(), now);
         return toSummary(robots.save(robot));
+    }
+
+    /**
+     * EXISTING_ASSET requires a workspace-scoped, ready-and-inspected video
+     * asset (Phase 11C, unchanged). CONTENT_SOURCE requires a
+     * workspace-scoped ContentSource and a selection policy; the source
+     * itself may currently be empty or contain not-yet-ready assets — that
+     * is a normal runtime state (see RobotSourceSelectionService), not a
+     * configuration error. sourcePolicy and its counterpart config are
+     * create-only, exactly like sourceAssetId already was in Phase 11C.
+     */
+    private SourceConfig resolveSourceConfig(
+            Workspace workspace, RobotSourcePolicy sourcePolicy, UUID sourceAssetId, UUID contentSourceId, RobotSelectionPolicy selectionPolicy) {
+        if (sourcePolicy == RobotSourcePolicy.EXISTING_ASSET) {
+            if (sourceAssetId == null) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "sourceAssetId is required for EXISTING_ASSET");
+            }
+            MediaAsset source = assets.findByWorkspaceAndId(workspace, sourceAssetId)
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Source asset not found"));
+            validateSourceEligibility(source);
+            return new SourceConfig(RobotSourcePolicy.EXISTING_ASSET, source, null, null);
+        }
+        if (contentSourceId == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "contentSourceId is required for CONTENT_SOURCE");
+        }
+        if (selectionPolicy == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "selectionPolicy is required for CONTENT_SOURCE");
+        }
+        ContentSource source = contentSources.findByWorkspaceAndId(workspace, contentSourceId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Content source not found"));
+        return new SourceConfig(RobotSourcePolicy.CONTENT_SOURCE, null, source, selectionPolicy);
+    }
+
+    private record SourceConfig(RobotSourcePolicy sourcePolicy, MediaAsset sourceAsset, ContentSource contentSource, RobotSelectionPolicy selectionPolicy) {
     }
 
     @Transactional(readOnly = true)
@@ -246,6 +284,8 @@ public class RobotService {
 
     private RobotSummary toSummary(Robot robot) {
         SocialAccount account = robot.getTargetSocialAccount();
+        MediaAsset sourceAsset = robot.getSourceAsset();
+        ContentSource contentSource = robot.getContentSource();
         return new RobotSummary(
                 robot.getId(),
                 robot.getName(),
@@ -253,8 +293,12 @@ public class RobotService {
                 robot.getStatus(),
                 robot.getAutonomyMode(),
                 robot.getHighlightStrategy(),
-                robot.getSourceAsset().getId(),
-                robot.getSourceAsset().getOriginalFilename(),
+                robot.getSourcePolicy(),
+                sourceAsset == null ? null : sourceAsset.getId(),
+                sourceAsset == null ? null : sourceAsset.getOriginalFilename(),
+                contentSource == null ? null : contentSource.getId(),
+                contentSource == null ? null : contentSource.getName(),
+                robot.getSelectionPolicy(),
                 account == null ? null : account.getId(),
                 account == null ? null : account.getDisplayName(),
                 robot.getCadenceType(),

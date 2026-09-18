@@ -1,6 +1,8 @@
 export type RobotStatus = 'ACTIVE' | 'PAUSED' | 'DISABLED';
 export type RobotAutonomyMode = 'DRAFT_ONLY' | 'REVIEW_REQUIRED' | 'AUTO_SCHEDULE';
 export type RobotHighlightStrategy = 'TOP_HIGHLIGHT';
+export type RobotSourcePolicy = 'EXISTING_ASSET' | 'CONTENT_SOURCE';
+export type RobotSelectionPolicy = 'OLDEST_UNPROCESSED' | 'NEWEST_UNPROCESSED';
 export type RobotCadenceType = 'MANUAL_ONLY' | 'INTERVAL';
 export type RobotRunTriggerType = 'MANUAL' | 'SCHEDULED';
 export type RobotRunStatus =
@@ -19,8 +21,12 @@ export interface RobotSummary {
   status: RobotStatus;
   autonomyMode: RobotAutonomyMode;
   highlightStrategy: RobotHighlightStrategy;
-  sourceAssetId: string;
+  sourcePolicy: RobotSourcePolicy;
+  sourceAssetId: string | null;
   sourceAssetFilename: string | null;
+  contentSourceId: string | null;
+  contentSourceName: string | null;
+  selectionPolicy: RobotSelectionPolicy | null;
   targetSocialAccountId: string | null;
   targetSocialAccountDisplayName: string | null;
   cadenceType: RobotCadenceType;
@@ -41,7 +47,10 @@ export interface RobotRunSummary {
   status: RobotRunStatus;
   startedAt: string;
   finishedAt: string | null;
-  sourceAssetId: string;
+  sourceAssetId: string | null;
+  contentSourceId: string | null;
+  contentSourceName: string | null;
+  selectionPolicy: RobotSelectionPolicy | null;
   highlightAnalysisId: string | null;
   highlightCandidateId: string | null;
   contentDraftId: string | null;
@@ -73,7 +82,10 @@ export interface CreateRobotRequest {
   name: string;
   description: string | null;
   autonomyMode: RobotAutonomyMode;
-  sourceAssetId: string;
+  sourcePolicy: RobotSourcePolicy;
+  sourceAssetId: string | null;
+  contentSourceId: string | null;
+  selectionPolicy: RobotSelectionPolicy | null;
   targetSocialAccountId: string | null;
   cadenceType: RobotCadenceType;
   cadenceIntervalHours: number | null;
@@ -81,4 +93,4 @@ export interface CreateRobotRequest {
   maxRunsPerDay: number | null;
 }
 
-export type UpdateRobotRequest = Omit<CreateRobotRequest, 'sourceAssetId'>;
+export type UpdateRobotRequest = Omit<CreateRobotRequest, 'sourcePolicy' | 'sourceAssetId' | 'contentSourceId' | 'selectionPolicy'>;

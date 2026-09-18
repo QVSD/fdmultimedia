@@ -22,6 +22,7 @@ import com.fdmultimedia.api.contentdrafts.ContentDraftService;
 import com.fdmultimedia.api.contentdrafts.ContentDraftStatus;
 import com.fdmultimedia.api.contentdrafts.ContentDraftSummary;
 import com.fdmultimedia.api.contentdrafts.ContentDraftWorkflowStage;
+import com.fdmultimedia.api.contentsources.ContentSourceRepository;
 import com.fdmultimedia.api.highlights.HighlightAnalysis;
 import com.fdmultimedia.api.highlights.HighlightAnalysisRepository;
 import com.fdmultimedia.api.highlights.HighlightAnalysisStatus;
@@ -68,9 +69,10 @@ class RobotRunOrchestratorTest {
     private final ContentDraftRepository contentDrafts = mock(ContentDraftRepository.class);
     private final RobotApprovalRepository approvals = mock(RobotApprovalRepository.class);
     private final PublishScheduleService publishScheduleService = mock(PublishScheduleService.class);
+    private final ContentSourceRepository contentSources = mock(ContentSourceRepository.class);
     private final RobotRunOrchestrator orchestrator = new RobotRunOrchestrator(
             authService, robotRepository, runs, analyses, candidates, highlightService, highlightProperties,
-            contentDraftService, contentDrafts, approvals, publishScheduleService, Clock.fixed(NOW, ZoneOffset.UTC));
+            contentDraftService, contentDrafts, approvals, publishScheduleService, contentSources, Clock.fixed(NOW, ZoneOffset.UTC));
 
     private Workspace workspace;
     private AppUser owner;
@@ -111,6 +113,34 @@ class RobotRunOrchestratorTest {
         assertThat(run.getHighlightAnalysisId()).isEqualTo(analysisId);
         assertThat(run.getStatus()).isEqualTo(RobotRunStatus.RUNNING);
         verify(contentDraftService, never()).createFromHighlightCandidate(any(), any());
+    }
+
+    @Test
+    void runningResolvesFromRunSourceAssetForContentSourceRobotWhoseOwnSourceAssetIsNull() {
+        com.fdmultimedia.api.contentsources.ContentSource contentSource =
+                new com.fdmultimedia.api.contentsources.ContentSource(workspace, "Incoming Tech Videos", null, owner, NOW);
+        Robot robot = new Robot(workspace, "Dynamic Robot", null, RobotAutonomyMode.DRAFT_ONLY,
+                RobotSourcePolicy.CONTENT_SOURCE, null, contentSource, RobotSelectionPolicy.OLDEST_UNPROCESSED, null,
+                RobotCadenceType.MANUAL_ONLY, null, null, 1, owner, NOW);
+        assertThat(robot.getSourceAsset()).isNull();
+        RobotRun run = new RobotRun(workspace, robot, RobotRunTriggerType.MANUAL, sourceAsset, contentSource.getId(), RobotSelectionPolicy.OLDEST_UNPROCESSED, NOW);
+        when(runs.findByIdForUpdateSkipLocked(run.getId())).thenReturn(Optional.of(run));
+        when(analyses.findByWorkspaceAndAssetOrderByCreatedAtDesc(workspace, sourceAsset)).thenReturn(List.of());
+        UUID analysisId = UUID.randomUUID();
+        when(highlightService.createAnalysis(any(), eq(sourceAsset.getId()), any()))
+                .thenReturn(highlightAnalysisSummary(analysisId, HighlightAnalysisStatus.PENDING));
+        when(contentSources.findById(contentSource.getId())).thenReturn(Optional.of(contentSource));
+        when(authService.currentMembershipFor(ownerPrincipal)).thenReturn(new WorkspaceMembership(workspace, owner, WorkspaceRole.OWNER));
+        when(runs.findByWorkspaceAndId(workspace, run.getId())).thenReturn(Optional.of(run));
+
+        orchestrator.reconcileOne(run.getId());
+
+        assertThat(run.getHighlightAnalysisId()).isEqualTo(analysisId);
+        assertThat(run.getStatus()).isEqualTo(RobotRunStatus.RUNNING);
+        RobotRunSummary summary = orchestrator.getFor(ownerPrincipal, run.getId());
+        assertThat(summary.contentSourceId()).isEqualTo(contentSource.getId());
+        assertThat(summary.contentSourceName()).isEqualTo("Incoming Tech Videos");
+        assertThat(summary.selectionPolicy()).isEqualTo(RobotSelectionPolicy.OLDEST_UNPROCESSED);
     }
 
     @Test

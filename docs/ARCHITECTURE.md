@@ -117,6 +117,27 @@ URL ingestion, social discovery/engagement automation, unattended real-
 provider publishing, TikTok/YouTube, AI content generation, and a generic
 workflow/cron/webhook engine.
 
+## Phase 11D scope
+
+Phase 11D lets a Robot select its next source from a controlled workspace
+pool instead of being permanently bound to one fixed `MediaAsset`, without
+redesigning anything Phase 11C established. See
+[Dynamic content sources & selection policies (Phase 11D)](#dynamic-content-sources--selection-policies-phase-11d)
+below for the full design: the new `ContentSource`/`ContentSourceAsset`
+domain and why it deliberately has no idea a Robot exists; `Robot`'s new
+`sourcePolicy` (`EXISTING_ASSET` unchanged, or `CONTENT_SOURCE`) and
+deterministic `selectionPolicy` (`OLDEST_UNPROCESSED`/`NEWEST_UNPROCESSED`);
+why only `ORIGINAL` assets are eligible membership; the one-query
+eligibility/ordering/per-Robot-exclusion selection SQL and its DB-level
+defense-in-depth unique index; empty-source (`NO_ELIGIBLE_SOURCE`, a real
+auditable run) versus paused-source (`CONTENT_SOURCE_UNAVAILABLE`, rejected
+before any run exists) semantics; and the single one-line change to
+`RobotRunOrchestrator` that keeps the entire downstream highlight/draft/
+schedule pipeline completely unaware a ContentSource was ever involved. Out
+of scope for this phase: RSS/feed ingestion, YouTube/TikTok/Instagram
+scraping, any form of autonomous browsing or arbitrary Robot network access,
+AI/LLM content selection or ranking, and virality/engagement prediction.
+
 ## High-level architecture
 
 ```
@@ -1356,3 +1377,155 @@ discovery or engagement automation, CAPTCHA/anti-bot bypass, automatic
 Instagram publishing without human approval, TikTok/YouTube, AI content
 generation, multi-post campaigns, a generic workflow/cron/webhook engine,
 and any change to Worker scheduling or cloud autoscaling.
+
+## Dynamic content sources & selection policies (Phase 11D)
+
+### ContentSource has no idea a Robot exists
+
+`ContentSource` (`com.fdmultimedia.api.contentsources`) is a controlled,
+workspace-scoped pool of existing `MediaAsset`s — organizational, not
+compute infrastructure, and not a Robot, a Worker, a Job, or a MediaAsset
+itself. Its only type in this phase is `MEDIA_LIBRARY`: membership
+(`ContentSourceAsset`) is explicit, human-added rows linking a source to
+assets already imported through the existing, unmodified Phase 5 secure
+import pipeline — never a feed URL, an RSS reader, or any credential the
+backend fetches on its own. The package deliberately has no dependency on
+`com.fdmultimedia.api.robots`; selection policy and per-Robot consumption
+tracking live entirely on the Robot side, so a ContentSource stays a
+reusable, Robot-agnostic building block. `ContentSourceService.addAsset`
+enforces the one hard membership rule: only an asset with
+`derivationType = ORIGINAL` may join a source, so a generated `CLIP` or
+`SOCIAL_VERTICAL` derivative can never recursively become new Robot input.
+Membership and eligibility are deliberately separate — an asset can join a
+source while still importing; only *selection* filters by readiness.
+
+### Robot's dynamic source configuration
+
+`Robot` gained `sourcePolicy` (`EXISTING_ASSET` or `CONTENT_SOURCE`),
+a nullable `contentSource`, and a nullable `selectionPolicy`
+(`OLDEST_UNPROCESSED`/`NEWEST_UNPROCESSED`); `sourceAsset` itself became
+nullable. Exactly one configuration is valid per policy, enforced by both
+`RobotService.resolveSourceConfig` and a database `CHECK` constraint
+(`robots_source_config_matches_policy`) — the same "belt and suspenders"
+pattern already used for autonomy-mode/cadence invariants in Phase 11C's
+own migration. `sourcePolicy` and its counterpart configuration are
+create-only, exactly like `sourceAssetId` already was — `UpdateRobotRequest`
+still cannot touch source configuration at all. An `EXISTING_ASSET` Robot is
+byte-for-byte the Phase 11C shape; nothing about its validation, storage, or
+runtime behavior changed.
+
+### One query owns eligibility, ordering, and exclusion
+
+`RobotSourceSelectionRepository` holds the two native queries
+(`findOldestUnprocessedAssetId`/`findNewestUnprocessedAssetId`) that do
+everything in PostgreSQL — never by loading a source's membership into Java
+and filtering there. Both require `status = READY`, `inspection_status =
+INSPECTED`, `has_video = true`, a known positive `duration_ms`, and
+`derivation_type = ORIGINAL` (defense in depth alongside the membership-insert
+check), order by `content_source_assets.added_at` (when the asset *joined
+this source*, not the asset's own creation time — so a source's ordering is
+independent of import order) with the membership row id as a stable
+tie-breaker, and exclude via `NOT EXISTS` every asset this exact Robot has
+already selected in *any* `RobotRun`, regardless of that run's terminal
+outcome. That last clause is the key semantic decision: a run that later
+*fails* still permanently consumes the asset for that Robot — otherwise a
+scheduled Robot would hammer the same broken asset every single interval
+forever. `FOR UPDATE OF ma SKIP LOCKED` on the query's `media_assets` rows
+mirrors the exact claiming idiom already used for Job/PublishSchedule/Robot
+claiming. `RobotSourceSelectionService` wraps this in two lines — pick the
+query by policy, load the returned id — and never throws for "nothing
+eligible"; that is a normal outcome the caller turns into an auditable
+terminal run, not an exception.
+
+### Atomic reservation is the RobotRun insert itself, not a lock held across a request
+
+There is no separate "reserve" step or consumption table. The actual
+reservation *is* creating the `RobotRun` row inside the same transaction
+that already claims the Robot (`RobotAutomationDispatchService.startRun`,
+called identically from both `createManualRun` and `dispatchOne` — manual
+and scheduled selection are the exact same code path, never two engines).
+Defense in depth against a genuine two-transaction race is a partial unique
+index:
+
+```sql
+CREATE UNIQUE INDEX robot_runs_one_dynamic_selection_per_asset
+    ON robot_runs (robot_id, source_asset_id)
+    WHERE content_source_id IS NOT NULL;
+```
+
+Scoped to `content_source_id IS NOT NULL` so it only ever governs dynamic
+selections — every Phase 11C `EXISTING_ASSET` run always has a null
+`content_source_id` and is completely untouched, preserving that phase's own
+`SOURCE_ALREADY_PROCESSED` (successful-runs-only) retry semantics exactly as
+they were. The constraint allows Robot A and Robot B to both select the same
+asset from a shared source (consumption is per-Robot, intentionally), but
+never lets Robot A select the same asset twice. This was proven directly
+against the running Postgres container: two concurrent `psql` sessions
+attempted the identical `INSERT` for the same `(robot_id, source_asset_id)`
+pair with `content_source_id` set; the first session's insert committed
+after a 3-second hold, and the second session's insert — blocked on the same
+index slot — failed with `duplicate key value violates unique constraint
+"robot_runs_one_dynamic_selection_per_asset"` the moment the first
+committed, exactly as the DB-level guarantee promises.
+
+### Empty source vs. paused source are different failure shapes on purpose
+
+`RobotAutomationDispatchService.validateCanStartRun` treats a **paused**
+`ContentSource` as a pre-condition failure — `CONTENT_SOURCE_UNAVAILABLE`,
+rejected before any `RobotRun` row is created at all, identically to how
+`AUTOMATION_DISABLED` or a not-`ACTIVE` Robot are rejected today. An
+**active-but-empty** source is different: `startRun` still creates a real
+`RobotRun`, immediately terminal with `failureCode = NO_ELIGIBLE_SOURCE`, so
+a user can see "this Robot ran and genuinely found nothing" rather than the
+run silently never appearing. Because the scheduler only ever starts one run
+per due occurrence (`dispatchOne` claims the Robot and unconditionally
+advances `nextRunAt` before validation even runs — the same Phase 11C
+mechanism that already stops a blocked Robot from being reclaimed every poll
+cycle), an interval Robot pointed at a chronically empty source produces at
+most one `NO_ELIGIBLE_SOURCE` run per cadence interval, never a flood of
+runs every 15-second poll — this fell out of the existing design for free,
+with no new suppression logic needed.
+
+### RobotRunOrchestrator needed exactly one change
+
+`resolveCandidate` used to read `robot.getSourceAsset()`; it now reads
+`run.getSourceAsset()` instead — the one line that makes the entire
+downstream highlight-analysis/candidate/Draft/autonomy-action pipeline
+completely policy-agnostic. Every `RobotRun`, whether its source was a fixed
+asset or a dynamic selection, already carries the one asset it actually
+uses; the orchestrator never learns a ContentSource was involved, never
+imports anything from `com.fdmultimedia.api.contentsources`, and needed zero
+other changes. `RobotRun` additionally carries a snapshot `contentSourceId`
+and `selectionPolicy` purely for audit — resolved back to a source name at
+read time (`RobotRunSummary.contentSourceName`) so the product can answer
+"why did this Robot choose this video?" (e.g. *"Selected by
+NEWEST_UNPROCESSED from 'Incoming Tech Videos'"*) without ever storing free-
+text reasoning.
+
+### Runtime acceptance
+
+Verified against the real Docker stack end to end: a `MEDIA_LIBRARY` source
+with three real READY+INSPECTED assets added in order; a `DRAFT_ONLY`
+`OLDEST_UNPROCESSED` Robot selecting the first-added asset, then — run
+again — correctly skipping it as consumed and selecting the second; a
+second Robot sharing the same source with `NEWEST_UNPROCESSED` selecting
+independently of the first Robot's consumption (proving per-Robot
+independence); a full `AUTO_SCHEDULE` dynamic run through the real
+highlight/clip/vertical/inspection pipeline to a `READY` Draft, a
+`PublishSchedule` with no Publication before due time, and — after due —
+dispatch to a `PUBLISHED` Publication through the same TEST-provider Worker
+path Phase 10A established; an empty-but-active source producing
+`NO_ELIGIBLE_SOURCE` with no Draft, Job, or Schedule created; a paused
+source rejecting with `CONTENT_SOURCE_UNAVAILABLE` before any run existed;
+and removing an asset's membership *after* a run had already selected it,
+confirming the run completed unaffected — membership only ever governs
+future selections.
+
+### Out of scope for this phase
+
+Generic web scraping, an autonomous browser, arbitrary Robot URLs, RSS/feed
+ingestion, YouTube/TikTok/Instagram scraping, login/session scraping,
+anti-bot bypass, proxy rotation, automatic social account discovery,
+engagement bots, AI/LLM content selection or ranking, virality/revenue
+prediction, and any change to the Worker scheduler, RabbitMQ, or cloud
+autoscaling.

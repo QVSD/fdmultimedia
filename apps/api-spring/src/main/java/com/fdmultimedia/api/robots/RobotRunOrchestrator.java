@@ -2,12 +2,14 @@ package com.fdmultimedia.api.robots;
 
 import com.fdmultimedia.api.accounts.SocialAccount;
 import com.fdmultimedia.api.accounts.SocialPlatform;
+import com.fdmultimedia.api.assets.MediaAsset;
 import com.fdmultimedia.api.auth.AuthService;
 import com.fdmultimedia.api.auth.security.AuthenticatedUser;
 import com.fdmultimedia.api.contentdrafts.ContentDraftRepository;
 import com.fdmultimedia.api.contentdrafts.ContentDraftService;
 import com.fdmultimedia.api.contentdrafts.ContentDraftStatus;
 import com.fdmultimedia.api.contentdrafts.ContentDraftSummary;
+import com.fdmultimedia.api.contentsources.ContentSourceRepository;
 import com.fdmultimedia.api.highlights.CreateHighlightAnalysisRequest;
 import com.fdmultimedia.api.highlights.HighlightAnalysis;
 import com.fdmultimedia.api.highlights.HighlightAnalysisRepository;
@@ -64,6 +66,7 @@ public class RobotRunOrchestrator {
     private final ContentDraftRepository contentDrafts;
     private final RobotApprovalRepository approvals;
     private final PublishScheduleService publishScheduleService;
+    private final ContentSourceRepository contentSources;
     private final Clock clock;
 
     public RobotRunOrchestrator(
@@ -78,6 +81,7 @@ public class RobotRunOrchestrator {
             ContentDraftRepository contentDrafts,
             RobotApprovalRepository approvals,
             PublishScheduleService publishScheduleService,
+            ContentSourceRepository contentSources,
             Clock clock) {
         this.authService = authService;
         this.robotRepository = robotRepository;
@@ -90,6 +94,7 @@ public class RobotRunOrchestrator {
         this.contentDrafts = contentDrafts;
         this.approvals = approvals;
         this.publishScheduleService = publishScheduleService;
+        this.contentSources = contentSources;
         this.clock = clock;
     }
 
@@ -171,10 +176,18 @@ public class RobotRunOrchestrator {
         }
     }
 
-    /** Returns true once {@code highlightCandidateId} is set (or the run has failed); false while still waiting on analysis. */
+    /**
+     * Returns true once {@code highlightCandidateId} is set (or the run has
+     * failed); false while still waiting on analysis. Reads the source asset
+     * from the run itself, never the Robot — a CONTENT_SOURCE Robot's own
+     * {@code sourceAsset} is always null, and every run already carries the
+     * one asset it actually selected (identically for EXISTING_ASSET and
+     * CONTENT_SOURCE), so this method never needs to know which policy chose it.
+     */
     private boolean resolveCandidate(RobotRun run, Robot robot, AuthenticatedUser principal, Instant now) {
+        MediaAsset sourceAsset = run.getSourceAsset();
         if (run.getHighlightAnalysisId() == null) {
-            List<HighlightAnalysis> existing = analyses.findByWorkspaceAndAssetOrderByCreatedAtDesc(run.getWorkspace(), robot.getSourceAsset());
+            List<HighlightAnalysis> existing = analyses.findByWorkspaceAndAssetOrderByCreatedAtDesc(run.getWorkspace(), sourceAsset);
             Optional<HighlightAnalysis> reusable = existing.stream()
                     .filter(a -> highlightProperties.getDeterministicAnalyzerType().equals(a.getAnalyzerType()))
                     .filter(a -> a.getStatus() != HighlightAnalysisStatus.FAILED)
@@ -190,7 +203,7 @@ public class RobotRunOrchestrator {
             HighlightAnalysisSummary created;
             try {
                 created = highlightService.createAnalysis(
-                        principal, robot.getSourceAsset().getId(),
+                        principal, sourceAsset.getId(),
                         new CreateHighlightAnalysisRequest(highlightProperties.getDeterministicAnalyzerType()));
             } catch (ResponseStatusException ex) {
                 run.markFailed("SOURCE_UNAVAILABLE", ex.getReason(), now);
@@ -305,6 +318,9 @@ public class RobotRunOrchestrator {
     }
 
     private RobotRunSummary toSummary(RobotRun run) {
+        String contentSourceName = run.getContentSourceId() == null
+                ? null
+                : contentSources.findById(run.getContentSourceId()).map(source -> source.getName()).orElse(null);
         return new RobotRunSummary(
                 run.getId(),
                 run.getRobot().getId(),
@@ -313,7 +329,10 @@ public class RobotRunOrchestrator {
                 run.getStatus(),
                 run.getStartedAt(),
                 run.getFinishedAt(),
-                run.getSourceAsset().getId(),
+                run.getSourceAsset() == null ? null : run.getSourceAsset().getId(),
+                run.getContentSourceId(),
+                contentSourceName,
+                run.getSelectionPolicy(),
                 run.getHighlightAnalysisId(),
                 run.getHighlightCandidateId(),
                 run.getContentDraftId(),

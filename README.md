@@ -5,9 +5,9 @@ social-media content workflows, video processing workers running across
 multiple laptops/cloud machines, scheduling, AI-assisted content creation,
 publishing, analytics, and revenue tracking.
 
-## Phase 11C scope
+## Phase 11D scope
 
-This repository is currently at **Phase 11C: robots & automation foundation**.
+This repository is currently at **Phase 11D: dynamic content sources & selection policies**.
 Phase 9A introduced current Worker telemetry and per-attempt execution metrics;
 Phase 9B introduced deterministic `TELEMETRY_AWARE_V1` selection; Phase 9C
 persisted successful claim decisions and exposed bounded workspace-scoped
@@ -49,7 +49,17 @@ backend hard-rejects `AUTO_SCHEDULE` against any real provider (Instagram),
 so unattended posting to a real account is impossible regardless of
 configuration. A durable `RobotRun` audit record and a central
 `FOR UPDATE SKIP LOCKED` poller mean no in-memory pipeline or waiting
-thread: a restart mid-run loses nothing.
+thread: a restart mid-run loses nothing. Phase 11D adds `ContentSource`: a
+controlled, workspace-scoped pool of a user's own imported media a Robot
+may select the next video from, instead of always pointing at one fixed
+asset — never a URL feed, RSS, or any form of autonomous web access. A
+Robot's `selectionPolicy` (`OLDEST_UNPROCESSED`/`NEWEST_UNPROCESSED`) is
+deterministic and explainable, never AI ranking; one PostgreSQL query owns
+eligibility, ordering, and per-Robot exclusion of every asset that Robot has
+already selected before (even from a run that later failed), with a
+database-level unique index as defense in depth so the same Robot can never
+select the same asset twice while a different Robot sharing the source
+freely may.
 
 Claim decisions are written in the same transaction as assignment. Empty polls
 and capacity rejections are not persisted, preventing poll-noise growth. Decision
@@ -166,6 +176,23 @@ That means:
   Provenance panel shows when a draft was created by a Robot run, and a new
   Robots page lets a user create Robots, run them on demand, and
   approve/reject `REVIEW_REQUIRED` proposals.
+- Workspace-scoped `ContentSource`s (`GET/POST /api/content-sources`,
+  `GET/PATCH /api/content-sources/{id}`,
+  `POST /api/content-sources/{id}/pause|resume`,
+  `GET/POST /api/content-sources/{id}/assets`,
+  `DELETE /api/content-sources/{id}/assets/{assetId}`) — a controlled pool
+  of a workspace's own imported media a Robot may select the next video
+  from; see
+  [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#dynamic-content-sources--selection-policies-phase-11d)
+  for the full design, including why only `ORIGINAL` assets can join a
+  source, the deterministic `OLDEST_UNPROCESSED`/`NEWEST_UNPROCESSED`
+  selection policies and their one-query eligibility/ordering/exclusion SQL,
+  the database-level duplicate-consumption guard, and why an empty-but-active
+  source produces an auditable `NO_ELIGIBLE_SOURCE` run while a paused one
+  rejects before any run exists. A Robot's `sourcePolicy` is now either the
+  unchanged Phase 11C `EXISTING_ASSET` or the new `CONTENT_SOURCE`. The
+  Content page gained a Sources tab and an "Add to Source" action on
+  original assets.
 
 No thumbnails, TikTok/YouTube/other platform integrations, AI content
 generation, analytics, or billing are implemented yet — see

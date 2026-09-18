@@ -109,9 +109,13 @@ problems and the naming is meant to keep them from being confused. `robots`
 `publishschedules` unattended, within backend-enforced autonomy/provider
 limits) was added in Phase 11C — a third, independent scheduling layer from
 both `jobs` and `publishschedules`, with no `Robot -> Worker` relationship
-anywhere. `analytics` and `revenue` remain placeholders. The package layout
-under `com.fdmultimedia.api` (`auth`, `users`, `workspaces`, `accounts`,
-`robots`, `assets`, `jobs`, `workers`, `publishing`, `contentdrafts`,
+anywhere. `contentsources` (controlled, workspace-scoped pools of existing
+`MediaAsset`s a Robot may select from) was added in Phase 11D — it
+deliberately has no dependency on `robots`, so it stays a reusable,
+Robot-agnostic building block; `robots` depends on it, never the reverse.
+`analytics` and `revenue` remain placeholders. The package layout under
+`com.fdmultimedia.api` (`auth`, `users`, `workspaces`, `accounts`, `robots`,
+`contentsources`, `assets`, `jobs`, `workers`, `publishing`, `contentdrafts`,
 `publishschedules`, `analytics`, `revenue`, `shared`) is where new domain
 logic should land. See [ARCHITECTURE.md](ARCHITECTURE.md) for what each
 package is for.
@@ -157,8 +161,9 @@ be created and cancelled, they simply never dispatch.
 
 `ROBOT_AUTOMATION_ENABLED=true` (the default) and no other configuration is
 needed for TEST-provider automation — create a Robot
-(`POST /api/robots`) with an existing READY+INSPECTED source asset and
-`autonomyMode: "AUTO_SCHEDULE"` against a TEST `SocialAccount`, then either
+(`POST /api/robots`) with `sourcePolicy: "EXISTING_ASSET"`, an existing
+READY+INSPECTED `sourceAssetId`, and `autonomyMode: "AUTO_SCHEDULE"` against
+a TEST `SocialAccount`, then either
 `POST /api/robots/{id}/run` for an immediate run or set `cadenceType:
 "INTERVAL"` and wait for `ROBOT_SCHEDULER_POLL_MS` (default 15s) to claim it.
 `GET /api/robot-runs/{id}` shows the run walking through its provenance
@@ -176,6 +181,26 @@ non-`TEST` account (or `PATCH` an existing Robot to point at one) — the API
 rejects it with 409 `AUTONOMOUS_PROVIDER_NOT_ALLOWED` regardless of Meta
 configuration; `DRAFT_ONLY`/`REVIEW_REQUIRED` allow any account, including
 Instagram, because a human still decides before anything publishes.
+
+## Testing dynamic content sources locally
+
+Create a `ContentSource` (`POST /api/content-sources`), add a few existing
+`ORIGINAL` assets to it in the order you want to observe
+(`POST /api/content-sources/{id}/assets`, body `{"mediaAssetId": "..."}`) —
+only assets already imported through the normal Content page/import API can
+join; there is no URL field anywhere on a Robot or a ContentSource. Create a
+Robot with `sourcePolicy: "CONTENT_SOURCE"`, `contentSourceId`, and
+`selectionPolicy: "OLDEST_UNPROCESSED"` (or `"NEWEST_UNPROCESSED"`) instead
+of `sourceAssetId`, then `POST /api/robots/{id}/run` repeatedly: each run's
+`GET /api/robot-runs/{id}` shows a different `sourceAssetId` as the source
+is worked through in order, and once every eligible asset has been used by
+that Robot, the next run terminates immediately with `failureCode:
+"NO_ELIGIBLE_SOURCE"` — no Draft, Job, or Schedule is created. A second
+Robot pointed at the same source may freely select an asset the first Robot
+already consumed (consumption is per-Robot, not global). `POST
+/api/content-sources/{id}/pause` makes any further run for a Robot
+configured against it fail fast with 409 `CONTENT_SOURCE_UNAVAILABLE`
+instead — `/resume` restores it.
 
 Set `ROBOT_AUTOMATION_ENABLED=false` to stop the scheduler from claiming or
 reconciling anything (a global kill switch, verifiable with a plain

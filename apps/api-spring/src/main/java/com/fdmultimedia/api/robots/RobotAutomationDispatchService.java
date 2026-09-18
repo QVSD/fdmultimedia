@@ -1,7 +1,9 @@
 package com.fdmultimedia.api.robots;
 
+import com.fdmultimedia.api.assets.MediaAsset;
 import com.fdmultimedia.api.auth.AuthService;
 import com.fdmultimedia.api.auth.security.AuthenticatedUser;
+import com.fdmultimedia.api.contentsources.ContentSourceStatus;
 import com.fdmultimedia.api.workspaces.Workspace;
 import com.fdmultimedia.api.workspaces.WorkspaceMembership;
 import java.time.Clock;
@@ -35,14 +37,21 @@ public class RobotAutomationDispatchService {
     private final RobotRepository robots;
     private final RobotRunRepository runs;
     private final RobotProperties properties;
+    private final RobotSourceSelectionService selectionService;
     private final Clock clock;
 
     public RobotAutomationDispatchService(
-            AuthService authService, RobotRepository robots, RobotRunRepository runs, RobotProperties properties, Clock clock) {
+            AuthService authService,
+            RobotRepository robots,
+            RobotRunRepository runs,
+            RobotProperties properties,
+            RobotSourceSelectionService selectionService,
+            Clock clock) {
         this.authService = authService;
         this.robots = robots;
         this.runs = runs;
         this.properties = properties;
+        this.selectionService = selectionService;
         this.clock = clock;
     }
 
@@ -60,7 +69,7 @@ public class RobotAutomationDispatchService {
         }
         Instant now = Instant.now(clock);
         validateCanStartRun(workspace, robot, now);
-        RobotRun run = runs.save(new RobotRun(workspace, robot, RobotRunTriggerType.MANUAL, robot.getSourceAsset(), now));
+        RobotRun run = runs.save(startRun(workspace, robot, RobotRunTriggerType.MANUAL, now));
         robot.recordManualRun(now);
         return run.getId();
     }
@@ -87,16 +96,46 @@ public class RobotAutomationDispatchService {
             log.info("Skipping scheduled run for robot {}: {}", robot.getId(), ex.getReason());
             return true;
         }
-        runs.save(new RobotRun(workspace, robot, RobotRunTriggerType.SCHEDULED, robot.getSourceAsset(), now));
+        runs.save(startRun(workspace, robot, RobotRunTriggerType.SCHEDULED, now));
         return true;
+    }
+
+    /**
+     * Resolves this run's source asset and creates the (still unsaved)
+     * RobotRun — the exact same path for a manual Run Now and a scheduled
+     * claim, per the "no separate selection behavior for scheduled vs
+     * manual" rule. For CONTENT_SOURCE robots, a source with nothing
+     * eligible right now still produces a real, auditable RobotRun,
+     * immediately terminal with failureCode {@code NO_ELIGIBLE_SOURCE} —
+     * never silent success and never a fabricated Draft.
+     */
+    private RobotRun startRun(Workspace workspace, Robot robot, RobotRunTriggerType triggerType, Instant now) {
+        if (robot.getSourcePolicy() == RobotSourcePolicy.EXISTING_ASSET) {
+            return new RobotRun(workspace, robot, triggerType, robot.getSourceAsset(), now);
+        }
+        UUID contentSourceId = robot.getContentSource().getId();
+        Optional<MediaAsset> selected = selectionService.selectNext(robot);
+        if (selected.isPresent()) {
+            return new RobotRun(workspace, robot, triggerType, selected.get(), contentSourceId, robot.getSelectionPolicy(), now);
+        }
+        RobotRun run = new RobotRun(workspace, robot, triggerType, null, contentSourceId, robot.getSelectionPolicy(), now);
+        run.markFailed("NO_ELIGIBLE_SOURCE", "No eligible unprocessed asset was found in this content source", now);
+        return run;
     }
 
     private void validateCanStartRun(Workspace workspace, Robot robot, Instant now) {
         if (runs.existsByRobotAndStatusNotIn(robot, RobotRunStatus.terminalStatuses())) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Robot already has an active run");
         }
-        if (runs.existsByRobotAndSourceAssetAndStatus(robot, robot.getSourceAsset(), RobotRunStatus.SUCCEEDED)) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "SOURCE_ALREADY_PROCESSED");
+        if (robot.getSourcePolicy() == RobotSourcePolicy.EXISTING_ASSET) {
+            if (runs.existsByRobotAndSourceAssetAndStatus(robot, robot.getSourceAsset(), RobotRunStatus.SUCCEEDED)) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "SOURCE_ALREADY_PROCESSED");
+            }
+        } else if (robot.getContentSource().getStatus() != ContentSourceStatus.ACTIVE) {
+            // A paused source never even attempts a run — distinct from a
+            // real, empty-but-active source, which does still produce an
+            // auditable NO_ELIGIBLE_SOURCE run (see startRun).
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "CONTENT_SOURCE_UNAVAILABLE");
         }
         Instant dayStart = now.truncatedTo(ChronoUnit.DAYS);
         if (runs.countByRobotAndCreatedAtGreaterThanEqual(robot, dayStart) >= robot.getMaxRunsPerDay()) {

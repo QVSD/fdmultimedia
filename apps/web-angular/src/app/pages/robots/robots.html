@@ -30,14 +30,43 @@
           <input type="text" maxlength="2000" [ngModel]="createDescription()" (ngModelChange)="createDescription.set($event)" name="description" />
         </label>
         <label>
-          <span>Source asset</span>
-          <select [ngModel]="createSourceAssetId()" (ngModelChange)="createSourceAssetId.set($event)" name="sourceAssetId" required>
-            <option value="" disabled>Choose an eligible asset</option>
-            @for (asset of eligibleAssets(); track asset.id) {
-              <option [value]="asset.id">{{ asset.originalFilename || asset.id.slice(0, 8) }}</option>
-            }
+          <span>Source type</span>
+          <select [ngModel]="createSourcePolicy()" (ngModelChange)="createSourcePolicy.set($event)" name="sourcePolicy">
+            <option value="EXISTING_ASSET">Fixed asset</option>
+            <option value="CONTENT_SOURCE">Content source</option>
           </select>
         </label>
+        @if (createSourcePolicy() === 'EXISTING_ASSET') {
+          <label>
+            <span>Source asset</span>
+            <select [ngModel]="createSourceAssetId()" (ngModelChange)="createSourceAssetId.set($event)" name="sourceAssetId" required>
+              <option value="" disabled>Choose an eligible asset</option>
+              @for (asset of eligibleAssets(); track asset.id) {
+                <option [value]="asset.id">{{ asset.originalFilename || asset.id.slice(0, 8) }}</option>
+              }
+            </select>
+          </label>
+        } @else {
+          <label>
+            <span>Content source</span>
+            <select [ngModel]="createContentSourceId()" (ngModelChange)="createContentSourceId.set($event)" name="contentSourceId" required>
+              <option value="" disabled>Choose a content source</option>
+              @for (source of activeContentSources(); track source.id) {
+                <option [value]="source.id">{{ source.name }} ({{ source.assetCount }} assets)</option>
+              }
+            </select>
+            @if (activeContentSources().length === 0) {
+              <p class="robots__muted">No active content sources yet — create one from the Content page's Sources tab.</p>
+            }
+          </label>
+          <label>
+            <span>Selection policy</span>
+            <select [ngModel]="createSelectionPolicy()" (ngModelChange)="createSelectionPolicy.set($event)" name="selectionPolicy">
+              <option value="OLDEST_UNPROCESSED">Oldest unprocessed</option>
+              <option value="NEWEST_UNPROCESSED">Newest unprocessed</option>
+            </select>
+          </label>
+        }
         <label>
           <span>Autonomy mode</span>
           <select [ngModel]="createAutonomyMode()" (ngModelChange)="createAutonomyMode.set($event)" name="autonomyMode">
@@ -115,7 +144,7 @@
                   <div class="robot-card__meta">
                     <span [class]="'robots__badge robots__badge--' + robot.status.toLowerCase()">{{ robotStatusLabel(robot.status) }}</span>
                     <span class="robots__badge">{{ robot.autonomyMode }}</span>
-                    <span>{{ robot.sourceAssetFilename || robot.sourceAssetId.slice(0, 8) }}</span>
+                    <span>{{ robotSourceLabel(robot) }}</span>
                     <span>{{ robot.cadenceType === 'INTERVAL' ? 'Every ' + robot.cadenceIntervalHours + 'h' : 'Manual only' }}</span>
                     @if (robot.targetSocialAccountDisplayName) {
                       <span>{{ robot.targetSocialAccountDisplayName }}</span>
@@ -152,6 +181,9 @@
                           <span [class]="'robots__badge robots__badge--run-' + run.status.toLowerCase()">{{ runStatusLabel(run.status) }}</span>
                           <span class="robots__muted">{{ run.triggerType }}</span>
                           <span class="robots__muted">{{ run.startedAt | date:'medium' }}</span>
+                          @if (runSourceLabel(run)) {
+                            <span class="robots__muted">{{ runSourceLabel(run) }}</span>
+                          }
                           @if (run.contentDraftId) {
                             <span class="robots__muted">Draft: {{ run.contentDraftId.slice(0, 8) }}</span>
                           }

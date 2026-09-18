@@ -13,6 +13,8 @@ import { ContentDraftsService } from '../../core/content-drafts/content-drafts.s
 import { ContentDraftStatus, ContentDraftSummary, ContentDraftWorkflowStage } from '../../core/content-drafts/content-draft.models';
 import { PublishSchedulesService } from '../../core/publish-schedules/publish-schedules.service';
 import { PublishScheduleStatus, PublishScheduleSummary } from '../../core/publish-schedules/publish-schedule.models';
+import { ContentSourcesService } from '../../core/content-sources/content-sources.service';
+import { ContentSourceAssetSummary, ContentSourceSummary } from '../../core/content-sources/content-source.models';
 
 type LoadState = 'loading' | 'ready' | 'error';
 
@@ -50,7 +52,25 @@ export class Content implements OnInit, OnDestroy {
   protected readonly publishBusy = signal<Record<string, boolean>>({});
   protected readonly publishErrors = signal<Record<string, string | null>>({});
 
-  protected readonly activeView = signal<'assets' | 'drafts' | 'schedule'>('assets');
+  protected readonly activeView = signal<'assets' | 'drafts' | 'schedule' | 'sources'>('assets');
+
+  protected readonly contentSources = signal<ContentSourceSummary[]>([]);
+  protected readonly contentSourcesLoadState = signal<LoadState>('loading');
+  protected readonly sourceCreateName = signal('');
+  protected readonly sourceCreateDescription = signal('');
+  protected readonly sourceCreateBusy = signal(false);
+  protected readonly sourceCreateError = signal<string | null>(null);
+  protected readonly sourcePauseResumeBusy = signal<Record<string, boolean>>({});
+  protected readonly expandedSources = signal<Record<string, boolean>>({});
+  protected readonly sourceAssets = signal<Record<string, ContentSourceAssetSummary[]>>({});
+  protected readonly sourceAddAssetId = signal<Record<string, string>>({});
+  protected readonly sourceAddBusy = signal<Record<string, boolean>>({});
+  protected readonly sourceAddErrors = signal<Record<string, string | null>>({});
+  protected readonly sourceRemoveBusy = signal<Record<string, boolean>>({});
+  protected readonly addToSourceSelection = signal<Record<string, string>>({});
+  protected readonly addToSourceBusy = signal<Record<string, boolean>>({});
+  protected readonly addToSourceErrors = signal<Record<string, string | null>>({});
+  protected readonly addToSourceDone = signal<Record<string, boolean>>({});
   protected readonly drafts = signal<ContentDraftSummary[]>([]);
   protected readonly draftsLoadState = signal<LoadState>('loading');
   protected readonly expandedDrafts = signal<Record<string, boolean>>({});
@@ -85,6 +105,7 @@ export class Content implements OnInit, OnDestroy {
   private subscription?: Subscription;
   private draftsSubscription?: Subscription;
   private schedulesSubscription?: Subscription;
+  private contentSourcesSubscription?: Subscription;
 
   constructor(
     private readonly assetsService: AssetsService,
@@ -92,6 +113,7 @@ export class Content implements OnInit, OnDestroy {
     private readonly socialAccountsService: SocialAccountsService,
     private readonly contentDraftsService: ContentDraftsService,
     private readonly publishSchedulesService: PublishSchedulesService,
+    private readonly contentSourcesService: ContentSourcesService,
   ) {}
 
   ngOnInit(): void {
@@ -153,12 +175,30 @@ export class Content implements OnInit, OnDestroy {
         this.schedules.set(schedules);
         this.schedulesLoadState.set('ready');
       });
+
+    this.contentSourcesSubscription = interval(5000)
+      .pipe(
+        startWith(0),
+        switchMap(() =>
+          this.contentSourcesService.list().pipe(
+            catchError(() => {
+              this.contentSourcesLoadState.set('error');
+              return EMPTY;
+            }),
+          ),
+        ),
+      )
+      .subscribe((sources) => {
+        this.contentSources.set(sources);
+        this.contentSourcesLoadState.set('ready');
+      });
   }
 
   ngOnDestroy(): void {
     this.subscription?.unsubscribe();
     this.draftsSubscription?.unsubscribe();
     this.schedulesSubscription?.unsubscribe();
+    this.contentSourcesSubscription?.unsubscribe();
   }
 
   protected importMedia(): void {
@@ -625,8 +665,182 @@ export class Content implements OnInit, OnDestroy {
     }
   }
 
-  protected switchView(view: 'assets' | 'drafts' | 'schedule'): void {
+  protected switchView(view: 'assets' | 'drafts' | 'schedule' | 'sources'): void {
     this.activeView.set(view);
+  }
+
+  // ---- content sources ----
+
+  protected canAddToSource(asset: MediaAssetSummary): boolean {
+    return asset.derivationType === 'ORIGINAL';
+  }
+
+  protected activeContentSources(): ContentSourceSummary[] {
+    return this.contentSources().filter((source) => source.status === 'ACTIVE');
+  }
+
+  protected createContentSource(): void {
+    this.sourceCreateError.set(null);
+    const name = this.sourceCreateName().trim();
+    if (!name) {
+      this.sourceCreateError.set('Name is required.');
+      return;
+    }
+    this.sourceCreateBusy.set(true);
+    this.contentSourcesService
+      .create({ name, description: this.sourceCreateDescription().trim() || null })
+      .pipe(finalize(() => this.sourceCreateBusy.set(false)))
+      .subscribe({
+        next: (source) => {
+          this.contentSources.set([source, ...this.contentSources()]);
+          this.sourceCreateName.set('');
+          this.sourceCreateDescription.set('');
+        },
+        error: () => this.sourceCreateError.set('Content source could not be created.'),
+      });
+  }
+
+  protected toggleSourcePause(source: ContentSourceSummary): void {
+    this.sourcePauseResumeBusy.update((busy) => ({ ...busy, [source.id]: true }));
+    const action = source.status === 'ACTIVE' ? this.contentSourcesService.pause(source.id) : this.contentSourcesService.resume(source.id);
+    action.pipe(finalize(() => this.sourcePauseResumeBusy.update((busy) => ({ ...busy, [source.id]: false })))).subscribe({
+      next: (updated) => this.replaceContentSource(updated),
+      error: () => undefined,
+    });
+  }
+
+  private replaceContentSource(source: ContentSourceSummary): void {
+    this.contentSources.set(this.contentSources().map((existing) => (existing.id === source.id ? source : existing)));
+  }
+
+  protected isSourceExpanded(source: ContentSourceSummary): boolean {
+    return this.expandedSources()[source.id] ?? false;
+  }
+
+  protected toggleSourceExpanded(source: ContentSourceSummary): void {
+    const expanded = !(this.expandedSources()[source.id] ?? false);
+    this.expandedSources.update((items) => ({ ...items, [source.id]: expanded }));
+    if (expanded) {
+      this.loadSourceAssets(source);
+    }
+  }
+
+  private loadSourceAssets(source: ContentSourceSummary): void {
+    this.contentSourcesService
+      .listAssets(source.id)
+      .pipe(catchError(() => EMPTY))
+      .subscribe((assets) => this.sourceAssets.update((items) => ({ ...items, [source.id]: assets })));
+  }
+
+  protected assetsInSource(source: ContentSourceSummary): ContentSourceAssetSummary[] {
+    return this.sourceAssets()[source.id] ?? [];
+  }
+
+  protected sourceAssetReadinessLabel(asset: ContentSourceAssetSummary): string {
+    switch (asset.status) {
+      case 'PENDING':
+        return 'Waiting';
+      case 'IMPORTING':
+      case 'PROCESSING':
+        return 'Processing';
+      case 'FAILED':
+        return 'Failed';
+      case 'READY':
+        return asset.inspectionStatus === 'INSPECTED' ? 'Eligible' : 'Not yet eligible';
+    }
+  }
+
+  protected candidateAssetsForSource(source: ContentSourceSummary): MediaAssetSummary[] {
+    const memberIds = new Set(this.assetsInSource(source).map((member) => member.mediaAssetId));
+    return this.assets().filter((asset) => asset.derivationType === 'ORIGINAL' && !memberIds.has(asset.id));
+  }
+
+  protected sourceAddAssetFor(source: ContentSourceSummary): string {
+    return this.sourceAddAssetId()[source.id] ?? '';
+  }
+
+  protected setSourceAddAsset(source: ContentSourceSummary, value: string): void {
+    this.sourceAddAssetId.update((ids) => ({ ...ids, [source.id]: value }));
+  }
+
+  protected addAssetToSource(source: ContentSourceSummary): void {
+    const assetId = this.sourceAddAssetFor(source);
+    this.sourceAddErrors.update((errors) => ({ ...errors, [source.id]: null }));
+    if (!assetId) {
+      this.sourceAddErrors.update((errors) => ({ ...errors, [source.id]: 'Choose an asset to add.' }));
+      return;
+    }
+    this.sourceAddBusy.update((busy) => ({ ...busy, [source.id]: true }));
+    this.contentSourcesService
+      .addAsset(source.id, assetId)
+      .pipe(finalize(() => this.sourceAddBusy.update((busy) => ({ ...busy, [source.id]: false }))))
+      .subscribe({
+        next: (added) => {
+          this.sourceAssets.update((items) => ({ ...items, [source.id]: [...(items[source.id] ?? []), added] }));
+          this.sourceAddAssetId.update((ids) => ({ ...ids, [source.id]: '' }));
+          this.replaceContentSource({ ...source, assetCount: source.assetCount + 1 });
+        },
+        error: () => this.sourceAddErrors.update((errors) => ({ ...errors, [source.id]: 'Asset could not be added.' })),
+      });
+  }
+
+  protected removeAssetFromSource(source: ContentSourceSummary, asset: ContentSourceAssetSummary): void {
+    const key = `${source.id}:${asset.mediaAssetId}`;
+    this.sourceRemoveBusy.update((busy) => ({ ...busy, [key]: true }));
+    this.contentSourcesService
+      .removeAsset(source.id, asset.mediaAssetId)
+      .pipe(finalize(() => this.sourceRemoveBusy.update((busy) => ({ ...busy, [key]: false }))))
+      .subscribe({
+        next: () => {
+          this.sourceAssets.update((items) => ({
+            ...items,
+            [source.id]: (items[source.id] ?? []).filter((member) => member.mediaAssetId !== asset.mediaAssetId),
+          }));
+          this.replaceContentSource({ ...source, assetCount: Math.max(0, source.assetCount - 1) });
+        },
+        error: () => undefined,
+      });
+  }
+
+  protected isRemovingFromSource(source: ContentSourceSummary, asset: ContentSourceAssetSummary): boolean {
+    return this.sourceRemoveBusy()[`${source.id}:${asset.mediaAssetId}`] ?? false;
+  }
+
+  // ---- add-to-source from the Assets tab ----
+
+  protected addToSourceSelectionFor(asset: MediaAssetSummary): string {
+    return this.addToSourceSelection()[asset.id] ?? this.activeContentSources()[0]?.id ?? '';
+  }
+
+  protected setAddToSourceSelection(asset: MediaAssetSummary, value: string): void {
+    this.addToSourceSelection.update((ids) => ({ ...ids, [asset.id]: value }));
+  }
+
+  protected addAssetToSelectedSource(asset: MediaAssetSummary): void {
+    const sourceId = this.addToSourceSelectionFor(asset);
+    this.addToSourceErrors.update((errors) => ({ ...errors, [asset.id]: null }));
+    this.addToSourceDone.update((done) => ({ ...done, [asset.id]: false }));
+    if (!sourceId) {
+      this.addToSourceErrors.update((errors) => ({ ...errors, [asset.id]: 'Create a content source first.' }));
+      return;
+    }
+    this.addToSourceBusy.update((busy) => ({ ...busy, [asset.id]: true }));
+    this.contentSourcesService
+      .addAsset(sourceId, asset.id)
+      .pipe(finalize(() => this.addToSourceBusy.update((busy) => ({ ...busy, [asset.id]: false }))))
+      .subscribe({
+        next: () => {
+          this.addToSourceDone.update((done) => ({ ...done, [asset.id]: true }));
+          const source = this.contentSources().find((existing) => existing.id === sourceId);
+          if (source) {
+            this.replaceContentSource({ ...source, assetCount: source.assetCount + 1 });
+          }
+        },
+        // The import/asset itself already succeeded; only the source
+        // association failed, and that failure must be surfaced accurately
+        // rather than silently swallowed or mistaken for an import failure.
+        error: () => this.addToSourceErrors.update((errors) => ({ ...errors, [asset.id]: 'Could not add to content source.' })),
+      });
   }
 
   protected canCreateDraft(asset: MediaAssetSummary): boolean {

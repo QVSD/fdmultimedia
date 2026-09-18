@@ -2,6 +2,7 @@ package com.fdmultimedia.api.robots;
 
 import com.fdmultimedia.api.accounts.SocialAccount;
 import com.fdmultimedia.api.assets.MediaAsset;
+import com.fdmultimedia.api.contentsources.ContentSource;
 import com.fdmultimedia.api.users.AppUser;
 import com.fdmultimedia.api.workspaces.Workspace;
 import jakarta.persistence.Column;
@@ -53,9 +54,21 @@ public class Robot {
     @Column(name = "highlight_strategy", nullable = false)
     private RobotHighlightStrategy highlightStrategy;
 
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "source_asset_id", nullable = false)
+    @Enumerated(EnumType.STRING)
+    @Column(name = "source_policy", nullable = false)
+    private RobotSourcePolicy sourcePolicy;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "source_asset_id")
     private MediaAsset sourceAsset;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "content_source_id")
+    private ContentSource contentSource;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "selection_policy")
+    private RobotSelectionPolicy selectionPolicy;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "target_social_account_id")
@@ -93,12 +106,33 @@ public class Robot {
     protected Robot() {
     }
 
+    /** EXISTING_ASSET convenience constructor — Phase 11C shape, unchanged. */
     public Robot(
             Workspace workspace,
             String name,
             String description,
             RobotAutonomyMode autonomyMode,
             MediaAsset sourceAsset,
+            SocialAccount targetSocialAccount,
+            RobotCadenceType cadenceType,
+            Integer cadenceIntervalHours,
+            Integer scheduleDelayMinutes,
+            int maxRunsPerDay,
+            AppUser createdByUser,
+            Instant now) {
+        this(workspace, name, description, autonomyMode, RobotSourcePolicy.EXISTING_ASSET, sourceAsset, null, null,
+                targetSocialAccount, cadenceType, cadenceIntervalHours, scheduleDelayMinutes, maxRunsPerDay, createdByUser, now);
+    }
+
+    public Robot(
+            Workspace workspace,
+            String name,
+            String description,
+            RobotAutonomyMode autonomyMode,
+            RobotSourcePolicy sourcePolicy,
+            MediaAsset sourceAsset,
+            ContentSource contentSource,
+            RobotSelectionPolicy selectionPolicy,
             SocialAccount targetSocialAccount,
             RobotCadenceType cadenceType,
             Integer cadenceIntervalHours,
@@ -113,7 +147,10 @@ public class Robot {
         this.status = RobotStatus.ACTIVE;
         this.autonomyMode = autonomyMode;
         this.highlightStrategy = RobotHighlightStrategy.TOP_HIGHLIGHT;
+        this.sourcePolicy = sourcePolicy;
         this.sourceAsset = sourceAsset;
+        this.contentSource = contentSource;
+        this.selectionPolicy = selectionPolicy;
         this.targetSocialAccount = targetSocialAccount;
         this.cadenceType = cadenceType;
         this.cadenceIntervalHours = cadenceIntervalHours;
@@ -210,7 +247,10 @@ public class Robot {
     public RobotStatus getStatus() { return status; }
     public RobotAutonomyMode getAutonomyMode() { return autonomyMode; }
     public RobotHighlightStrategy getHighlightStrategy() { return highlightStrategy; }
+    public RobotSourcePolicy getSourcePolicy() { return sourcePolicy; }
     public MediaAsset getSourceAsset() { return sourceAsset; }
+    public ContentSource getContentSource() { return contentSource; }
+    public RobotSelectionPolicy getSelectionPolicy() { return selectionPolicy; }
     public SocialAccount getTargetSocialAccount() { return targetSocialAccount; }
     public RobotCadenceType getCadenceType() { return cadenceType; }
     public Integer getCadenceIntervalHours() { return cadenceIntervalHours; }

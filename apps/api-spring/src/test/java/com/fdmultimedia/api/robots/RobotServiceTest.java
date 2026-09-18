@@ -16,6 +16,8 @@ import com.fdmultimedia.api.assets.MediaImportMetadata;
 import com.fdmultimedia.api.assets.MediaInspectionMetadata;
 import com.fdmultimedia.api.auth.AuthService;
 import com.fdmultimedia.api.auth.security.AuthenticatedUser;
+import com.fdmultimedia.api.contentsources.ContentSource;
+import com.fdmultimedia.api.contentsources.ContentSourceRepository;
 import com.fdmultimedia.api.jobs.Job;
 import com.fdmultimedia.api.jobs.JobType;
 import com.fdmultimedia.api.publishschedules.PublishScheduleProperties;
@@ -43,12 +45,13 @@ class RobotServiceTest {
     private final RobotRepository robots = mock(RobotRepository.class);
     private final MediaAssetRepository assets = mock(MediaAssetRepository.class);
     private final SocialAccountRepository socialAccounts = mock(SocialAccountRepository.class);
+    private final ContentSourceRepository contentSources = mock(ContentSourceRepository.class);
     private final RobotProperties properties = new RobotProperties();
     private final PublishScheduleProperties publishScheduleProperties = new PublishScheduleProperties();
     private final RobotAutomationDispatchService dispatchService = mock(RobotAutomationDispatchService.class);
     private final RobotRunOrchestrator orchestrator = mock(RobotRunOrchestrator.class);
     private final RobotService service = new RobotService(
-            authService, robots, assets, socialAccounts, properties, publishScheduleProperties,
+            authService, robots, assets, socialAccounts, contentSources, properties, publishScheduleProperties,
             dispatchService, orchestrator, Clock.fixed(NOW, ZoneOffset.UTC));
 
     private Workspace workspace;
@@ -72,7 +75,7 @@ class RobotServiceTest {
         when(assets.findByWorkspaceAndId(workspace, asset.getId())).thenReturn(Optional.of(asset));
 
         RobotSummary summary = service.create(user, new CreateRobotRequest(
-                "Romanian Tech Clips", "desc", RobotAutonomyMode.DRAFT_ONLY, asset.getId(), null,
+                "Romanian Tech Clips", "desc", RobotAutonomyMode.DRAFT_ONLY, RobotSourcePolicy.EXISTING_ASSET, asset.getId(), null, null, null,
                 RobotCadenceType.MANUAL_ONLY, null, null, null));
 
         assertThat(summary.status()).isEqualTo(RobotStatus.ACTIVE);
@@ -89,7 +92,7 @@ class RobotServiceTest {
         when(socialAccounts.findByWorkspaceAndId(workspace, testAccount.getId())).thenReturn(Optional.of(testAccount));
 
         RobotSummary summary = service.create(user, new CreateRobotRequest(
-                "Auto Robot", null, RobotAutonomyMode.AUTO_SCHEDULE, asset.getId(), testAccount.getId(),
+                "Auto Robot", null, RobotAutonomyMode.AUTO_SCHEDULE, RobotSourcePolicy.EXISTING_ASSET, asset.getId(), null, null, testAccount.getId(),
                 RobotCadenceType.INTERVAL, 6, 60, 2));
 
         assertThat(summary.autonomyMode()).isEqualTo(RobotAutonomyMode.AUTO_SCHEDULE);
@@ -106,7 +109,7 @@ class RobotServiceTest {
         when(socialAccounts.findByWorkspaceAndId(workspace, instagram.getId())).thenReturn(Optional.of(instagram));
 
         assertThatThrownBy(() -> service.create(user, new CreateRobotRequest(
-                "Bad Robot", null, RobotAutonomyMode.AUTO_SCHEDULE, asset.getId(), instagram.getId(),
+                "Bad Robot", null, RobotAutonomyMode.AUTO_SCHEDULE, RobotSourcePolicy.EXISTING_ASSET, asset.getId(), null, null, instagram.getId(),
                 RobotCadenceType.MANUAL_ONLY, null, 60, null)))
                 .isInstanceOf(ResponseStatusException.class)
                 .extracting("statusCode")
@@ -121,7 +124,7 @@ class RobotServiceTest {
         when(socialAccounts.findByWorkspaceAndId(workspace, instagram.getId())).thenReturn(Optional.of(instagram));
 
         RobotSummary summary = service.create(user, new CreateRobotRequest(
-                "Review Robot", null, RobotAutonomyMode.REVIEW_REQUIRED, asset.getId(), instagram.getId(),
+                "Review Robot", null, RobotAutonomyMode.REVIEW_REQUIRED, RobotSourcePolicy.EXISTING_ASSET, asset.getId(), null, null, instagram.getId(),
                 RobotCadenceType.MANUAL_ONLY, null, 120, null));
 
         assertThat(summary.targetSocialAccountId()).isEqualTo(instagram.getId());
@@ -133,7 +136,7 @@ class RobotServiceTest {
         when(assets.findByWorkspaceAndId(workspace, asset.getId())).thenReturn(Optional.of(asset));
 
         assertThatThrownBy(() -> service.create(user, new CreateRobotRequest(
-                "Robot", null, RobotAutonomyMode.DRAFT_ONLY, asset.getId(), null,
+                "Robot", null, RobotAutonomyMode.DRAFT_ONLY, RobotSourcePolicy.EXISTING_ASSET, asset.getId(), null, null, null,
                 RobotCadenceType.MANUAL_ONLY, null, null, null)))
                 .isInstanceOf(ResponseStatusException.class)
                 .extracting("statusCode")
@@ -146,7 +149,7 @@ class RobotServiceTest {
         when(assets.findByWorkspaceAndId(workspace, otherAssetId)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.create(user, new CreateRobotRequest(
-                "Robot", null, RobotAutonomyMode.DRAFT_ONLY, otherAssetId, null,
+                "Robot", null, RobotAutonomyMode.DRAFT_ONLY, RobotSourcePolicy.EXISTING_ASSET, otherAssetId, null, null, null,
                 RobotCadenceType.MANUAL_ONLY, null, null, null)))
                 .isInstanceOf(ResponseStatusException.class)
                 .extracting("statusCode")
@@ -159,7 +162,7 @@ class RobotServiceTest {
         when(assets.findByWorkspaceAndId(workspace, asset.getId())).thenReturn(Optional.of(asset));
 
         assertThatThrownBy(() -> service.create(user, new CreateRobotRequest(
-                "Robot", null, RobotAutonomyMode.DRAFT_ONLY, asset.getId(), null,
+                "Robot", null, RobotAutonomyMode.DRAFT_ONLY, RobotSourcePolicy.EXISTING_ASSET, asset.getId(), null, null, null,
                 RobotCadenceType.INTERVAL, null, null, null)))
                 .isInstanceOf(ResponseStatusException.class)
                 .extracting("statusCode")
@@ -172,7 +175,7 @@ class RobotServiceTest {
         when(assets.findByWorkspaceAndId(workspace, asset.getId())).thenReturn(Optional.of(asset));
 
         assertThatThrownBy(() -> service.create(user, new CreateRobotRequest(
-                "Robot", null, RobotAutonomyMode.DRAFT_ONLY, asset.getId(), null,
+                "Robot", null, RobotAutonomyMode.DRAFT_ONLY, RobotSourcePolicy.EXISTING_ASSET, asset.getId(), null, null, null,
                 RobotCadenceType.INTERVAL, 200, null, null)))
                 .isInstanceOf(ResponseStatusException.class)
                 .extracting("statusCode")
@@ -186,7 +189,7 @@ class RobotServiceTest {
         when(socialAccounts.findByWorkspaceAndId(workspace, testAccount.getId())).thenReturn(Optional.of(testAccount));
 
         assertThatThrownBy(() -> service.create(user, new CreateRobotRequest(
-                "Robot", null, RobotAutonomyMode.AUTO_SCHEDULE, asset.getId(), testAccount.getId(),
+                "Robot", null, RobotAutonomyMode.AUTO_SCHEDULE, RobotSourcePolicy.EXISTING_ASSET, asset.getId(), null, null, testAccount.getId(),
                 RobotCadenceType.MANUAL_ONLY, null, 0, null)))
                 .isInstanceOf(ResponseStatusException.class)
                 .extracting("statusCode")
@@ -199,7 +202,7 @@ class RobotServiceTest {
         when(assets.findByWorkspaceAndId(workspace, asset.getId())).thenReturn(Optional.of(asset));
 
         assertThatThrownBy(() -> service.create(user, new CreateRobotRequest(
-                "Robot", null, RobotAutonomyMode.REVIEW_REQUIRED, asset.getId(), null,
+                "Robot", null, RobotAutonomyMode.REVIEW_REQUIRED, RobotSourcePolicy.EXISTING_ASSET, asset.getId(), null, null, null,
                 RobotCadenceType.MANUAL_ONLY, null, 60, null)))
                 .isInstanceOf(ResponseStatusException.class)
                 .extracting("statusCode")
@@ -212,11 +215,56 @@ class RobotServiceTest {
         when(assets.findByWorkspaceAndId(workspace, asset.getId())).thenReturn(Optional.of(asset));
 
         assertThatThrownBy(() -> service.create(user, new CreateRobotRequest(
-                "Robot", null, RobotAutonomyMode.DRAFT_ONLY, asset.getId(), null,
+                "Robot", null, RobotAutonomyMode.DRAFT_ONLY, RobotSourcePolicy.EXISTING_ASSET, asset.getId(), null, null, null,
                 RobotCadenceType.MANUAL_ONLY, null, null, 100)))
                 .isInstanceOf(ResponseStatusException.class)
                 .extracting("statusCode")
                 .isEqualTo(HttpStatus.BAD_REQUEST);
+    }
+
+    @Test
+    void createsContentSourceRobot() {
+        ContentSource source = new ContentSource(workspace, "Incoming Tech Videos", null, owner, NOW);
+        when(contentSources.findByWorkspaceAndId(workspace, source.getId())).thenReturn(Optional.of(source));
+
+        RobotSummary summary = service.create(user, new CreateRobotRequest(
+                "Dynamic Robot", null, RobotAutonomyMode.DRAFT_ONLY, RobotSourcePolicy.CONTENT_SOURCE, null,
+                source.getId(), RobotSelectionPolicy.NEWEST_UNPROCESSED, null,
+                RobotCadenceType.MANUAL_ONLY, null, null, null));
+
+        assertThat(summary.sourcePolicy()).isEqualTo(RobotSourcePolicy.CONTENT_SOURCE);
+        assertThat(summary.contentSourceId()).isEqualTo(source.getId());
+        assertThat(summary.contentSourceName()).isEqualTo("Incoming Tech Videos");
+        assertThat(summary.selectionPolicy()).isEqualTo(RobotSelectionPolicy.NEWEST_UNPROCESSED);
+        assertThat(summary.sourceAssetId()).isNull();
+    }
+
+    @Test
+    void rejectsContentSourceRobotWithoutSelectionPolicy() {
+        ContentSource source = new ContentSource(workspace, "Incoming Tech Videos", null, owner, NOW);
+        when(contentSources.findByWorkspaceAndId(workspace, source.getId())).thenReturn(Optional.of(source));
+
+        assertThatThrownBy(() -> service.create(user, new CreateRobotRequest(
+                "Dynamic Robot", null, RobotAutonomyMode.DRAFT_ONLY, RobotSourcePolicy.CONTENT_SOURCE, null,
+                source.getId(), null, null,
+                RobotCadenceType.MANUAL_ONLY, null, null, null)))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting("statusCode")
+                .isEqualTo(HttpStatus.BAD_REQUEST);
+    }
+
+    @Test
+    void rejectsContentSourceRobotFromAnotherWorkspace() {
+        UUID otherSourceId = UUID.randomUUID();
+        when(contentSources.findByWorkspaceAndId(workspace, otherSourceId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.create(user, new CreateRobotRequest(
+                "Dynamic Robot", null, RobotAutonomyMode.DRAFT_ONLY, RobotSourcePolicy.CONTENT_SOURCE, null,
+                otherSourceId, RobotSelectionPolicy.OLDEST_UNPROCESSED, null,
+                RobotCadenceType.MANUAL_ONLY, null, null, null)))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting("statusCode")
+                .isEqualTo(HttpStatus.NOT_FOUND);
     }
 
     @Test

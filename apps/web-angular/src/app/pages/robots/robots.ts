@@ -13,9 +13,13 @@ import {
   RobotAutonomyMode,
   RobotCadenceType,
   RobotRunSummary,
+  RobotSelectionPolicy,
+  RobotSourcePolicy,
   RobotSummary,
   RobotApprovalSummary,
 } from '../../core/robots/robot.models';
+import { ContentSourcesService } from '../../core/content-sources/content-sources.service';
+import { ContentSourceSummary } from '../../core/content-sources/content-source.models';
 
 type LoadState = 'loading' | 'ready' | 'error';
 
@@ -36,6 +40,7 @@ export class Robots implements OnInit, OnDestroy {
 
   protected readonly eligibleAssets = signal<MediaAssetSummary[]>([]);
   protected readonly socialAccounts = signal<SocialAccountSummary[]>([]);
+  protected readonly contentSources = signal<ContentSourceSummary[]>([]);
 
   protected readonly expandedRobots = signal<Record<string, boolean>>({});
   protected readonly runNowBusy = signal<Record<string, boolean>>({});
@@ -46,7 +51,10 @@ export class Robots implements OnInit, OnDestroy {
   protected readonly createName = signal('');
   protected readonly createDescription = signal('');
   protected readonly createAutonomyMode = signal<RobotAutonomyMode>('DRAFT_ONLY');
+  protected readonly createSourcePolicy = signal<RobotSourcePolicy>('EXISTING_ASSET');
   protected readonly createSourceAssetId = signal('');
+  protected readonly createContentSourceId = signal('');
+  protected readonly createSelectionPolicy = signal<RobotSelectionPolicy>('OLDEST_UNPROCESSED');
   protected readonly createTargetAccountId = signal('');
   protected readonly createCadenceType = signal<RobotCadenceType>('MANUAL_ONLY');
   protected readonly createCadenceIntervalHours = signal(24);
@@ -67,6 +75,7 @@ export class Robots implements OnInit, OnDestroy {
     private readonly approvalsService: RobotApprovalsService,
     private readonly assetsService: AssetsService,
     private readonly socialAccountsService: SocialAccountsService,
+    private readonly contentSourcesService: ContentSourcesService,
   ) {}
 
   ngOnInit(): void {
@@ -79,6 +88,11 @@ export class Robots implements OnInit, OnDestroy {
       .list()
       .pipe(catchError(() => EMPTY))
       .subscribe((accounts) => this.socialAccounts.set(accounts));
+
+    this.contentSourcesService
+      .list()
+      .pipe(catchError(() => EMPTY))
+      .subscribe((sources) => this.contentSources.set(sources));
 
     this.robotsSubscription = interval(5000)
       .pipe(
@@ -175,6 +189,25 @@ export class Robots implements OnInit, OnDestroy {
     return mode === 'AUTO_SCHEDULE' ? this.autoScheduleAccounts() : this.reviewOrDraftAccounts();
   }
 
+  protected sourcePolicyLabel(policy: RobotSourcePolicy): string {
+    return policy === 'EXISTING_ASSET' ? 'Fixed asset' : 'Content source';
+  }
+
+  protected selectionPolicyLabel(policy: RobotSelectionPolicy | null): string {
+    switch (policy) {
+      case 'OLDEST_UNPROCESSED':
+        return 'Oldest unprocessed';
+      case 'NEWEST_UNPROCESSED':
+        return 'Newest unprocessed';
+      default:
+        return '';
+    }
+  }
+
+  protected activeContentSources(): ContentSourceSummary[] {
+    return this.contentSources().filter((source) => source.status === 'ACTIVE');
+  }
+
   protected createRobot(): void {
     this.createError.set(null);
     const name = this.createName().trim();
@@ -182,8 +215,13 @@ export class Robots implements OnInit, OnDestroy {
       this.createError.set('Name is required.');
       return;
     }
-    if (!this.createSourceAssetId()) {
+    const sourcePolicy = this.createSourcePolicy();
+    if (sourcePolicy === 'EXISTING_ASSET' && !this.createSourceAssetId()) {
       this.createError.set('Choose a source asset.');
+      return;
+    }
+    if (sourcePolicy === 'CONTENT_SOURCE' && !this.createContentSourceId()) {
+      this.createError.set('Choose a content source.');
       return;
     }
     const mode = this.createAutonomyMode();
@@ -197,7 +235,10 @@ export class Robots implements OnInit, OnDestroy {
         name,
         description: this.createDescription().trim() || null,
         autonomyMode: mode,
-        sourceAssetId: this.createSourceAssetId(),
+        sourcePolicy,
+        sourceAssetId: sourcePolicy === 'EXISTING_ASSET' ? this.createSourceAssetId() : null,
+        contentSourceId: sourcePolicy === 'CONTENT_SOURCE' ? this.createContentSourceId() : null,
+        selectionPolicy: sourcePolicy === 'CONTENT_SOURCE' ? this.createSelectionPolicy() : null,
         targetSocialAccountId: this.requiresAccount(mode) ? this.createTargetAccountId() : null,
         cadenceType: this.createCadenceType(),
         cadenceIntervalHours: this.createCadenceType() === 'INTERVAL' ? this.createCadenceIntervalHours() : null,
@@ -237,6 +278,18 @@ export class Robots implements OnInit, OnDestroy {
     return latest ? this.runStatusLabel(latest.status) : 'No runs yet';
   }
 
+  /** Answers "why did this Robot choose this video?" for the run history view — never free-text reasoning, just the recorded policy/source/asset. */
+  protected runSourceLabel(run: RobotRunSummary): string {
+    if (run.contentSourceName) {
+      const policy = this.selectionPolicyLabel(run.selectionPolicy);
+      const asset = run.sourceAssetId ? run.sourceAssetId.slice(0, 8) : null;
+      return asset
+        ? `Selected by ${policy} from "${run.contentSourceName}" (${asset})`
+        : `${policy} from "${run.contentSourceName}": nothing eligible`;
+    }
+    return run.sourceAssetId ? `Fixed asset ${run.sourceAssetId.slice(0, 8)}` : '';
+  }
+
   protected runStatusLabel(status: RobotRunSummary['status']): string {
     switch (status) {
       case 'RUNNING':
@@ -252,6 +305,13 @@ export class Robots implements OnInit, OnDestroy {
       case 'CANCELLED':
         return 'Cancelled';
     }
+  }
+
+  protected robotSourceLabel(robot: RobotSummary): string {
+    if (robot.sourcePolicy === 'CONTENT_SOURCE') {
+      return `${robot.contentSourceName ?? robot.contentSourceId?.slice(0, 8) ?? 'Content source'} · ${this.selectionPolicyLabel(robot.selectionPolicy)}`;
+    }
+    return robot.sourceAssetFilename || (robot.sourceAssetId ? robot.sourceAssetId.slice(0, 8) : 'Fixed asset');
   }
 
   protected robotStatusLabel(status: RobotSummary['status']): string {

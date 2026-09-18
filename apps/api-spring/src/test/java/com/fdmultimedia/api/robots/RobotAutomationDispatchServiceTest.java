@@ -13,6 +13,7 @@ import com.fdmultimedia.api.assets.MediaImportMetadata;
 import com.fdmultimedia.api.assets.MediaInspectionMetadata;
 import com.fdmultimedia.api.auth.AuthService;
 import com.fdmultimedia.api.auth.security.AuthenticatedUser;
+import com.fdmultimedia.api.contentsources.ContentSource;
 import com.fdmultimedia.api.users.AppUser;
 import com.fdmultimedia.api.workspaces.Workspace;
 import com.fdmultimedia.api.workspaces.WorkspaceMembership;
@@ -36,8 +37,9 @@ class RobotAutomationDispatchServiceTest {
     private final RobotRepository robots = mock(RobotRepository.class);
     private final RobotRunRepository runs = mock(RobotRunRepository.class);
     private final RobotProperties properties = new RobotProperties();
+    private final RobotSourceSelectionService selectionService = mock(RobotSourceSelectionService.class);
     private final RobotAutomationDispatchService service = new RobotAutomationDispatchService(
-            authService, robots, runs, properties, Clock.fixed(NOW, ZoneOffset.UTC));
+            authService, robots, runs, properties, selectionService, Clock.fixed(NOW, ZoneOffset.UTC));
 
     private Workspace workspace;
     private AppUser owner;
@@ -174,6 +176,72 @@ class RobotAutomationDispatchServiceTest {
         assertThat(result).isTrue();
         assertThat(robot.getNextRunAt()).isEqualTo(NOW.plusSeconds(6 * 3600L));
         verify(runs, never()).save(any());
+    }
+
+    @Test
+    void createManualRunRejectsWhenContentSourceIsPaused() {
+        ContentSource source = pausedContentSource();
+        Robot robot = contentSourceRobot(source);
+        when(robots.findByWorkspaceAndIdForUpdate(workspace, robot.getId())).thenReturn(Optional.of(robot));
+
+        assertThatThrownBy(() -> service.createManualRun(user, robot.getId()))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting("reason")
+                .isEqualTo("CONTENT_SOURCE_UNAVAILABLE");
+        verify(runs, never()).save(any());
+    }
+
+    @Test
+    void createManualRunCreatesNoEligibleSourceRunWhenSelectionFindsNothing() {
+        ContentSource source = activeContentSource();
+        Robot robot = contentSourceRobot(source);
+        when(robots.findByWorkspaceAndIdForUpdate(workspace, robot.getId())).thenReturn(Optional.of(robot));
+        when(selectionService.selectNext(robot)).thenReturn(Optional.empty());
+
+        UUID runId = service.createManualRun(user, robot.getId());
+
+        assertThat(runId).isNotNull();
+        org.mockito.ArgumentCaptor<RobotRun> captor = org.mockito.ArgumentCaptor.forClass(RobotRun.class);
+        verify(runs).save(captor.capture());
+        RobotRun saved = captor.getValue();
+        assertThat(saved.getStatus()).isEqualTo(RobotRunStatus.FAILED);
+        assertThat(saved.getFailureCode()).isEqualTo("NO_ELIGIBLE_SOURCE");
+        assertThat(saved.getSourceAsset()).isNull();
+        assertThat(saved.getContentSourceId()).isEqualTo(source.getId());
+    }
+
+    @Test
+    void createManualRunSelectsAssetForContentSourceRobot() {
+        ContentSource source = activeContentSource();
+        Robot robot = contentSourceRobot(source);
+        MediaAsset selected = readyInspectedVideoAsset();
+        when(robots.findByWorkspaceAndIdForUpdate(workspace, robot.getId())).thenReturn(Optional.of(robot));
+        when(selectionService.selectNext(robot)).thenReturn(Optional.of(selected));
+
+        service.createManualRun(user, robot.getId());
+
+        org.mockito.ArgumentCaptor<RobotRun> captor = org.mockito.ArgumentCaptor.forClass(RobotRun.class);
+        verify(runs).save(captor.capture());
+        RobotRun saved = captor.getValue();
+        assertThat(saved.getStatus()).isEqualTo(RobotRunStatus.RUNNING);
+        assertThat(saved.getSourceAsset()).isEqualTo(selected);
+        assertThat(saved.getSelectionPolicy()).isEqualTo(RobotSelectionPolicy.OLDEST_UNPROCESSED);
+    }
+
+    private ContentSource activeContentSource() {
+        return new ContentSource(workspace, "Incoming Tech Videos", null, owner, NOW);
+    }
+
+    private ContentSource pausedContentSource() {
+        ContentSource source = activeContentSource();
+        source.pause(NOW);
+        return source;
+    }
+
+    private Robot contentSourceRobot(ContentSource source) {
+        return new Robot(workspace, "Robot", null, RobotAutonomyMode.DRAFT_ONLY,
+                RobotSourcePolicy.CONTENT_SOURCE, null, source, RobotSelectionPolicy.OLDEST_UNPROCESSED, null,
+                RobotCadenceType.MANUAL_ONLY, null, null, 1, owner, NOW);
     }
 
     private Robot draftOnlyRobot() {

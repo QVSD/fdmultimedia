@@ -11,6 +11,8 @@ import { ContentDraftsService } from '../../core/content-drafts/content-drafts.s
 import { ContentDraftSummary } from '../../core/content-drafts/content-draft.models';
 import { PublishSchedulesService } from '../../core/publish-schedules/publish-schedules.service';
 import { PublishScheduleSummary } from '../../core/publish-schedules/publish-schedule.models';
+import { ContentSourcesService } from '../../core/content-sources/content-sources.service';
+import { ContentSourceAssetSummary, ContentSourceSummary } from '../../core/content-sources/content-source.models';
 import { Content } from './content';
 
 describe('Content', () => {
@@ -35,6 +37,7 @@ describe('Content', () => {
     'list' | 'createFromAsset' | 'createFromHighlightCandidate' | 'update' | 'publish' | 'retryPreparation'
   >;
   let publishSchedulesService: Pick<PublishSchedulesService, 'list' | 'create' | 'cancel' | 'reschedule'>;
+  let contentSourcesService: Pick<ContentSourcesService, 'list' | 'create' | 'pause' | 'resume' | 'listAssets' | 'addAsset' | 'removeAsset'>;
 
   beforeEach(async () => {
     assetsService = {
@@ -76,6 +79,15 @@ describe('Content', () => {
       cancel: vi.fn().mockReturnValue(of(schedule('CANCELLED'))),
       reschedule: vi.fn().mockReturnValue(of(schedule('SCHEDULED'))),
     };
+    contentSourcesService = {
+      list: vi.fn().mockReturnValue(of([contentSource()])),
+      create: vi.fn().mockReturnValue(of(contentSource())),
+      pause: vi.fn().mockReturnValue(of({ ...contentSource(), status: 'PAUSED' as const })),
+      resume: vi.fn().mockReturnValue(of(contentSource())),
+      listAssets: vi.fn().mockReturnValue(of([])),
+      addAsset: vi.fn().mockReturnValue(of(contentSourceAsset())),
+      removeAsset: vi.fn().mockReturnValue(of(undefined)),
+    };
 
     await TestBed.configureTestingModule({
       imports: [Content],
@@ -85,6 +97,7 @@ describe('Content', () => {
         { provide: SocialAccountsService, useValue: socialAccountsService },
         { provide: ContentDraftsService, useValue: contentDraftsService },
         { provide: PublishSchedulesService, useValue: publishSchedulesService },
+        { provide: ContentSourcesService, useValue: contentSourcesService },
       ],
     }).compileComponents();
 
@@ -593,6 +606,126 @@ describe('Content', () => {
     expect(fixture.nativeElement.textContent).toContain('editing this draft afterward will not change an already-scheduled post');
   });
 
+  it('shows the empty content sources state', () => {
+    vi.mocked(contentSourcesService.list).mockReturnValue(of([]));
+    fixture = TestBed.createComponent(Content);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+    component['switchView']('sources');
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.textContent).toContain('No content sources yet.');
+  });
+
+  it('shows an error state when content sources fail to load', () => {
+    vi.mocked(contentSourcesService.list).mockReturnValue(throwError(() => new Error('Network failure')));
+    fixture = TestBed.createComponent(Content);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+    component['switchView']('sources');
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.textContent).toContain('Content sources could not be loaded.');
+  });
+
+  it('creates a content source', () => {
+    vi.mocked(contentSourcesService.list).mockReturnValue(of([]));
+    fixture = TestBed.createComponent(Content);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+    component['switchView']('sources');
+    component['sourceCreateName'].set('Incoming Tech Videos');
+
+    component['createContentSource']();
+
+    expect(contentSourcesService.create).toHaveBeenCalledWith({ name: 'Incoming Tech Videos', description: null });
+    expect(component['contentSources']()[0].name).toBe('Incoming Tech Videos');
+  });
+
+  it('rejects creating a content source without a name', () => {
+    fixture.detectChanges();
+    component['switchView']('sources');
+
+    component['createContentSource']();
+
+    expect(contentSourcesService.create).not.toHaveBeenCalled();
+    expect(component['sourceCreateError']()).toBe('Name is required.');
+  });
+
+  it('pauses and resumes a content source', () => {
+    fixture.detectChanges();
+    component['switchView']('sources');
+    const source = component['contentSources']()[0];
+
+    component['toggleSourcePause'](source);
+
+    expect(contentSourcesService.pause).toHaveBeenCalledWith(source.id);
+    expect(component['contentSources']()[0].status).toBe('PAUSED');
+
+    component['toggleSourcePause'](component['contentSources']()[0]);
+
+    expect(contentSourcesService.resume).toHaveBeenCalled();
+  });
+
+  it('expands a source, adds an asset, and shows its readiness label', () => {
+    vi.mocked(contentSourcesService.listAssets).mockReturnValue(of([contentSourceAsset()]));
+    fixture.detectChanges();
+    component['switchView']('sources');
+    const source = component['contentSources']()[0];
+
+    component['toggleSourceExpanded'](source);
+    fixture.detectChanges();
+
+    expect(contentSourcesService.listAssets).toHaveBeenCalledWith(source.id);
+    const text = fixture.nativeElement.textContent as string;
+    expect(text).toContain('video.mp4');
+    expect(text).toContain('Eligible');
+    expect(text).not.toContain('undefined');
+    expect(text).not.toContain('Invalid Date');
+  });
+
+  it('removes an asset from a content source', () => {
+    vi.mocked(contentSourcesService.listAssets).mockReturnValue(of([contentSourceAsset()]));
+    fixture.detectChanges();
+    component['switchView']('sources');
+    const source = component['contentSources']()[0];
+    component['toggleSourceExpanded'](source);
+    const member = component['sourceAssets']()[source.id][0];
+
+    component['removeAssetFromSource'](source, member);
+
+    expect(contentSourcesService.removeAsset).toHaveBeenCalledWith(source.id, member.mediaAssetId);
+    expect(component['sourceAssets']()[source.id]).toHaveLength(0);
+  });
+
+  it('surfaces an error when adding an asset to a source fails', () => {
+    vi.mocked(contentSourcesService.addAsset).mockReturnValue(throwError(() => new Error('boom')));
+    fixture.detectChanges();
+    component['switchView']('sources');
+    const source = component['contentSources']()[0];
+    component['toggleSourceExpanded'](source);
+    component['setSourceAddAsset'](source, 'READY-asset');
+
+    component['addAssetToSource'](source);
+
+    expect(component['sourceAddErrors']()[source.id]).toBe('Asset could not be added.');
+  });
+
+  it('offers "Add to Source" only for original assets and reports success', () => {
+    fixture.detectChanges();
+    const readyOriginal = component['assets']().find((item) => item.status === 'READY' && item.derivationType === 'ORIGINAL')!;
+    const clip = clipAsset();
+
+    expect(component['canAddToSource'](readyOriginal)).toBe(true);
+    expect(component['canAddToSource'](clip)).toBe(false);
+
+    component['setAddToSourceSelection'](readyOriginal, 'source-1');
+    component['addAssetToSelectedSource'](readyOriginal);
+
+    expect(contentSourcesService.addAsset).toHaveBeenCalledWith('source-1', readyOriginal.id);
+    expect(component['addToSourceDone']()[readyOriginal.id]).toBe(true);
+  });
+
   function asset(status: MediaAssetStatus): MediaAssetSummary {
     return {
       id: `${status}-asset`,
@@ -768,6 +901,32 @@ describe('Content', () => {
       failureCode: status === 'FAILED' ? 'MEDIA_UNAVAILABLE' : null,
       failureMessage: status === 'FAILED' ? 'Scheduled media is no longer ready' : null,
       dispatchDelayMs: status === 'DISPATCHED' ? 5000 : null,
+    };
+  }
+
+  function contentSource(): ContentSourceSummary {
+    return {
+      id: 'source-1',
+      name: 'Incoming Tech Videos',
+      description: null,
+      type: 'MEDIA_LIBRARY',
+      status: 'ACTIVE',
+      assetCount: 0,
+      createdAt: '2026-09-18T07:00:00Z',
+      updatedAt: '2026-09-18T07:00:00Z',
+    };
+  }
+
+  function contentSourceAsset(): ContentSourceAssetSummary {
+    return {
+      mediaAssetId: 'READY-asset',
+      originalFilename: 'video.mp4',
+      status: 'READY',
+      inspectionStatus: 'INSPECTED',
+      derivationType: 'ORIGINAL',
+      durationMs: 12_000,
+      hasVideo: true,
+      addedAt: '2026-09-18T07:05:00Z',
     };
   }
 

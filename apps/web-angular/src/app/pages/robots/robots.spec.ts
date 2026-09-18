@@ -8,6 +8,8 @@ import { SocialAccountSummary } from '../../core/social-accounts/social-account.
 import { RobotsService } from '../../core/robots/robots.service';
 import { RobotApprovalsService } from '../../core/robots/robot-approvals.service';
 import { RobotApprovalSummary, RobotRunSummary, RobotSummary } from '../../core/robots/robot.models';
+import { ContentSourcesService } from '../../core/content-sources/content-sources.service';
+import { ContentSourceSummary } from '../../core/content-sources/content-source.models';
 import { Robots } from './robots';
 
 describe('Robots', () => {
@@ -17,6 +19,7 @@ describe('Robots', () => {
   let approvalsService: Pick<RobotApprovalsService, 'list' | 'approve' | 'reject'>;
   let assetsService: Pick<AssetsService, 'list'>;
   let socialAccountsService: Pick<SocialAccountsService, 'list'>;
+  let contentSourcesService: Pick<ContentSourcesService, 'list'>;
 
   beforeEach(async () => {
     robotsService = {
@@ -40,6 +43,9 @@ describe('Robots', () => {
     socialAccountsService = {
       list: vi.fn().mockReturnValue(of([testAccount(), instagramAccount()])),
     };
+    contentSourcesService = {
+      list: vi.fn().mockReturnValue(of([contentSource()])),
+    };
 
     await TestBed.configureTestingModule({
       imports: [Robots],
@@ -48,6 +54,7 @@ describe('Robots', () => {
         { provide: RobotApprovalsService, useValue: approvalsService },
         { provide: AssetsService, useValue: assetsService },
         { provide: SocialAccountsService, useValue: socialAccountsService },
+        { provide: ContentSourcesService, useValue: contentSourcesService },
       ],
     }).compileComponents();
 
@@ -106,6 +113,65 @@ describe('Robots', () => {
 
     expect(robotsService.create).not.toHaveBeenCalled();
     expect(component['createError']()).toBe('Choose a target account for this autonomy mode.');
+  });
+
+  it('creates a CONTENT_SOURCE robot with a selection policy', () => {
+    fixture.detectChanges();
+    component['toggleCreateForm']();
+    component['createName'].set('Dynamic Robot');
+    component['createSourcePolicy'].set('CONTENT_SOURCE');
+    component['createContentSourceId'].set('source-1');
+    component['createSelectionPolicy'].set('NEWEST_UNPROCESSED');
+
+    component['createRobot']();
+
+    expect(robotsService.create).toHaveBeenCalledWith(expect.objectContaining({
+      name: 'Dynamic Robot',
+      sourcePolicy: 'CONTENT_SOURCE',
+      sourceAssetId: null,
+      contentSourceId: 'source-1',
+      selectionPolicy: 'NEWEST_UNPROCESSED',
+    }));
+  });
+
+  it('requires a content source when source type is CONTENT_SOURCE', () => {
+    fixture.detectChanges();
+    component['toggleCreateForm']();
+    component['createName'].set('Dynamic Robot');
+    component['createSourcePolicy'].set('CONTENT_SOURCE');
+
+    component['createRobot']();
+
+    expect(robotsService.create).not.toHaveBeenCalled();
+    expect(component['createError']()).toBe('Choose a content source.');
+  });
+
+  it('shows a human-readable selection policy label', () => {
+    fixture.detectChanges();
+
+    expect(component['selectionPolicyLabel']('OLDEST_UNPROCESSED')).toBe('Oldest unprocessed');
+    expect(component['selectionPolicyLabel']('NEWEST_UNPROCESSED')).toBe('Newest unprocessed');
+  });
+
+  it('shows the content source name and selection policy on a dynamic robot card', () => {
+    const dynamicRobot: RobotSummary = {
+      ...robot('ACTIVE', 'DRAFT_ONLY'),
+      sourcePolicy: 'CONTENT_SOURCE',
+      sourceAssetId: null,
+      sourceAssetFilename: null,
+      contentSourceId: 'source-1',
+      contentSourceName: 'Incoming Tech Videos',
+      selectionPolicy: 'OLDEST_UNPROCESSED',
+    };
+    vi.mocked(robotsService.list).mockReturnValue(of([dynamicRobot]));
+    fixture = TestBed.createComponent(Robots);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+
+    const text = fixture.nativeElement.textContent as string;
+    expect(text).toContain('Incoming Tech Videos');
+    expect(text).toContain('Oldest unprocessed');
+    expect(text).not.toContain('undefined');
   });
 
   it('allows REVIEW_REQUIRED to target an Instagram account', () => {
@@ -177,6 +243,31 @@ describe('Robots', () => {
     expect(text).not.toContain('Invalid Date');
   });
 
+  it('shows an understandable message for a NO_ELIGIBLE_SOURCE run', () => {
+    const emptySourceRun: RobotRunSummary = {
+      ...run('FAILED'),
+      sourceAssetId: null,
+      contentSourceId: 'source-1',
+      contentSourceName: 'Incoming Tech Videos',
+      selectionPolicy: 'OLDEST_UNPROCESSED',
+      failureCode: 'NO_ELIGIBLE_SOURCE',
+      failureMessage: 'No eligible unprocessed asset was found in this content source',
+    };
+    vi.mocked(robotsService.list).mockReturnValue(of([robot('ACTIVE', 'DRAFT_ONLY')]));
+    vi.mocked(robotsService.allRuns).mockReturnValue(of([emptySourceRun]));
+    fixture = TestBed.createComponent(Robots);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+    const theRobot = component['robots']()[0];
+    component['toggleExpanded'](theRobot);
+    fixture.detectChanges();
+
+    const text = fixture.nativeElement.textContent as string;
+    expect(text).toContain('NO_ELIGIBLE_SOURCE');
+    expect(text).toContain('nothing eligible');
+    expect(text).not.toContain('undefined');
+  });
+
   it('shows the empty approvals state', () => {
     fixture.detectChanges();
     component['switchView']('approvals');
@@ -233,8 +324,12 @@ describe('Robots', () => {
       status,
       autonomyMode,
       highlightStrategy: 'TOP_HIGHLIGHT',
+      sourcePolicy: 'EXISTING_ASSET',
       sourceAssetId: 'asset-1',
       sourceAssetFilename: 'video.mp4',
+      contentSourceId: null,
+      contentSourceName: null,
+      selectionPolicy: null,
       targetSocialAccountId: null,
       targetSocialAccountDisplayName: null,
       cadenceType: 'MANUAL_ONLY',
@@ -258,6 +353,9 @@ describe('Robots', () => {
       startedAt: '2026-09-18T08:05:00Z',
       finishedAt: status === 'RUNNING' ? null : '2026-09-18T08:06:00Z',
       sourceAssetId: 'asset-1',
+      contentSourceId: null,
+      contentSourceName: null,
+      selectionPolicy: null,
       highlightAnalysisId: null,
       highlightCandidateId: null,
       contentDraftId: null,
@@ -285,6 +383,19 @@ describe('Robots', () => {
       decidedAt: status === 'PENDING' ? null : '2026-09-18T08:15:00Z',
       decidedByUserId: status === 'PENDING' ? null : 'user-1',
       publishScheduleId: status === 'APPROVED' ? 'schedule-1' : null,
+    };
+  }
+
+  function contentSource(): ContentSourceSummary {
+    return {
+      id: 'source-1',
+      name: 'Incoming Tech Videos',
+      description: null,
+      type: 'MEDIA_LIBRARY',
+      status: 'ACTIVE',
+      assetCount: 3,
+      createdAt: '2026-09-18T07:00:00Z',
+      updatedAt: '2026-09-18T07:00:00Z',
     };
   }
 

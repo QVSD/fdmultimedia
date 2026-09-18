@@ -34,7 +34,106 @@
     <button type="button" [class.content__tab--active]="activeView() === 'schedule'" (click)="switchView('schedule')">
       Schedule @if (upcomingSchedules().length > 0) { ({{ upcomingSchedules().length }}) }
     </button>
+    <button type="button" [class.content__tab--active]="activeView() === 'sources'" (click)="switchView('sources')">Sources</button>
   </nav>
+
+  @if (activeView() === 'sources') {
+    <p class="content__lead">
+      A Content Source is a controlled pool of your own imported media a Robot may pick the next video from — never
+      a URL feed, never arbitrary web content.
+    </p>
+    <form class="content__form" (ngSubmit)="createContentSource()">
+      <label>
+        <span>Name</span>
+        <input type="text" maxlength="200" [ngModel]="sourceCreateName()" (ngModelChange)="sourceCreateName.set($event)" name="sourceName" required />
+      </label>
+      <label>
+        <span>Description</span>
+        <input type="text" maxlength="2000" [ngModel]="sourceCreateDescription()" (ngModelChange)="sourceCreateDescription.set($event)" name="sourceDescription" />
+      </label>
+      <button type="submit" [disabled]="sourceCreateBusy()">{{ sourceCreateBusy() ? 'Creating...' : 'Create Source' }}</button>
+      @if (sourceCreateError()) {
+        <p class="content__state content__state--error">{{ sourceCreateError() }}</p>
+      }
+    </form>
+
+    @switch (contentSourcesLoadState()) {
+      @case ('loading') {
+        <p class="content__state">Loading content sources...</p>
+      }
+      @case ('error') {
+        <p class="content__state content__state--error">Content sources could not be loaded.</p>
+      }
+      @case ('ready') {
+        @if (contentSources().length === 0) {
+          <p class="content__state">No content sources yet. Create one, then add existing imported assets to it.</p>
+        } @else {
+          <div class="asset-list">
+            @for (source of contentSources(); track source.id) {
+              <article class="asset-card">
+                <div class="asset-card__summary">
+                  <div class="asset-card__title">
+                    <h2>{{ source.name }}</h2>
+                    @if (source.description) {
+                      <p>{{ source.description }}</p>
+                    }
+                  </div>
+                  <div class="asset-card__meta">
+                    <span [class]="'content__badge content__badge--' + source.status.toLowerCase()">{{ source.status === 'ACTIVE' ? 'Active' : 'Paused' }}</span>
+                    <span>{{ source.assetCount }} asset(s)</span>
+                    <span>Created {{ source.createdAt | date:'medium' }}</span>
+                  </div>
+                  <div class="asset-card__actions">
+                    <button class="button-secondary" type="button" (click)="toggleSourcePause(source)" [disabled]="sourcePauseResumeBusy()[source.id]">
+                      {{ source.status === 'ACTIVE' ? 'Pause' : 'Resume' }}
+                    </button>
+                    <button class="button-secondary" type="button" (click)="toggleSourceExpanded(source)" [attr.aria-expanded]="isSourceExpanded(source)">
+                      {{ isSourceExpanded(source) ? 'Hide Assets' : 'Assets' }}
+                    </button>
+                  </div>
+                </div>
+
+                @if (isSourceExpanded(source)) {
+                  <div class="asset-card__details">
+                    <label>
+                      <span>Add an existing asset</span>
+                      <select [ngModel]="sourceAddAssetFor(source)" (ngModelChange)="setSourceAddAsset(source, $event)" name="addAsset-{{ source.id }}">
+                        <option value="" disabled>Choose an original asset</option>
+                        @for (candidate of candidateAssetsForSource(source); track candidate.id) {
+                          <option [value]="candidate.id">{{ candidate.originalFilename || candidate.id.slice(0, 8) }}</option>
+                        }
+                      </select>
+                      <button type="button" (click)="addAssetToSource(source)" [disabled]="sourceAddBusy()[source.id]">
+                        {{ sourceAddBusy()[source.id] ? 'Adding...' : 'Add' }}
+                      </button>
+                    </label>
+                    @if (sourceAddErrors()[source.id]) {
+                      <p class="content__state content__state--error">{{ sourceAddErrors()[source.id] }}</p>
+                    }
+
+                    @if (assetsInSource(source).length === 0) {
+                      <p class="content__muted">No assets in this source yet.</p>
+                    } @else {
+                      @for (member of assetsInSource(source); track member.mediaAssetId) {
+                        <div class="run-row">
+                          <span>{{ member.originalFilename || member.mediaAssetId.slice(0, 8) }}</span>
+                          <span class="content__muted">{{ sourceAssetReadinessLabel(member) }}</span>
+                          <span class="content__muted">Added {{ member.addedAt | date:'medium' }}</span>
+                          <button class="button-secondary" type="button" (click)="removeAssetFromSource(source, member)" [disabled]="isRemovingFromSource(source, member)">
+                            {{ isRemovingFromSource(source, member) ? 'Removing...' : 'Remove' }}
+                          </button>
+                        </div>
+                      }
+                    }
+                  </div>
+                }
+              </article>
+            }
+          </div>
+        }
+      }
+    }
+  }
 
   @if (activeView() === 'schedule') {
     <p class="content__muted">Times are shown in your local timezone ({{ localTimeZone }}).</p>
@@ -407,6 +506,26 @@
                   <span>{{ mediaSummary(asset) }}</span>
                   <span>{{ asset.createdAt | date:'medium' }}</span>
                 </div>
+
+                @if (canAddToSource(asset)) {
+                  <div class="asset-card__meta" aria-label="Add to content source">
+                    <select [ngModel]="addToSourceSelectionFor(asset)" (ngModelChange)="setAddToSourceSelection(asset, $event)" name="addToSource-{{ asset.id }}">
+                      <option value="" disabled>Choose a content source</option>
+                      @for (source of activeContentSources(); track source.id) {
+                        <option [value]="source.id">{{ source.name }}</option>
+                      }
+                    </select>
+                    <button class="button-secondary" type="button" (click)="addAssetToSelectedSource(asset)" [disabled]="addToSourceBusy()[asset.id] || activeContentSources().length === 0">
+                      {{ addToSourceBusy()[asset.id] ? 'Adding...' : 'Add to Source' }}
+                    </button>
+                    @if (addToSourceDone()[asset.id]) {
+                      <span class="content__muted">Added</span>
+                    }
+                    @if (addToSourceErrors()[asset.id]) {
+                      <span class="content__error">{{ addToSourceErrors()[asset.id] }}</span>
+                    }
+                  </div>
+                }
 
                 <div class="asset-card__actions" aria-label="Available actions">
                   @if (canTranscribe(asset)) {
