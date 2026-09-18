@@ -4,11 +4,15 @@
     <p class="settings__lead">Workspace and account settings are managed here.</p>
   </header>
 
+  @if (callbackBanner(); as banner) {
+    <p [class]="'settings__banner settings__banner--' + banner.kind">{{ banner.message }}</p>
+  }
+
   <section class="settings__panel">
     <h2>Social Accounts</h2>
     <p class="settings__muted">
-      Only the <strong>TEST</strong> platform is available right now. It never posts to a real platform &mdash; it exists
-      so the publishing pipeline can be exercised end-to-end before Instagram/TikTok support is added.
+      The <strong>TEST</strong> platform never posts to a real platform &mdash; it exists so the publishing pipeline can
+      be exercised end-to-end. Instagram uses Meta's official API and publishes for real once connected.
     </p>
 
     <form class="settings__form" (ngSubmit)="createAccount()">
@@ -35,6 +39,20 @@
       <p class="settings__error">{{ createError() }}</p>
     }
 
+    <div class="settings__instagram">
+      @if (instagramAvailable()) {
+        <button type="button" (click)="connectInstagram()" [disabled]="connectingInstagram()">
+          {{ connectingInstagram() ? 'Redirecting to Instagram...' : 'Connect Instagram' }}
+        </button>
+        <p class="settings__muted">Uses Instagram's official login &mdash; your credentials are never seen by this app.</p>
+      } @else {
+        <p class="settings__muted">Instagram is not configured on this server yet.</p>
+      }
+      @if (connectError()) {
+        <p class="settings__error">{{ connectError() }}</p>
+      }
+    </div>
+
     @switch (loadState()) {
       @case ('loading') {
         <p class="settings__muted">Loading social accounts...</p>
@@ -57,6 +75,19 @@
                   {{ statusLabel(account.status) }}
                 </span>
                 <span class="settings__muted">Added {{ account.createdAt | date:'medium' }}</span>
+                @if (account.platform === 'INSTAGRAM' && account.status === 'ACTIVE') {
+                  <button
+                    class="settings__disconnect"
+                    type="button"
+                    (click)="disconnect(account)"
+                    [disabled]="disconnecting()[account.id]"
+                  >
+                    {{ disconnecting()[account.id] ? 'Disconnecting...' : 'Disconnect' }}
+                  </button>
+                }
+                @if (disconnectErrors()[account.id]) {
+                  <span class="settings__error">{{ disconnectErrors()[account.id] }}</span>
+                }
               </article>
             }
           </div>

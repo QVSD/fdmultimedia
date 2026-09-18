@@ -67,6 +67,62 @@
   color: #991b1b;
 }
 
+.settings__banner {
+  margin: 0;
+  border-radius: 8px;
+  padding: 0.65rem 1rem;
+  font-weight: 600;
+}
+
+.settings__banner--success {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.settings__banner--error {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.settings__instagram {
+  display: grid;
+  gap: 0.35rem;
+  justify-items: start;
+
+  button {
+    min-height: 2.25rem;
+    border: 0;
+    border-radius: 6px;
+    padding: 0.45rem 0.9rem;
+    background: #111827;
+    color: #ffffff;
+    font-weight: 700;
+    cursor: pointer;
+
+    &:disabled {
+      cursor: wait;
+      opacity: 0.65;
+    }
+  }
+}
+
+.settings__disconnect {
+  margin-left: auto;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  padding: 0.3rem 0.6rem;
+  background: #ffffff;
+  color: #111827;
+  font-weight: 700;
+  font-size: 0.8rem;
+  cursor: pointer;
+
+  &:disabled {
+    cursor: wait;
+    opacity: 0.65;
+  }
+}
+
 .settings__accounts {
   display: grid;
   gap: 0.6rem;

@@ -427,8 +427,21 @@ export class Content implements OnInit, OnDestroy {
     return asset.status === 'READY' && asset.inspectionStatus === 'INSPECTED' && asset.hasVideo === true;
   }
 
-  protected testSocialAccounts(): SocialAccountSummary[] {
+  protected publishableSocialAccounts(): SocialAccountSummary[] {
     return this.socialAccounts().filter((account) => account.status === 'ACTIVE');
+  }
+
+  protected instagramEligibilityHint(asset: MediaAssetSummary): string | null {
+    if (asset.durationMs === null) {
+      return null;
+    }
+    if (asset.durationMs < 3000) {
+      return 'Instagram Reels require at least 3 seconds of video.';
+    }
+    if (asset.durationMs > 15 * 60 * 1000) {
+      return 'Instagram Reels must be 15 minutes or shorter.';
+    }
+    return null;
   }
 
   protected publicationsFor(asset: MediaAssetSummary): PublicationSummary[] {
@@ -436,7 +449,12 @@ export class Content implements OnInit, OnDestroy {
   }
 
   protected publishAccountFor(asset: MediaAssetSummary): string {
-    return this.publishAccountId()[asset.id] ?? this.testSocialAccounts()[0]?.id ?? '';
+    return this.publishAccountId()[asset.id] ?? this.publishableSocialAccounts()[0]?.id ?? '';
+  }
+
+  protected selectedAccountFor(asset: MediaAssetSummary): SocialAccountSummary | null {
+    const accountId = this.publishAccountFor(asset);
+    return this.publishableSocialAccounts().find((account) => account.id === accountId) ?? null;
   }
 
   protected setPublishAccount(asset: MediaAssetSummary, value: string): void {
@@ -474,7 +492,7 @@ export class Content implements OnInit, OnDestroy {
       return;
     }
     if (!socialAccountId) {
-      this.publishErrors.update((errors) => ({ ...errors, [asset.id]: 'Add a TEST social account first.' }));
+      this.publishErrors.update((errors) => ({ ...errors, [asset.id]: 'Connect a social account first.' }));
       return;
     }
     const caption = this.publishCaptionFor(asset).trim();

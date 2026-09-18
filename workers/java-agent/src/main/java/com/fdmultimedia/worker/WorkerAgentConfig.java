@@ -22,7 +22,8 @@ record WorkerAgentConfig(
         int maxActiveJobs,
         Path identityFile,
         Duration heartbeatInterval,
-        Duration jobPollInterval) {
+        Duration jobPollInterval,
+        boolean instagramPublishingEnabled) {
 
     static WorkerAgentConfig fromEnvironment() {
         return from(System.getenv());
@@ -67,6 +68,13 @@ record WorkerAgentConfig(
         if (jobPollInterval.isNegative() || jobPollInterval.isZero()) {
             throw new IllegalArgumentException("FDM_WORKER_JOB_POLL_SECONDS must be greater than zero");
         }
+        // Never technically requires credentials or local tooling (all
+        // Instagram HTTP calls happen backend-side) but is opt-in anyway: this
+        // machine never sees a token, but it DOES trigger real, external,
+        // side-effectful posts. Operators who want to restrict which physical
+        // workers can do that set this explicitly.
+        boolean instagramPublishingEnabled = Boolean.parseBoolean(
+                environment.getOrDefault("WORKER_INSTAGRAM_PUBLISHING_ENABLED", "false").trim());
         return new WorkerAgentConfig(
                 apiBaseUrl,
                 normalizeToken(token),
@@ -84,7 +92,8 @@ record WorkerAgentConfig(
                 maxActiveJobs,
                 identityFile,
                 heartbeatInterval,
-                jobPollInterval);
+                jobPollInterval,
+                instagramPublishingEnabled);
     }
 
     private static String required(Map<String, String> environment, String key) {

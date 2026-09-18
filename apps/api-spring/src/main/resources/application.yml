@@ -72,6 +72,19 @@ app:
     connect-timeout: ${MEDIA_CONNECT_TIMEOUT:10s}
     read-timeout: ${MEDIA_READ_TIMEOUT:30s}
     max-redirects: ${MEDIA_MAX_REDIRECTS:3}
+  social-credentials:
+    # Base64-encoded 32-byte AES-256 key. Blank by default: TEST-only
+    # deployments never need it. Required (and validated at startup) only
+    # when Instagram publishing is enabled. Never generated automatically.
+    encryption-key: ${SOCIAL_CREDENTIAL_ENCRYPTION_KEY:}
+  publishing:
+    instagram:
+      enabled: ${INSTAGRAM_ENABLED:false}
+      app-id: ${META_APP_ID:}
+      app-secret: ${META_APP_SECRET:}
+      oauth-redirect-uri: ${META_OAUTH_REDIRECT_URI:}
+      public-base-url: ${META_PUBLIC_BASE_URL:}
+      graph-api-version: ${META_GRAPH_API_VERSION:v25.0}
   storage:
     endpoint: ${STORAGE_ENDPOINT:http://localhost:9000}
     public-endpoint: ${STORAGE_PUBLIC_ENDPOINT:${STORAGE_ENDPOINT:http://localhost:9000}}

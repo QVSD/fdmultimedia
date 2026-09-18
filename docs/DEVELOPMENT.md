@@ -97,12 +97,36 @@ npm run build      # production build
 
 ## Adding a new backend module
 
-`accounts` and `publishing` are implemented as of Phase 10A; `robots`,
+`accounts` and `publishing` are implemented as of Phase 10A; `publishing.instagram`
+(the real Instagram Graph API integration) was added in Phase 10B. `robots`,
 `analytics`, and `revenue` remain placeholders. The package layout under
 `com.fdmultimedia.api` (`auth`, `users`, `workspaces`, `accounts`, `robots`,
 `assets`, `jobs`, `workers`, `publishing`, `analytics`, `revenue`, `shared`)
 is where new domain logic should land. See [ARCHITECTURE.md](ARCHITECTURE.md)
 for what each package is for.
+
+## Testing Instagram publishing locally
+
+TEST publishing needs no configuration at all — this is the default. To
+exercise the Instagram code paths locally without real Meta credentials:
+
+- **Unit/contract tests** (`InstagramGraphClientTest` and friends) already
+  point the client at a local fake HTTP server instead of Meta — run them
+  with the rest of the backend test suite, no setup required.
+- **A real end-to-end Instagram publish** additionally requires: a Meta App
+  Dashboard app with the Instagram Login product added and
+  `instagram_business_basic` + `instagram_business_content_publish`
+  permissions; a real Instagram Business/Creator account you control; a
+  publicly reachable HTTPS origin for `META_OAUTH_REDIRECT_URI` and
+  `META_PUBLIC_BASE_URL` (Meta's servers cannot reach `localhost`, and this
+  app will not weaken MinIO's privacy to work around that); and
+  `SOCIAL_CREDENTIAL_ENCRYPTION_KEY` set to a real generated key
+  (`openssl rand -base64 32`). Set `INSTAGRAM_ENABLED=true` and the other
+  `META_*` variables from `.env.example`, restart the stack, and the
+  Settings page will offer "Connect Instagram".
+- Without those prerequisites, leave `INSTAGRAM_ENABLED=false` (the
+  default) — the app starts normally, the Settings page shows "Instagram is
+  not configured on this server yet", and TEST publishing is unaffected.
 
 ## Database migrations
 
@@ -137,6 +161,17 @@ Worker import endpoints under `/api/worker-agent/assets/imports/**` are machine
 APIs. Workers request a presigned PUT URL, upload directly to private object
 storage, and report completion/failure. Permanent MinIO/S3 credentials remain
 server-side.
+
+`/api/social-accounts/**` and `/api/publications/**` are normal session APIs
+(CSRF-protected mutations, workspace-derived from the session), including the
+Instagram OAuth `POST /connect` start endpoint and the
+`POST /{accountId}/disconnect` endpoint. The one deliberate exception is
+`GET /api/public-media/{token}` — permitAll and outside CSRF, because a real
+external provider (Meta) must be able to fetch media over the public
+internet and cannot present a session cookie. See
+[ARCHITECTURE.md](ARCHITECTURE.md#instagram-publishing-phase-10b) for why
+that endpoint is still safe: the token is unguessable, publication-scoped,
+and stops working once the Publication leaves `PUBLISHING`.
 
 ## Working on the worker agent
 

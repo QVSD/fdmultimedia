@@ -37,6 +37,11 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.GET, "/api/health", "/api/actuator/health").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/auth/login").permitAll()
+                        // Meta's servers must be able to fetch publish media over the public
+                        // internet; they cannot present a session cookie or CSRF token. Every
+                        // other safety property is enforced by PublicMediaTokenService and
+                        // PublicMediaAccessService, not by authentication. GET only.
+                        .requestMatchers(HttpMethod.GET, "/api/public-media/**").permitAll()
                         .requestMatchers("/", "/login", "/index.html", "/favicon.ico", "/*.js", "/*.css").permitAll()
                         .requestMatchers("/api/worker-agent/**").hasRole("WORKER")
                         .requestMatchers("/api/assets/**").hasRole("USER")

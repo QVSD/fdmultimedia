@@ -10,12 +10,21 @@ fixed 1080x1920 social vertical derivatives through `CREATE_SOCIAL_VERTICAL`.
 It also advertises `ANALYZE_HIGHLIGHTS`, which uses a deterministic local
 analyzer and does not require FFmpeg, FFprobe, or any AI provider.
 When FFmpeg and a configured local Whisper-compatible CLI are available, it also
-advertises `TRANSCRIBE_MEDIA`. It always advertises `PUBLISH_MEDIA`, backed by a
-deterministic, explicitly non-real `TEST` publishing provider: it downloads the
-source asset through a short-lived presigned URL, verifies it is non-empty and
-(when provided) checksum-matches, and returns a deterministic
+advertises `TRANSCRIBE_MEDIA`. It always advertises `PUBLISH_MEDIA` for the
+`TEST` provider, backed by a deterministic, explicitly non-real publisher: it
+downloads the source asset through a short-lived presigned URL, verifies it is
+non-empty and (when provided) checksum-matches, and returns a deterministic
 `test-pub-<publicationId>` provider id. It never contacts Instagram, TikTok, or
-any other real platform.
+any other real platform for TEST.
+
+As of Phase 10B, the agent can also *drive* real Instagram publishing when the
+operator explicitly opts this specific machine in with
+`WORKER_INSTAGRAM_PUBLISHING_ENABLED=true` — but even then it never downloads
+source media or holds an Instagram credential. All credential-bearing Graph
+API calls stay on the backend; the worker only polls a narrow endpoint in a
+bounded loop and stops once the backend reports the publish finished or
+failed. See [ARCHITECTURE.md](../docs/ARCHITECTURE.md#instagram-publishing-phase-10b)
+for the full design and why the Worker was deliberately not given a token.
 
 The agent persists a random installation UUID locally and uses that as the
 machine identifier. It does not use MAC addresses or other hardware IDs.
@@ -216,15 +225,18 @@ commands/prompts. The API filters job claims by supported analyzer type and
 validates that returned semantic candidates are grounded in transcript segment
 timing before persistence.
 
-`PUBLISH_MEDIA` is always advertised; it requires no external tool and no
-configuration, backed by the deterministic `TestPublishingProvider`. The
-worker:
+`PUBLISH_MEDIA` for the `TEST` platform is always advertised; it requires no
+external tool and no configuration, backed by the deterministic
+`TestPublishingProvider`. `PublishMediaExecutor` branches on
+`authorization.platform()` after the initial authorization call:
+
+**TEST** (unchanged since Phase 10A):
 
 1. asks the API for publication authorization (asset, account, platform,
    caption, and a short-lived presigned GET URL for the source asset)
 2. downloads the source asset through that presigned URL with bounded
    streaming and a configured maximum size
-3. hands the downloaded file to the configured `PublishingProvider`
+3. hands the downloaded file to `TestPublishingProvider`
 4. reports the provider's result (`providerRequestId`, `providerPublicationId`,
    `publishedAt`) or a classified failure
 5. deletes the temporary file
@@ -235,9 +247,28 @@ checksum is supplied, that it matches, then returns
 `test-pub-<publicationId>` as the provider publication id. Because that id is
 derived only from the Publication id, retries of the same Publication are
 naturally idempotent: the same provider id is returned every time, matching
-the backend's idempotency contract. A real Instagram/TikTok
-`PublishingProvider` (Phase 10B+) would live behind the same interface without
-changing the Job/authorization/completion protocol.
+the backend's idempotency contract.
+
+**INSTAGRAM** (Phase 10B, only when `WORKER_INSTAGRAM_PUBLISHING_ENABLED=true`):
+
+1. asks the API for publication authorization — the response's `downloadUrl`
+   is `null` for this platform; the worker never downloads media itself
+2. repeatedly calls `POST /worker-agent/publications/{jobId}/instagram/drive`
+   (bounded: a bit longer than the backend's own default processing timeout,
+   as a last-resort safety net; the backend's own timeout normally fires
+   first), sleeping briefly between calls while the existing lease-renewal
+   thread keeps the job lease alive independently
+3. stops as soon as the response reports anything other than `IN_PROGRESS` —
+   the backend has already finalized the Job and Publication as part of that
+   same call, so there is nothing left for the worker to report
+
+Every actual Instagram Graph API call (container creation, status polling,
+the final publish call) happens inside that one backend endpoint, using a
+credential decrypted only on the backend for exactly that call. See
+[ARCHITECTURE.md](../docs/ARCHITECTURE.md#instagram-publishing-phase-10b) for
+the full protocol, the reconciliation strategy that avoids a duplicate real
+post on retry, and why this trust boundary was chosen over giving the Worker
+a token the way `TestPublishingProvider` has one.
 
 ## Telemetry and scheduling inputs
 

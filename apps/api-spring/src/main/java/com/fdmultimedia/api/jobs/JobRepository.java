@@ -43,6 +43,10 @@ public interface JobRepository extends JpaRepository<Job, UUID> {
                         type <> 'ANALYZE_HIGHLIGHTS'
                         OR COALESCE(payload ->> 'analyzerType', 'DETERMINISTIC_V1') IN (:highlightAnalyzers)
                       )
+                      AND (
+                        type <> 'PUBLISH_MEDIA'
+                        OR COALESCE(payload ->> 'provider', 'TEST') IN (:publishingProviders)
+                      )
                     ORDER BY queued_at ASC
                     LIMIT 1
                     FOR UPDATE SKIP LOCKED
@@ -51,7 +55,8 @@ public interface JobRepository extends JpaRepository<Job, UUID> {
     Optional<Job> findNextQueuedForUpdate(
             @Param("workspaceId") UUID workspaceId,
             @Param("types") List<String> types,
-            @Param("highlightAnalyzers") List<String> highlightAnalyzers);
+            @Param("highlightAnalyzers") List<String> highlightAnalyzers,
+            @Param("publishingProviders") List<String> publishingProviders);
 
     @Query(
             value = """
@@ -64,6 +69,10 @@ public interface JobRepository extends JpaRepository<Job, UUID> {
                         type <> 'ANALYZE_HIGHLIGHTS'
                         OR COALESCE(payload ->> 'analyzerType', 'DETERMINISTIC_V1') IN (:highlightAnalyzers)
                       )
+                      AND (
+                        type <> 'PUBLISH_MEDIA'
+                        OR COALESCE(payload ->> 'provider', 'TEST') IN (:publishingProviders)
+                      )
                     ORDER BY queued_at ASC, id ASC
                     LIMIT :limit
                     FOR UPDATE SKIP LOCKED
@@ -73,10 +82,11 @@ public interface JobRepository extends JpaRepository<Job, UUID> {
             @Param("workspaceId") UUID workspaceId,
             @Param("types") List<String> types,
             @Param("highlightAnalyzers") List<String> highlightAnalyzers,
+            @Param("publishingProviders") List<String> publishingProviders,
             @Param("limit") int limit);
 
     default Optional<Job> findNextQueuedForUpdate(UUID workspaceId, List<String> types) {
-        return findNextQueuedForUpdate(workspaceId, types, List.of("DETERMINISTIC_V1"));
+        return findNextQueuedForUpdate(workspaceId, types, List.of("DETERMINISTIC_V1"), List.of("TEST"));
     }
 
     @Query(

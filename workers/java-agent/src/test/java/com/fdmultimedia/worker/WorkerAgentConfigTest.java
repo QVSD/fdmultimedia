@@ -30,6 +30,23 @@ class WorkerAgentConfigTest {
         assertEquals(Path.of("worker-id.txt"), config.identityFile());
         assertEquals(Duration.ofSeconds(5), config.heartbeatInterval());
         assertEquals(Duration.ofSeconds(2), config.jobPollInterval());
+        assertEquals(false, config.instagramPublishingEnabled());
+    }
+
+    @Test
+    void instagramPublishingDisabledByDefault() {
+        WorkerAgentConfig config = WorkerAgentConfig.from(Map.of("FDM_WORKER_TOKEN", "credential.secret"));
+
+        assertEquals(false, config.instagramPublishingEnabled());
+    }
+
+    @Test
+    void instagramPublishingCanBeExplicitlyEnabled() {
+        WorkerAgentConfig config = WorkerAgentConfig.from(Map.of(
+                "FDM_WORKER_TOKEN", "credential.secret",
+                "WORKER_INSTAGRAM_PUBLISHING_ENABLED", "true"));
+
+        assertEquals(true, config.instagramPublishingEnabled());
     }
 
     @Test

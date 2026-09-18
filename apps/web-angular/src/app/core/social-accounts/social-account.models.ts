@@ -10,3 +10,8 @@ export interface SocialAccountSummary {
   createdAt: string;
   updatedAt: string;
 }
+
+export interface SocialPlatformAvailability {
+  TEST: boolean;
+  INSTAGRAM: boolean;
+}

@@ -69,13 +69,38 @@ public class SocialAccount {
             String displayName,
             AppUser createdByUser,
             Instant now) {
+        this(workspace, platform, displayName, null, createdByUser, now);
+    }
+
+    public SocialAccount(
+            Workspace workspace,
+            SocialPlatform platform,
+            String displayName,
+            String externalAccountId,
+            AppUser createdByUser,
+            Instant now) {
         this.id = UUID.randomUUID();
         this.workspace = workspace;
         this.platform = platform;
         this.displayName = displayName;
+        this.externalAccountId = externalAccountId;
         this.status = SocialAccountStatus.ACTIVE;
         this.createdByUser = createdByUser;
         this.createdAt = now;
+        this.updatedAt = now;
+    }
+
+    /** Reconnecting via OAuth after a disconnect, or refreshing a provider-reported display name. */
+    public void reactivate(String displayName, Instant now) {
+        this.status = SocialAccountStatus.ACTIVE;
+        if (displayName != null && !displayName.isBlank()) {
+            this.displayName = displayName;
+        }
+        this.updatedAt = now;
+    }
+
+    public void markDisconnected(Instant now) {
+        this.status = SocialAccountStatus.DISCONNECTED;
         this.updatedAt = now;
     }
 

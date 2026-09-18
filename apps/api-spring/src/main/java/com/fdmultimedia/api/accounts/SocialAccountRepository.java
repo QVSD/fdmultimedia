@@ -11,4 +11,6 @@ public interface SocialAccountRepository extends JpaRepository<SocialAccount, UU
     List<SocialAccount> findByWorkspaceOrderByCreatedAtDesc(Workspace workspace);
 
     Optional<SocialAccount> findByWorkspaceAndId(Workspace workspace, UUID id);
+
+    Optional<SocialAccount> findByWorkspaceAndPlatformAndExternalAccountId(Workspace workspace, SocialPlatform platform, String externalAccountId);
 }

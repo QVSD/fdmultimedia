@@ -3,7 +3,7 @@ import { Injectable } from '@angular/core';
 import { Observable } from 'rxjs';
 
 import { environment } from '../../../environments/environment';
-import { SocialAccountSummary } from './social-account.models';
+import { SocialAccountSummary, SocialPlatformAvailability } from './social-account.models';
 
 @Injectable({ providedIn: 'root' })
 export class SocialAccountsService {
@@ -17,6 +17,28 @@ export class SocialAccountsService {
     return this.http.post<SocialAccountSummary>(
       `${environment.apiBaseUrl}/social-accounts`,
       { platform, displayName },
+      { withCredentials: true },
+    );
+  }
+
+  disconnect(accountId: string): Observable<SocialAccountSummary> {
+    return this.http.post<SocialAccountSummary>(
+      `${environment.apiBaseUrl}/social-accounts/${accountId}/disconnect`,
+      {},
+      { withCredentials: true },
+    );
+  }
+
+  platforms(): Observable<SocialPlatformAvailability> {
+    return this.http.get<SocialPlatformAvailability>(`${environment.apiBaseUrl}/social-accounts/platforms`, {
+      withCredentials: true,
+    });
+  }
+
+  connectInstagram(): Observable<{ authorizationUrl: string }> {
+    return this.http.post<{ authorizationUrl: string }>(
+      `${environment.apiBaseUrl}/social-accounts/instagram/connect`,
+      {},
       { withCredentials: true },
     );
   }

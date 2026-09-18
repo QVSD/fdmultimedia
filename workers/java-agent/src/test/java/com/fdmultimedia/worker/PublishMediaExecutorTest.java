@@ -68,6 +68,69 @@ class PublishMediaExecutorTest {
     }
 
     @Test
+    void executeDrivesInstagramPublicationUntilPublishedWithoutDownloadingAnyMedia() throws Exception {
+        UUID publicationId = UUID.fromString("00000000-0000-4000-8000-000000000010");
+        java.util.concurrent.atomic.AtomicInteger driveCalls = new java.util.concurrent.atomic.AtomicInteger(0);
+        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/api/worker-agent/publications/00000000-0000-4000-8000-000000000001/authorization", exchange -> {
+            byte[] response = instagramAuthorizationJson(publicationId).getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.createContext("/api/worker-agent/publications/00000000-0000-4000-8000-000000000001/instagram/drive", exchange -> {
+            int call = driveCalls.incrementAndGet();
+            String status = call < 2 ? "IN_PROGRESS" : "PUBLISHED";
+            byte[] response = ("{\"status\":\"" + status + "\"}").getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        // No "/media" context is registered at all: if the executor ever tried
+        // to download source media for an Instagram job (it must not), this
+        // test would fail with a connection/404 error instead of passing.
+        server.start();
+        WorkerAgentClient client = new WorkerAgentClient(URI.create(baseUrl() + "/api/"), "WorkerToken credential.secret");
+        PublishMediaExecutor executor = new PublishMediaExecutor(new TestPublishingProvider());
+
+        executor.execute(
+                client,
+                new ClaimedJob(true, UUID.fromString("00000000-0000-4000-8000-000000000001"), "PUBLISH_MEDIA", java.util.Map.of(), 1, 30),
+                "machine-1");
+
+        assertTrue(driveCalls.get() >= 2);
+    }
+
+    @Test
+    void executeReturnsWhenInstagramDriveReportsFailed() throws Exception {
+        UUID publicationId = UUID.fromString("00000000-0000-4000-8000-000000000010");
+        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/api/worker-agent/publications/00000000-0000-4000-8000-000000000001/authorization", exchange -> {
+            byte[] response = instagramAuthorizationJson(publicationId).getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.createContext("/api/worker-agent/publications/00000000-0000-4000-8000-000000000001/instagram/drive", exchange -> {
+            byte[] response = "{\"status\":\"FAILED\"}".getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.start();
+        WorkerAgentClient client = new WorkerAgentClient(URI.create(baseUrl() + "/api/"), "WorkerToken credential.secret");
+        PublishMediaExecutor executor = new PublishMediaExecutor(new TestPublishingProvider());
+
+        // The backend already finalized the Job/Publication as part of the
+        // drive call; the Worker must simply return, not throw or report
+        // failure a second time.
+        executor.execute(
+                client,
+                new ClaimedJob(true, UUID.fromString("00000000-0000-4000-8000-000000000001"), "PUBLISH_MEDIA", java.util.Map.of(), 1, 30),
+                "machine-1");
+    }
+
+    @Test
     void enforcesMaximumDownloadSizeWhileStreaming() throws Exception {
         byte[] media = "too-large-media-blob".getBytes(StandardCharsets.UTF_8);
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
@@ -145,6 +208,20 @@ class PublishMediaExecutorTest {
                 + "\"platform\":\"TEST\","
                 + "\"caption\":\"Hello\","
                 + "\"downloadUrl\":\"" + baseUrl() + "/media\","
+                + "\"expectedChecksumSha256\":null,"
+                + "\"maxDownloadSizeBytes\":1000,"
+                + "\"connectTimeoutSeconds\":5,"
+                + "\"readTimeoutSeconds\":5,"
+                + "\"idempotencyKey\":\"" + publicationId + "\"}";
+    }
+
+    private String instagramAuthorizationJson(UUID publicationId) {
+        return "{\"publicationId\":\"" + publicationId + "\","
+                + "\"assetId\":\"00000000-0000-4000-8000-000000000020\","
+                + "\"socialAccountId\":\"00000000-0000-4000-8000-000000000030\","
+                + "\"platform\":\"INSTAGRAM\","
+                + "\"caption\":\"Hello\","
+                + "\"downloadUrl\":null,"
                 + "\"expectedChecksumSha256\":null,"
                 + "\"maxDownloadSizeBytes\":1000,"
                 + "\"connectTimeoutSeconds\":5,"

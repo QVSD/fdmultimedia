@@ -11,6 +11,8 @@ import static org.mockito.Mockito.when;
 
 import com.fdmultimedia.api.accounts.SocialAccount;
 import com.fdmultimedia.api.accounts.SocialAccountRepository;
+import com.fdmultimedia.api.accounts.SocialCredentialMetadata;
+import com.fdmultimedia.api.accounts.SocialCredentialService;
 import com.fdmultimedia.api.accounts.SocialPlatform;
 import com.fdmultimedia.api.assets.MediaAsset;
 import com.fdmultimedia.api.assets.MediaAssetRepository;
@@ -26,6 +28,8 @@ import com.fdmultimedia.api.jobs.JobService;
 import com.fdmultimedia.api.jobs.JobStatus;
 import com.fdmultimedia.api.jobs.JobSummary;
 import com.fdmultimedia.api.jobs.JobType;
+import com.fdmultimedia.api.publishing.instagram.InstagramProperties;
+import com.fdmultimedia.api.publishing.instagram.InstagramPublishingService;
 import com.fdmultimedia.api.users.AppUser;
 import com.fdmultimedia.api.workers.Worker;
 import com.fdmultimedia.api.workers.WorkerCredential;
@@ -60,8 +64,13 @@ class PublishingServiceTest {
     private final JobService jobService = mock(JobService.class);
     private final ObjectStorageService storage = mock(ObjectStorageService.class);
     private final PublishingProperties properties = new PublishingProperties();
+    private final PublishingEligibilityService eligibilityService = new PublishingEligibilityService();
+    private final SocialCredentialService credentialService = mock(SocialCredentialService.class);
+    private final InstagramPublishingService instagramPublishingService = mock(InstagramPublishingService.class);
+    private final InstagramProperties instagramProperties = new InstagramProperties();
     private final PublishingService service = new PublishingService(
             authService, assets, socialAccounts, publications, attempts, jobService, storage, properties,
+            eligibilityService, credentialService, instagramPublishingService, instagramProperties,
             Clock.fixed(NOW, ZoneOffset.UTC));
 
     private Workspace workspace;
@@ -353,6 +362,225 @@ class PublishingServiceTest {
         assertThat(summary.status()).isEqualTo(PublicationStatus.FAILED);
     }
 
+    @Test
+    void createPublicationJobPayloadRecordsProviderForCapabilityGating() {
+        MediaAsset asset = readyInspectedVideoAsset();
+        when(assets.findByWorkspaceAndId(workspace, asset.getId())).thenReturn(Optional.of(asset));
+        when(socialAccounts.findByWorkspaceAndId(workspace, account.getId())).thenReturn(Optional.of(account));
+        Job job = publishJob(asset.getId(), account.getId());
+        when(jobService.createForWorkspace(any(), any(JobCreateRequest.class))).thenReturn(jobSummary(job));
+        when(jobService.getJobEntityForWorkspace(workspace, job.getId())).thenReturn(Optional.of(job));
+
+        service.createPublication(user, asset.getId(), new CreatePublicationRequest(account.getId(), null));
+
+        ArgumentCaptor<JobCreateRequest> request = ArgumentCaptor.forClass(JobCreateRequest.class);
+        verify(jobService).createForWorkspace(any(), request.capture());
+        assertThat(request.getValue().payload().get("provider")).isEqualTo("TEST");
+    }
+
+    @Test
+    void instagramAccountRejectedWhenIntegrationNotConfigured() {
+        MediaAsset asset = readyInspectedVideoAsset();
+        SocialAccount instagramAccount = new SocialAccount(workspace, SocialPlatform.INSTAGRAM, "creator", "ig-user-1", owner, NOW);
+        when(assets.findByWorkspaceAndId(workspace, asset.getId())).thenReturn(Optional.of(asset));
+        when(socialAccounts.findByWorkspaceAndId(workspace, instagramAccount.getId())).thenReturn(Optional.of(instagramAccount));
+        instagramProperties.setEnabled(false);
+
+        assertThatThrownBy(() -> service.createPublication(user, asset.getId(), new CreatePublicationRequest(instagramAccount.getId(), null)))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting("statusCode")
+                .isEqualTo(HttpStatus.CONFLICT);
+    }
+
+    @Test
+    void instagramAccountRejectedWithoutStoredCredential() {
+        MediaAsset asset = readyInspectedVideoAsset();
+        SocialAccount instagramAccount = new SocialAccount(workspace, SocialPlatform.INSTAGRAM, "creator", "ig-user-1", owner, NOW);
+        when(assets.findByWorkspaceAndId(workspace, asset.getId())).thenReturn(Optional.of(asset));
+        when(socialAccounts.findByWorkspaceAndId(workspace, instagramAccount.getId())).thenReturn(Optional.of(instagramAccount));
+        configureInstagram();
+        when(credentialService.metadataFor(instagramAccount)).thenReturn(SocialCredentialMetadata.absent());
+
+        assertThatThrownBy(() -> service.createPublication(user, asset.getId(), new CreatePublicationRequest(instagramAccount.getId(), null)))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting("statusCode")
+                .isEqualTo(HttpStatus.CONFLICT);
+    }
+
+    @Test
+    void instagramAccountRejectedWithExpiredCredential() {
+        MediaAsset asset = readyInspectedVideoAsset();
+        SocialAccount instagramAccount = new SocialAccount(workspace, SocialPlatform.INSTAGRAM, "creator", "ig-user-1", owner, NOW);
+        when(assets.findByWorkspaceAndId(workspace, asset.getId())).thenReturn(Optional.of(asset));
+        when(socialAccounts.findByWorkspaceAndId(workspace, instagramAccount.getId())).thenReturn(Optional.of(instagramAccount));
+        configureInstagram();
+        when(credentialService.metadataFor(instagramAccount))
+                .thenReturn(new SocialCredentialMetadata(true, NOW.minusSeconds(1), true, "scopes", NOW.minusSeconds(100)));
+
+        assertThatThrownBy(() -> service.createPublication(user, asset.getId(), new CreatePublicationRequest(instagramAccount.getId(), null)))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting("statusCode")
+                .isEqualTo(HttpStatus.CONFLICT);
+    }
+
+    @Test
+    void instagramAccountAcceptedWithActiveCredentialAndConfiguredIntegration() {
+        MediaAsset asset = readyInspectedVideoAsset();
+        SocialAccount instagramAccount = new SocialAccount(workspace, SocialPlatform.INSTAGRAM, "creator", "ig-user-1", owner, NOW);
+        when(assets.findByWorkspaceAndId(workspace, asset.getId())).thenReturn(Optional.of(asset));
+        when(socialAccounts.findByWorkspaceAndId(workspace, instagramAccount.getId())).thenReturn(Optional.of(instagramAccount));
+        configureInstagram();
+        when(credentialService.metadataFor(instagramAccount))
+                .thenReturn(new SocialCredentialMetadata(true, NOW.plusSeconds(3600), false, "scopes", NOW));
+        Job job = publishJob(asset.getId(), instagramAccount.getId());
+        when(jobService.createForWorkspace(any(), any(JobCreateRequest.class))).thenReturn(jobSummary(job));
+        when(jobService.getJobEntityForWorkspace(workspace, job.getId())).thenReturn(Optional.of(job));
+
+        PublicationSummary summary = service.createPublication(user, asset.getId(), new CreatePublicationRequest(instagramAccount.getId(), null));
+
+        assertThat(summary.platform()).isEqualTo(SocialPlatform.INSTAGRAM);
+    }
+
+    @Test
+    void driveInstagramPublicationKeepsPollingWhileInProgress() {
+        MediaAsset asset = readyInspectedVideoAsset();
+        SocialAccount instagramAccount = new SocialAccount(workspace, SocialPlatform.INSTAGRAM, "creator", "ig-user-1", owner, NOW);
+        Publication publication = new Publication(workspace, asset, instagramAccount, null, owner, NOW.minusSeconds(5));
+        Job job = publishJob(publication.getId(), asset.getId(), instagramAccount.getId());
+        job.claim(worker, NOW.minusSeconds(3), NOW.plusSeconds(30));
+        job.start(worker, NOW.minusSeconds(2), NOW.plusSeconds(30));
+        publication.attachJob(job, NOW.minusSeconds(5));
+        when(jobService.requireJobForWorkerWorkspace(worker, job.getId())).thenReturn(job);
+        when(publications.findByJobId(job.getId())).thenReturn(Optional.of(publication));
+        when(instagramPublishingService.drive(publication)).thenReturn(
+                com.fdmultimedia.api.publishing.instagram.InstagramDriveOutcome.inProgress());
+
+        PublicationDriveResponse response = service.driveInstagramPublication(workerPrincipal, job.getId(), "machine-1");
+
+        assertThat(response.status()).isEqualTo("IN_PROGRESS");
+        assertThat(publication.getStatus()).isEqualTo(PublicationStatus.PUBLISHING);
+        assertThat(job.getStatus()).isEqualTo(JobStatus.RUNNING);
+    }
+
+    @Test
+    void driveInstagramPublicationCompletesJobAndPublicationOnPublished() {
+        MediaAsset asset = readyInspectedVideoAsset();
+        SocialAccount instagramAccount = new SocialAccount(workspace, SocialPlatform.INSTAGRAM, "creator", "ig-user-1", owner, NOW);
+        Publication publication = new Publication(workspace, asset, instagramAccount, null, owner, NOW.minusSeconds(5));
+        Job job = publishJob(publication.getId(), asset.getId(), instagramAccount.getId());
+        job.claim(worker, NOW.minusSeconds(3), NOW.plusSeconds(30));
+        job.start(worker, NOW.minusSeconds(2), NOW.plusSeconds(30));
+        publication.attachJob(job, NOW.minusSeconds(5));
+        publication.markPublishing(NOW.minusSeconds(1));
+        when(jobService.requireJobForWorkerWorkspace(worker, job.getId())).thenReturn(job);
+        when(publications.findByJobId(job.getId())).thenReturn(Optional.of(publication));
+        when(instagramPublishingService.drive(publication)).thenReturn(
+                com.fdmultimedia.api.publishing.instagram.InstagramDriveOutcome.published("container-1", "media-1"));
+
+        PublicationDriveResponse response = service.driveInstagramPublication(workerPrincipal, job.getId(), "machine-1");
+
+        assertThat(response.status()).isEqualTo("PUBLISHED");
+        assertThat(publication.getStatus()).isEqualTo(PublicationStatus.PUBLISHED);
+        assertThat(publication.getProviderPublicationId()).isEqualTo("media-1");
+        assertThat(job.getStatus()).isEqualTo(JobStatus.SUCCEEDED);
+        ArgumentCaptor<PublishingAttempt> attemptCaptor = ArgumentCaptor.forClass(PublishingAttempt.class);
+        verify(attempts).save(attemptCaptor.capture());
+        assertThat(attemptCaptor.getValue().getOutcome()).isEqualTo(PublishingAttemptOutcome.SUCCEEDED);
+    }
+
+    @Test
+    void driveInstagramPublicationHandlesPublishedWithUnknownMediaIdWithoutError() {
+        MediaAsset asset = readyInspectedVideoAsset();
+        SocialAccount instagramAccount = new SocialAccount(workspace, SocialPlatform.INSTAGRAM, "creator", "ig-user-1", owner, NOW);
+        Publication publication = new Publication(workspace, asset, instagramAccount, null, owner, NOW.minusSeconds(5));
+        Job job = publishJob(publication.getId(), asset.getId(), instagramAccount.getId());
+        job.claim(worker, NOW.minusSeconds(3), NOW.plusSeconds(30));
+        job.start(worker, NOW.minusSeconds(2), NOW.plusSeconds(30));
+        publication.attachJob(job, NOW.minusSeconds(5));
+        publication.markPublishing(NOW.minusSeconds(1));
+        when(jobService.requireJobForWorkerWorkspace(worker, job.getId())).thenReturn(job);
+        when(publications.findByJobId(job.getId())).thenReturn(Optional.of(publication));
+        when(instagramPublishingService.drive(publication)).thenReturn(
+                com.fdmultimedia.api.publishing.instagram.InstagramDriveOutcome.published("container-1", null));
+
+        PublicationDriveResponse response = service.driveInstagramPublication(workerPrincipal, job.getId(), "machine-1");
+
+        assertThat(response.status()).isEqualTo("PUBLISHED");
+        assertThat(publication.getStatus()).isEqualTo(PublicationStatus.PUBLISHED);
+        assertThat(publication.getProviderPublicationId()).isNull();
+        assertThat(job.getStatus()).isEqualTo(JobStatus.SUCCEEDED);
+    }
+
+    @Test
+    void driveInstagramPublicationTerminalFailureMarksPublicationFailed() {
+        MediaAsset asset = readyInspectedVideoAsset();
+        SocialAccount instagramAccount = new SocialAccount(workspace, SocialPlatform.INSTAGRAM, "creator", "ig-user-1", owner, NOW);
+        Publication publication = new Publication(workspace, asset, instagramAccount, null, owner, NOW.minusSeconds(5));
+        Job job = publishJob(publication.getId(), asset.getId(), instagramAccount.getId());
+        job.claim(worker, NOW.minusSeconds(3), NOW.plusSeconds(30));
+        job.start(worker, NOW.minusSeconds(2), NOW.plusSeconds(30));
+        publication.attachJob(job, NOW.minusSeconds(5));
+        publication.markPublishing(NOW.minusSeconds(1));
+        when(jobService.requireJobForWorkerWorkspace(worker, job.getId())).thenReturn(job);
+        when(publications.findByJobId(job.getId())).thenReturn(Optional.of(publication));
+        when(instagramPublishingService.drive(publication)).thenReturn(
+                com.fdmultimedia.api.publishing.instagram.InstagramDriveOutcome.failure("INSTAGRAM_AUTH_EXPIRED", "expired", true));
+
+        PublicationDriveResponse response = service.driveInstagramPublication(workerPrincipal, job.getId(), "machine-1");
+
+        assertThat(response.status()).isEqualTo("FAILED");
+        assertThat(publication.getStatus()).isEqualTo(PublicationStatus.FAILED);
+        assertThat(publication.getFailureCode()).isEqualTo("INSTAGRAM_AUTH_EXPIRED");
+        assertThat(job.getStatus()).isEqualTo(JobStatus.FAILED);
+    }
+
+    @Test
+    void driveInstagramPublicationRetryableFailureRequeuesJobAndPublication() {
+        MediaAsset asset = readyInspectedVideoAsset();
+        SocialAccount instagramAccount = new SocialAccount(workspace, SocialPlatform.INSTAGRAM, "creator", "ig-user-1", owner, NOW);
+        Publication publication = new Publication(workspace, asset, instagramAccount, null, owner, NOW.minusSeconds(5));
+        Job job = publishJob(publication.getId(), asset.getId(), instagramAccount.getId());
+        job.claim(worker, NOW.minusSeconds(3), NOW.plusSeconds(30));
+        job.start(worker, NOW.minusSeconds(2), NOW.plusSeconds(30));
+        publication.attachJob(job, NOW.minusSeconds(5));
+        publication.markPublishing(NOW.minusSeconds(1));
+        when(jobService.requireJobForWorkerWorkspace(worker, job.getId())).thenReturn(job);
+        when(publications.findByJobId(job.getId())).thenReturn(Optional.of(publication));
+        when(instagramPublishingService.drive(publication)).thenReturn(
+                com.fdmultimedia.api.publishing.instagram.InstagramDriveOutcome.failure("INSTAGRAM_RATE_LIMITED", "rate limited", false));
+
+        PublicationDriveResponse response = service.driveInstagramPublication(workerPrincipal, job.getId(), "machine-1");
+
+        assertThat(response.status()).isEqualTo("FAILED");
+        assertThat(publication.getStatus()).isEqualTo(PublicationStatus.PENDING);
+        assertThat(job.getStatus()).isEqualTo(JobStatus.QUEUED);
+    }
+
+    @Test
+    void driveInstagramPublicationRejectsTestPlatformJobs() {
+        MediaAsset asset = readyInspectedVideoAsset();
+        Publication publication = new Publication(workspace, asset, account, null, owner, NOW.minusSeconds(5));
+        Job job = publishJob(publication.getId(), asset.getId(), account.getId());
+        job.claim(worker, NOW.minusSeconds(3), NOW.plusSeconds(30));
+        job.start(worker, NOW.minusSeconds(2), NOW.plusSeconds(30));
+        publication.attachJob(job, NOW.minusSeconds(5));
+        when(jobService.requireJobForWorkerWorkspace(worker, job.getId())).thenReturn(job);
+        when(publications.findByJobId(job.getId())).thenReturn(Optional.of(publication));
+
+        assertThatThrownBy(() -> service.driveInstagramPublication(workerPrincipal, job.getId(), "machine-1"))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting("statusCode")
+                .isEqualTo(HttpStatus.CONFLICT);
+    }
+
+    private void configureInstagram() {
+        instagramProperties.setEnabled(true);
+        instagramProperties.setAppId("app-id");
+        instagramProperties.setAppSecret("app-secret");
+        instagramProperties.setOauthRedirectUri("https://app.example.test/api/social-accounts/instagram/callback");
+        instagramProperties.setPublicBaseUrl("https://app.example.test");
+    }
+
     private MediaAsset readyInspectedVideoAsset() {
         return readyInspectedAsset(true, true);
     }
@@ -382,6 +610,15 @@ class PublishingServiceTest {
 
     private Job publishJob(UUID assetId, UUID socialAccountId) {
         return new Job(workspace, JobType.PUBLISH_MEDIA, publishPayload(assetId, socialAccountId), 3, NOW);
+    }
+
+    private Job publishJob(UUID publicationId, UUID assetId, UUID socialAccountId) {
+        Map<String, Object> payload = new java.util.LinkedHashMap<>();
+        payload.put("publicationId", publicationId.toString());
+        payload.put("assetId", assetId.toString());
+        payload.put("socialAccountId", socialAccountId.toString());
+        payload.put("provider", "INSTAGRAM");
+        return new Job(workspace, JobType.PUBLISH_MEDIA, payload, 3, NOW);
     }
 
     private Map<String, Object> publishPayload(UUID assetId, UUID socialAccountId) {

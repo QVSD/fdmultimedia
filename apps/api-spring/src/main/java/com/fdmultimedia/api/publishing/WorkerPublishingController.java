@@ -44,4 +44,13 @@ public class WorkerPublishingController {
             @Valid @RequestBody WorkerPublicationFailureRequest request) {
         return publishingService.failWorkerPublication((WorkerPrincipal) authentication.getPrincipal(), jobId, request);
     }
+
+    @PostMapping("/{jobId}/instagram/drive")
+    public PublicationDriveResponse driveInstagram(
+            Authentication authentication,
+            @PathVariable UUID jobId,
+            @Valid @RequestBody WorkerPublicationAuthorizationRequest request) {
+        return publishingService.driveInstagramPublication(
+                (WorkerPrincipal) authentication.getPrincipal(), jobId, request.machineIdentifier());
+    }
 }

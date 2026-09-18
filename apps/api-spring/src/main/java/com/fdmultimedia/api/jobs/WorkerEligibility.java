@@ -4,5 +4,6 @@ import java.util.List;
 
 public record WorkerEligibility(
         List<String> supportedJobTypes,
-        List<String> supportedHighlightAnalyzers) {
+        List<String> supportedHighlightAnalyzers,
+        List<String> supportedPublishingProviders) {
 }

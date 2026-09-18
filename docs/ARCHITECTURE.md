@@ -43,6 +43,25 @@ below for the full design. Out of scope for this phase: real Instagram/TikTok
 APIs, browser automation, unofficial platform APIs, scheduled/recurring
 posting, AI-generated captions, and multi-platform fan-out.
 
+## Phase 10B scope
+
+Phase 10B connects the very first real provider — Instagram — to the Phase
+10A foundation, using only Meta's official "Instagram API with Instagram
+Login" and Content Publishing API (video/Reels). TEST keeps working
+unchanged. See
+[Instagram publishing (Phase 10B)](#instagram-publishing-phase-10b) below for
+the full design: OAuth start/callback with a hashed, single-use, expiring
+state; AES-256-GCM credential encryption with no plaintext fallback; a
+credential trust boundary that never hands the Worker a token (all Graph API
+calls stay backend-side; the Worker only drives a bounded poll loop);
+provider-aware Worker capability gating enforced as a hard gate in the Job
+claim SQL; unguessable, publication-scoped, self-expiring public media
+delivery tokens that never make the MinIO bucket public; and
+container-id-based reconciliation to avoid duplicate real posts on retry.
+Out of scope for this phase: TikTok, YouTube, Facebook publishing, Stories,
+carousels, image posts, engagement automation, scheduled/recurring
+publishing, and AI-generated captions/hashtags.
+
 ## High-level architecture
 
 ```
@@ -80,7 +99,10 @@ Local Laptop       Cloud Worker
   `INSPECT_MEDIA` when FFprobe is available, FFmpeg derivatives when FFmpeg is
   available, deterministic highlight analysis, media transcription when a
   configured local transcription provider is available, and `PUBLISH_MEDIA`
-  through the deterministic, non-real `TEST` publishing provider.
+  through the deterministic, non-real `TEST` publishing provider. A Worker
+  also drives real Instagram publishing when explicitly opted in via
+  `WORKER_INSTAGRAM_PUBLISHING_ENABLED` — it never holds an Instagram
+  credential either way; see Phase 10B below.
 
 ## Request flow
 
@@ -148,12 +170,13 @@ com.fdmultimedia.api
 ├── auth          — session authentication, bootstrap, and auth DTOs
 ├── users         — user accounts and email normalization
 ├── workspaces    — workspaces / tenants and membership authorization
-├── accounts      — connected external (social) accounts
+├── accounts      — connected external (social) accounts, credentials, OAuth state
 ├── robots        — logical content-automation entities
-├── assets        — media assets
+├── assets        — media assets, public-media token delivery
 ├── jobs          — distributed processing jobs
 ├── workers       — worker registration and management
 ├── publishing    — publishing to external platforms
+│   └── instagram — real Instagram Graph API integration (Phase 10B)
 ├── analytics     — analytics and reporting
 ├── revenue       — revenue tracking and attribution
 └── shared        — cross-cutting concerns (web, config, health)
@@ -575,6 +598,298 @@ the Publication back to `PENDING` (attempts remain) or `FAILED` (attempts
 exhausted), implemented directly against `PublicationRepository` — `JobService`
 never depends on `PublishingService`, only on its repository, to avoid a
 circular bean dependency.
+
+## Instagram publishing (Phase 10B)
+
+Phase 10B adds the first real `PublishingProvider`-equivalent — Instagram —
+on top of the Phase 10A foundation above, without redesigning Publication,
+PublishingAttempt, PUBLISH_MEDIA, the distributed Job architecture, Worker
+ownership, scheduling, execution metrics, asset authorization, or private
+MinIO. TEST keeps working exactly as before.
+
+### Official API surface and authentication model
+
+Verified against developers.facebook.com in September 2026, before writing
+any provider code. Meta currently supports two OAuth flows for Instagram; the
+platform uses **Instagram API with Instagram Login** ("Business Login for
+Instagram"), Meta's currently recommended flow for new integrations, because
+it needs no linked Facebook Page and no Facebook app review surface — only
+Instagram-specific permissions.
+
+- **Supported account types**: Instagram **Business** or **Creator** only.
+  Personal accounts cannot use the Content Publishing API at all; a personal
+  account must be converted first, entirely outside this app.
+- **Scopes**: `instagram_business_basic` and `instagram_business_content_publish`,
+  each requiring separate Meta App Review before real accounts outside the
+  developer's own can be published to.
+- **API version**: `v25.0`, configured via `META_GRAPH_API_VERSION` rather
+  than hardcoded, and never influenced by browser input.
+- **Authorize URL**: `https://www.instagram.com/oauth/authorize`
+- **Code exchange** (server-side only, needs the app secret):
+  `POST https://api.instagram.com/oauth/access_token` → short-lived token
+  (~1 hour), response shaped as `{"data":[{"access_token":...,"user_id":...}]}`.
+- **Long-lived token exchange**: `GET https://graph.instagram.com/access_token?grant_type=ig_exchange_token`
+  → 60-day token.
+- **Refresh**: `GET https://graph.instagram.com/refresh_access_token?grant_type=ig_refresh_token`,
+  valid only once the current token is at least 24 hours old; refreshing
+  earlier silently returns the same token. Once a token is fully expired,
+  no refresh is possible — the user must reconnect from scratch.
+- **Account discovery**: the Instagram Login flow's token exchange itself
+  scopes access to exactly the one account the user authorized; this app
+  calls `GET /{ig-user-id}?fields=id,username` with `me` as the id to read
+  that account's profile. Meta's current docs do not publish a separate
+  "list every account this token can access" endpoint for this flow — a
+  documented research gap, not a confirmed absence — which is also *why*
+  Phase 10B never needed a multi-account selection UI: one OAuth grant
+  yields exactly one account.
+- **Publishing** (video/Reels only in this phase): create a container
+  (`POST /{ig-user-id}/media` with `media_type=REELS`, `video_url`,
+  `caption`), poll it (`GET /{container-id}?fields=status_code`, values
+  `IN_PROGRESS`/`FINISHED`/`ERROR`/`EXPIRED`/`PUBLISHED`), then publish
+  (`POST /{ig-user-id}/media_publish` with `creation_id`).
+- **Media URL requirement**: confirmed — Meta's servers fetch the video by
+  URL server-side ("we cURL it"); there is no direct-upload alternative for
+  this flow. The URL must be publicly reachable.
+- **Rate limits**: the content-publishing overview page and the
+  `content_publishing_limit` reference page disagree on the numeric quota
+  (100 vs 50 posts/24h) — this app never hardcodes either number and instead
+  classifies live 4xx throttle responses (error codes 4/17/32/341, or HTTP
+  429) as retryable.
+- **Revocation**: Meta exposes `DELETE /{user-id}/permissions/{permission}`
+  (Graph API generally), but nothing scoped specifically to this flow's
+  tokens is documented as callable from here with confidence; disconnect
+  therefore removes our own stored credential copy (see below) rather than
+  asserting a remote revocation occurred.
+
+### Credential boundary
+
+Phase 10A deliberately shipped `SocialAccount` with no credential columns.
+Phase 10B adds exactly the boundary it promised:
+
+- **`social_account_credentials`** (one row per `SocialAccount`, `V15`):
+  `encrypted_access_token`, `token_expires_at`, `scopes`, `last_validated_at`.
+  Never a plaintext token, never the authorization code (that is exchanged
+  and discarded within one request).
+- **`CredentialEncryptionService`** — AES-256-GCM, a fresh random 96-bit
+  nonce per encryption (so the same token never produces the same ciphertext
+  twice), a versioned stored format (`"v1:" + base64(nonce || ciphertext)`),
+  and GCM's authentication tag catching any tampering as a hard decryption
+  failure rather than corrupted plaintext. The key is read only from
+  `SOCIAL_CREDENTIAL_ENCRYPTION_KEY` (base64, 32 bytes); it is never
+  generated automatically, never stored in the database, and a blank key
+  simply disables the service (`isAvailable() == false`) rather than
+  crashing — required so TEST-only deployments never need it. If a key *is*
+  supplied but is the wrong length or not valid base64, construction fails
+  loudly instead of silently falling back to plaintext.
+- **`InstagramStartupCheck`** fails application startup immediately, with a
+  clear message, if `app.publishing.instagram.enabled=true` but the
+  encryption key or Meta app configuration is missing — so a misconfigured
+  Instagram deployment never boots into a half-working state that would
+  otherwise be tempted to store credentials in plaintext.
+- **`SocialCredentialService`** is the only code path allowed to see
+  plaintext: `store` (encrypt immediately), `decryptAccessToken` (used for
+  exactly one provider HTTP call, never cached, never logged, never sent
+  anywhere except that call), `metadataFor` (a secret-free
+  `SocialCredentialMetadata` — presence/expiry/scopes only, safe to show the
+  browser), and `remove`. There is no bulk "all plaintext credentials"
+  accessor.
+
+### OAuth state, start, and callback
+
+`SocialOAuthState` (`V15`) is a short-lived, single-use, server-tracked CSRF
+token: `SocialOAuthStateService.create` generates 32 random bytes, hands the
+raw value to the browser inside the authorization URL, and stores only its
+SHA-256 hash plus the workspace/user that started the flow and an expiry.
+`consume` looks the state up by hash, checks it is unexpired, unused, and for
+the right platform, and marks it consumed in the same transaction — so a
+replayed callback (same state used twice) is rejected deterministically, not
+by a race-prone check-then-act.
+
+`POST /api/social-accounts/instagram/connect` (authenticated, CSRF-protected
+like any other mutation) creates that state and returns the Meta
+authorization URL as JSON; Angular navigates the browser there itself, so the
+POST endpoint never issues a redirect a CSRF token couldn't have protected.
+`GET /api/social-accounts/instagram/callback` is the registered Meta
+redirect URI. Critically, it **never trusts workspace/user identity from
+callback query parameters** — only `code`, `state`, and `error` are read from
+the query string; the workspace and user that the connection belongs to come
+only from the `SocialOAuthState` row resolved by the state's hash. A forged
+or replayed callback cannot act on an arbitrary workspace even if it guesses
+a valid-looking state string, because the state itself must already exist,
+be unexpired, and be unused. On success or failure the callback ends with an
+HTTP redirect to `/settings?instagram=connected` or
+`/settings?instagram=error&reason=...` — the authorization code and every
+provider token stay entirely server-side; nothing reaches Angular.
+
+### Account identity, duplicates, and disconnect
+
+The persisted `SocialAccount.externalAccountId` is Instagram's own numeric
+user id (authoritative), and `displayName` is the provider-reported
+`username` (cosmetic, refreshed on reconnect). A partial unique index —
+`(workspace_id, platform, external_account_id) WHERE external_account_id IS
+NOT NULL` — makes duplicate connections a database-level impossibility for
+any platform with a real external identity (TEST accounts, which have no
+external identity, are deliberately excluded from this constraint and may
+still be created freely for testing). `InstagramAccountConnectionService`
+also checks for an existing row with the same external id *before* touching
+the database and updates it in place (`SocialAccount.reactivate`) on
+reconnect rather than relying on the constraint to reject a duplicate insert.
+
+Disconnect (`POST /api/social-accounts/{id}/disconnect`) is
+workspace-authorized, removes the stored credential row, and marks the
+account `DISCONNECTED` so `PublishingService.validateAccountEligibility`
+refuses new publications against it. It does not delete `Publication`
+history. Meta's currently-documented revocation surface is not confirmed
+callable for this OAuth flow with confidence (see above), so disconnect is
+honestly a **local** credential removal — the user may also need to revoke
+access from their own Instagram account settings for a true remote
+deauthorization.
+
+### Trust boundary: the Worker never holds a token
+
+Phase 10A's TEST provider runs entirely inside the Worker process. Phase 10B
+deliberately does **not** copy that shape for Instagram: doing so would mean
+handing a long-lived, real, externally-valid access token to every physical
+machine capable of running the worker binary. Instead:
+
+- Every credential-bearing Graph API call (`InstagramGraphClient`) and the
+  container-create/poll/publish orchestration (`InstagramPublishingService`,
+  the "Instagram Publishing Coordinator") live entirely on the backend.
+- The Worker keeps its existing job-ownership, lease-renewal, and polling
+  machinery — that infrastructure is unchanged and platform-agnostic — but
+  for an Instagram `PUBLISH_MEDIA` job, `PublishMediaExecutor` does not
+  download media or hold a token. It repeatedly calls one narrow endpoint,
+  `POST /api/worker-agent/publications/{jobId}/instagram/drive`
+  (`WorkerToken`-authenticated, job-ownership-checked exactly like every
+  other worker-agent endpoint), and the backend decides, one bounded step at
+  a time, what actually happens.
+- Each `drive` call does at most one of: create a container (if none exists
+  yet for this Publication), check container status, or call the final
+  publish — and when the outcome becomes terminal (`PUBLISHED` or `FAILED`),
+  the **same call** also performs the Job/Publication completion bookkeeping
+  that TEST does via separate `/complete`/`/fail` calls. The Worker's loop
+  just keeps calling `drive` (renewing the job lease independently, on its
+  own thread, exactly as every other job type does) until the status stops
+  being `IN_PROGRESS`, then stops — there is nothing left to report.
+
+This means a Worker's technical ability to *drive* Instagram publishing
+requires no local tooling at all (unlike FFmpeg/Whisper) — it is pure HTTP
+orchestration. To still give operators a meaningful way to restrict which
+physical machines can trigger a real, externally-visible side effect (even
+though none of them ever see a token), Worker capability advertisement was
+generalized exactly the way `ANALYZE_HIGHLIGHTS` already generalizes by
+analyzer type:
+
+- `WorkerJobClaimRequest` gained `supportedPublishingProviders`; a Worker
+  that doesn't send it (including every pre-Phase-10B binary) defaults to
+  `["TEST"]` only — the safe default.
+- The Job claim SQL gained a clause exactly mirroring the existing
+  `ANALYZE_HIGHLIGHTS` analyzer filter:
+  `type <> 'PUBLISH_MEDIA' OR COALESCE(payload ->> 'provider', 'TEST') IN
+  (:publishingProviders)`. This is a **hard gate inside the same
+  `FOR UPDATE SKIP LOCKED` claim query**, not a soft scoring preference — an
+  incompatible Worker's claim query simply never returns an Instagram
+  `PUBLISH_MEDIA` row, full stop, before `WorkerSchedulingService` sees it
+  at all. `TELEMETRY_AWARE_V1`'s scoring weights are untouched.
+  Publication creation now stamps the job payload with
+  `"provider": account.getPlatform().name()` so this filter has something to
+  match.
+- The Java worker only advertises `"INSTAGRAM"` when the operator sets
+  `WORKER_INSTAGRAM_PUBLISHING_ENABLED=true` on that specific machine — an
+  explicit opt-in, since there is no local capability to auto-detect the way
+  FFmpeg/FFprobe presence is auto-detected.
+
+This was verified against a real Postgres instance, not just mocks: a
+`PUBLISH_MEDIA` job with `provider: "INSTAGRAM"` in its payload was left
+`QUEUED` and untouched by a TEST-only worker actively polling and
+successfully claiming other jobs in the same run, and was claimed within one
+poll cycle by a second worker started with
+`WORKER_INSTAGRAM_PUBLISHING_ENABLED=true`.
+
+### Public media delivery without a public bucket
+
+Meta's servers must fetch the source video from a URL they can reach. The
+private MinIO bucket **stays fully private** — no bucket policy change, no
+presigned URL handed to Meta. Instead:
+
+- `PublicMediaTokenService` issues a self-contained, HMAC-SHA256-signed token
+  (`base64url(publicationId:assetId:expiresAt:nonce) + "." + signature`) —
+  not a sequential id, and not forgeable without the same master key used for
+  credential encryption (a domain-separated HMAC of the same
+  `SOCIAL_CREDENTIAL_ENCRYPTION_KEY`, a MAC rather than AES-GCM so there is
+  no cross-protocol key-reuse concern).
+- `GET /api/public-media/{token}` is the one intentionally unauthenticated
+  endpoint in the API (Meta cannot present a session cookie or CSRF token).
+  Every other safety property is enforced by the token and by
+  `PublicMediaAccessService`: the token names one specific Publication: the
+  storage key actually streamed is always resolved server-side from that
+  Publication's own asset row, never accepted as caller input, so there is no
+  path here that can read an arbitrary object, list a bucket, or leak a
+  storage credential. The endpoint proxies bytes directly from MinIO through
+  the backend's own `ObjectStorageService.getObjectStream` — Meta never sees
+  a MinIO URL or credential either.
+- The token stops working the moment the Publication leaves `PUBLISHING`
+  (success, failure, or cancellation) even if it has not technically expired
+  yet — a practical, free form of revocation-after-use, and the reason a
+  fresh token is issued per container-creation attempt rather than reused.
+- `app.publishing.instagram.public-media-url-ttl` bounds how long a token
+  stays valid regardless.
+
+**Local development limitation**: Meta's servers cannot reach
+`http://localhost:...` or a private LAN MinIO address. A real Instagram
+publish therefore requires `META_PUBLIC_BASE_URL` to be a genuine public
+HTTPS origin. This is an environment prerequisite, not something the code
+can or should work around by weakening storage privacy — see the Phase 10B
+final report for how this was handled in this session (Level A acceptance
+uses a local fake HTTP server standing in for Meta entirely; Level B real
+Meta acceptance is reported separately).
+
+### Reconciliation: avoiding a duplicate real post
+
+Publishing is externally side-effectful, and Instagram's protocol has no
+native idempotency key an app can supply for container creation. The
+mitigation is `PublicationProviderState` (`V15`, one row per Publication):
+
+- Before any container exists, no row exists. As soon as Meta confirms a
+  container id, it is persisted **immediately**, before the Publication
+  itself is marked anything — so a retry after a crash or a lost HTTP
+  response reuses that same container (`InstagramPublishingService.drive`
+  checks for an existing row first) instead of creating a duplicate one.
+- Instagram's own container `status_code` can report `PUBLISHED` (not just
+  `FINISHED`) once a container has actually been posted — `drive` treats
+  that status as "already done" and does **not** call `media_publish` again,
+  which is what actually prevents a second real post on retry.
+- The one gap the official API leaves, documented rather than hidden: if the
+  process crashes in the narrow window between Meta confirming
+  `media_publish` succeeded and this service persisting that media id, a
+  retry sees the container-level `PUBLISHED` status but has no way to
+  recover the exact media id afterward — there is no documented "list
+  recent media and match" fallback used here. In that specific case the
+  Publication is still completed as `PUBLISHED` (a confirmed real post being
+  reported as a false failure would be worse), with `providerPublicationId`
+  left `null` rather than guessed. The window this can happen in is as small
+  as a single database commit right after the HTTP call returns — this is
+  not exactly-once delivery, and is not claimed to be, but it is the
+  strongest reconciliation the official API's signals allow.
+- Retry classification distinguishes retryable provider failures (5xx,
+  network timeouts, rate limiting, a container still processing) from
+  terminal ones (expired/invalid token, rejected media, unsupported
+  platform) via `InstagramErrorCodes`/`InstagramApiException.retryable()`,
+  reusing the exact same `Job`/`Publication` retry semantics Phase 10A
+  already established — no second retry system.
+
+### Eligibility
+
+`PublishingEligibilityService` generalizes the Phase 10A
+READY+INSPECTED+video gate and adds Instagram-specific checks *before* any
+external call is made, using only metadata the existing inspection step
+already captured: duration between 3 seconds and 15 minutes, aspect ratio
+between 0.1:1 and 10:1, file size under 300 MB, and an MP4/MOV-ish container
+— the current officially documented Reels bounds (`ig-user/media` reference,
+fetched 2026-09). Requirements this service cannot determine from existing
+metadata (exact codec/GOP/bitrate details) are left for Meta's own
+validation at container-creation time; Phase 10B never silently transforms
+media to force compliance.
 
 ## An important architectural rule: Robots are not workers
 

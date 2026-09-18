@@ -295,7 +295,7 @@ describe('Content', () => {
     component['publish'](ready);
 
     expect(publishingService.createPublication).not.toHaveBeenCalled();
-    expect(component['publishErrors']()[ready.id]).toBe('Add a TEST social account first.');
+    expect(component['publishErrors']()[ready.id]).toBe('Connect a social account first.');
   });
 
   it('surfaces publication failures reported by the backend', () => {

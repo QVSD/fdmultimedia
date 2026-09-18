@@ -6,9 +6,14 @@ import java.util.List;
 public record WorkerJobClaimRequest(
         @NotBlank String machineIdentifier,
         List<JobType> supportedJobTypes,
-        List<String> supportedHighlightAnalyzers) {
+        List<String> supportedHighlightAnalyzers,
+        List<String> supportedPublishingProviders) {
 
     public WorkerJobClaimRequest(String machineIdentifier, List<JobType> supportedJobTypes) {
-        this(machineIdentifier, supportedJobTypes, null);
+        this(machineIdentifier, supportedJobTypes, null, null);
+    }
+
+    public WorkerJobClaimRequest(String machineIdentifier, List<JobType> supportedJobTypes, List<String> supportedHighlightAnalyzers) {
+        this(machineIdentifier, supportedJobTypes, supportedHighlightAnalyzers, null);
     }
 }

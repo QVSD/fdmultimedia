@@ -5,20 +5,23 @@ social-media content workflows, video processing workers running across
 multiple laptops/cloud machines, scheduling, AI-assisted content creation,
 publishing, analytics, and revenue tracking.
 
-## Phase 10A scope
+## Phase 10B scope
 
-This repository is currently at **Phase 10A: social accounts & publishing foundation**.
+This repository is currently at **Phase 10B: Instagram official publishing integration**.
 Phase 9A introduced current Worker telemetry and per-attempt execution metrics;
 Phase 9B introduced deterministic `TELEMETRY_AWARE_V1` selection; Phase 9C
 persisted successful claim decisions and exposed bounded workspace-scoped
 queue, execution, Worker/job-type, fallback, and starvation statistics. Phase
-10A now adds the secure domain model and distributed publishing pipeline
+10A added the secure domain model and distributed publishing pipeline
 foundation for eventually publishing media to Instagram/TikTok — a
-workspace-scoped `SocialAccount` (metadata only, no credential columns), a
-`Publication` state machine with durable per-attempt history, and a new
-`PUBLISH_MEDIA` job type proven end-to-end by a deterministic, **explicitly
-non-real** `TEST` publishing provider. No real social platform integration
-exists yet.
+workspace-scoped `SocialAccount`, a `Publication` state machine with durable
+per-attempt history, and a new `PUBLISH_MEDIA` job type proven end-to-end by
+a deterministic, **explicitly non-real** `TEST` publishing provider. Phase
+10B now connects the first **real** provider: Instagram, using only Meta's
+official "Instagram API with Instagram Login" and Content Publishing API
+(video/Reels), disabled by default and requiring explicit Meta app
+configuration plus an AES-256-GCM credential encryption key to enable. TEST
+keeps working unchanged either way.
 
 Claim decisions are written in the same transaction as assignment. Empty polls
 and capacity rejections are not persisted, preventing poll-noise growth. Decision
@@ -78,14 +81,26 @@ That means:
   PUBLISHED/FAILED/CANCELLED state machine and durable per-attempt
   `PublishingAttempt` history, backed by a new `PUBLISH_MEDIA` job type that
   reuses the existing distributed Job infrastructure unchanged. A Settings
-  page manages TEST accounts; the Content page can publish eligible
-  READY + INSPECTED video assets and shows publication state, clearly labeled
-  as non-real.
+  page manages TEST and Instagram accounts; the Content page can publish
+  eligible READY + INSPECTED video assets and shows publication state, with
+  TEST always clearly labeled as non-real.
+- Real Instagram account connection via official OAuth
+  (`POST /api/social-accounts/instagram/connect`,
+  `GET /api/social-accounts/instagram/callback`), an encrypted server-side
+  credential store (never sent to the browser or to a Worker), and real
+  Reel publishing driven by a bounded backend orchestrator
+  (`InstagramPublishingService`) that a Worker only polls — see
+  [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#instagram-publishing-phase-10b)
+  for the full design, including the credential trust boundary, provider-aware
+  Worker capability gating, the unauthenticated-but-token-scoped public media
+  delivery endpoint, and how duplicate real posts are avoided on retry.
+  Disabled and fully optional: the app starts and TEST publishing works with
+  none of this configured.
 
-No thumbnails, real social platform integrations, AI, analytics, or billing
-are implemented yet — see [docs/ROADMAP.md](docs/ROADMAP.md) for what comes
-next and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how the pieces fit
-together.
+No thumbnails, TikTok/YouTube/other platform integrations, AI, analytics, or
+billing are implemented yet — see [docs/ROADMAP.md](docs/ROADMAP.md) for what
+comes next and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how the
+pieces fit together.
 
 ## Prerequisites
 

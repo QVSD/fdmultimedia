@@ -3,11 +3,11 @@ package com.fdmultimedia.api.publishing;
 import com.fdmultimedia.api.accounts.SocialAccount;
 import com.fdmultimedia.api.accounts.SocialAccountRepository;
 import com.fdmultimedia.api.accounts.SocialAccountStatus;
+import com.fdmultimedia.api.accounts.SocialCredentialMetadata;
+import com.fdmultimedia.api.accounts.SocialCredentialService;
 import com.fdmultimedia.api.accounts.SocialPlatform;
 import com.fdmultimedia.api.assets.MediaAsset;
 import com.fdmultimedia.api.assets.MediaAssetRepository;
-import com.fdmultimedia.api.assets.MediaAssetStatus;
-import com.fdmultimedia.api.assets.MediaInspectionStatus;
 import com.fdmultimedia.api.assets.ObjectStorageService;
 import com.fdmultimedia.api.assets.StorageAccess;
 import com.fdmultimedia.api.auth.AuthService;
@@ -18,6 +18,9 @@ import com.fdmultimedia.api.jobs.JobService;
 import com.fdmultimedia.api.jobs.JobStatus;
 import com.fdmultimedia.api.jobs.JobSummary;
 import com.fdmultimedia.api.jobs.JobType;
+import com.fdmultimedia.api.publishing.instagram.InstagramDriveOutcome;
+import com.fdmultimedia.api.publishing.instagram.InstagramPublishingService;
+import com.fdmultimedia.api.publishing.instagram.InstagramProperties;
 import com.fdmultimedia.api.workers.Worker;
 import com.fdmultimedia.api.workers.security.WorkerPrincipal;
 import com.fdmultimedia.api.workspaces.Workspace;
@@ -47,6 +50,10 @@ public class PublishingService {
     private final JobService jobService;
     private final ObjectStorageService storage;
     private final PublishingProperties properties;
+    private final PublishingEligibilityService eligibilityService;
+    private final SocialCredentialService credentialService;
+    private final InstagramPublishingService instagramPublishingService;
+    private final InstagramProperties instagramProperties;
     private final Clock clock;
 
     public PublishingService(
@@ -58,6 +65,10 @@ public class PublishingService {
             JobService jobService,
             ObjectStorageService storage,
             PublishingProperties properties,
+            PublishingEligibilityService eligibilityService,
+            SocialCredentialService credentialService,
+            InstagramPublishingService instagramPublishingService,
+            InstagramProperties instagramProperties,
             Clock clock) {
         this.authService = authService;
         this.assets = assets;
@@ -67,6 +78,10 @@ public class PublishingService {
         this.jobService = jobService;
         this.storage = storage;
         this.properties = properties;
+        this.eligibilityService = eligibilityService;
+        this.credentialService = credentialService;
+        this.instagramPublishingService = instagramPublishingService;
+        this.instagramProperties = instagramProperties;
         this.clock = clock;
     }
 
@@ -78,7 +93,7 @@ public class PublishingService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Asset not found"));
         SocialAccount account = socialAccounts.findByWorkspaceAndId(workspace, request.socialAccountId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Social account not found"));
-        validateAssetEligibility(asset);
+        eligibilityService.validateAssetEligibility(asset, account.getPlatform());
         validateAccountEligibility(account);
         String caption = validateCaption(request.caption());
 
@@ -89,6 +104,7 @@ public class PublishingService {
         payload.put("publicationId", publication.getId().toString());
         payload.put("assetId", asset.getId().toString());
         payload.put("socialAccountId", account.getId().toString());
+        payload.put("provider", account.getPlatform().name());
         JobSummary jobSummary = jobService.createForWorkspace(
                 workspace, new JobCreateRequest(JobType.PUBLISH_MEDIA, payload));
         Job job = jobService.getJobEntityForWorkspace(workspace, jobSummary.id())
@@ -130,26 +146,74 @@ public class PublishingService {
         MediaAsset asset = publication.getAsset();
         SocialAccount account = publication.getSocialAccount();
         validateJobReferencesPublication(job, publication);
-        validateAssetEligibility(asset);
+        eligibilityService.validateAssetEligibility(asset, account.getPlatform());
         validateAccountEligibility(account);
-        if (asset.getStorageKey() == null) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Asset is not stored");
-        }
         Instant now = Instant.now(clock);
         publication.markPublishing(now);
-        StorageAccess access = storage.presignedGet(asset.getStorageKey());
+        // Only the TEST provider path downloads media through the Worker; a
+        // real Instagram publish never gives the Worker a presigned storage
+        // URL, so this is skipped for every other platform.
+        String downloadUrl = null;
+        if (account.getPlatform() == SocialPlatform.TEST) {
+            if (asset.getStorageKey() == null) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "Asset is not stored");
+            }
+            StorageAccess access = storage.presignedGet(asset.getStorageKey());
+            downloadUrl = access.url();
+        }
         return new WorkerPublicationAuthorizationResponse(
                 publication.getId(),
                 asset.getId(),
                 account.getId(),
                 account.getPlatform(),
                 publication.getCaption(),
-                access.url(),
+                downloadUrl,
                 asset.getChecksumSha256(),
                 properties.getMaxDownloadSizeBytes(),
                 (int) properties.getConnectTimeout().toSeconds(),
                 (int) properties.getReadTimeout().toSeconds(),
                 publication.getId().toString());
+    }
+
+    /**
+     * One bounded step of driving an Instagram publish forward, called
+     * repeatedly by the Worker's poll loop. Unlike the TEST provider's
+     * separate authorize/complete/fail calls, this endpoint performs
+     * completion/failure bookkeeping itself the moment the outcome becomes
+     * final, since all Instagram provider state (and the credential needed to
+     * inspect it) lives only on the backend.
+     */
+    @Transactional
+    public PublicationDriveResponse driveInstagramPublication(WorkerPrincipal principal, UUID jobId, String machineIdentifier) {
+        Worker worker = jobService.requireOnlineWorker(principal, machineIdentifier);
+        Job job = requirePublishJob(worker, jobId);
+        Publication publication = requirePublicationForJob(job);
+        validateJobReferencesPublication(job, publication);
+        if (publication.getSocialAccount().getPlatform() != SocialPlatform.INSTAGRAM) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Job is not an Instagram publication");
+        }
+        if (publication.getStatus() != PublicationStatus.PUBLISHING) {
+            publication.markPublishing(Instant.now(clock));
+        }
+
+        InstagramDriveOutcome outcome = instagramPublishingService.drive(publication);
+        Instant now = Instant.now(clock);
+        int attemptNumber = job.getAttemptCount();
+        Instant startedAt = job.getStartedAt();
+
+        return switch (outcome.status()) {
+            case IN_PROGRESS -> new PublicationDriveResponse("IN_PROGRESS");
+            case PUBLISHED -> {
+                completePublicationInternal(job, worker, publication, attemptNumber, startedAt,
+                        outcome.providerRequestId(), outcome.providerPublicationId(), now);
+                yield new PublicationDriveResponse("PUBLISHED");
+            }
+            case FAILED -> {
+                failPublicationInternal(job, worker, publication, attemptNumber, startedAt,
+                        outcome.errorCode(), outcome.errorMessage(), outcome.terminal(), now);
+                yield new PublicationDriveResponse("FAILED");
+            }
+        };
     }
 
     @Transactional
@@ -186,21 +250,57 @@ public class PublishingService {
         Job job = requirePublishJob(worker, jobId);
         Publication publication = requirePublicationForJob(job);
         validateRequestMatchesPublication(publication, request.publicationId(), request.assetId(), request.socialAccountId());
-        Instant now = Instant.now(clock);
         int attemptNumber = job.getAttemptCount();
         Instant startedAt = job.getStartedAt();
         String errorCode = request.errorCode();
         String errorMessage = safeErrorMessage(request.errorMessage());
         boolean terminal = Boolean.TRUE.equals(request.terminal());
+        Instant now = Instant.now(clock);
+        failPublicationInternal(job, worker, publication, attemptNumber, startedAt, errorCode, errorMessage, terminal, now);
+        return toSummary(publication);
+    }
+
+    /**
+     * Shared completion path for both the TEST provider's HTTP completion
+     * call and the Instagram drive loop's internal completion. Unlike
+     * {@link #completeWorkerPublication}, {@code providerPublicationId} may be
+     * null here: the one documented Instagram API gap (see
+     * {@code InstagramPublishingService}) is that a crash between a
+     * successful {@code media_publish} call and our own bookkeeping leaves no
+     * way to recover the exact media id afterward. The Publication is still
+     * completed as PUBLISHED in that case — treating a confirmed real post as
+     * a false failure would be worse than an unknown provider id.
+     */
+    private void completePublicationInternal(
+            Job job, Worker worker, Publication publication, int attemptNumber, Instant startedAt,
+            String providerRequestId, String providerPublicationId, Instant now) {
+        String safeRequestId = trimToNull(providerRequestId, MAX_PROVIDER_ID_LENGTH);
+        String safePublicationId = trimToNull(providerPublicationId, MAX_PROVIDER_ID_LENGTH);
+        publication.markPublished(safeRequestId, safePublicationId, now, now);
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("publicationId", publication.getId().toString());
+        if (safePublicationId != null) {
+            result.put("providerPublicationId", safePublicationId);
+        }
+        jobService.completeOwnedJob(job, worker, result, now);
+        attempts.save(new PublishingAttempt(
+                publication, job, attemptNumber, worker, startedAt, now,
+                PublishingAttemptOutcome.SUCCEEDED, safeRequestId, safePublicationId, null, null));
+    }
+
+    private void failPublicationInternal(
+            Job job, Worker worker, Publication publication, int attemptNumber, Instant startedAt,
+            String errorCode, String errorMessage, boolean terminal, Instant now) {
+        String safeMessage = safeErrorMessage(errorMessage);
         PublishingAttemptOutcome outcome;
         if (terminal) {
-            jobService.failOwnedJob(job, worker, errorCode, errorMessage, true, now);
-            publication.markFailed(errorCode, errorMessage, now);
+            jobService.failOwnedJob(job, worker, errorCode, safeMessage, true, now);
+            publication.markFailed(errorCode, safeMessage, now);
             outcome = PublishingAttemptOutcome.FAILED;
         } else {
-            jobService.failOwnedJob(job, worker, errorCode, errorMessage, false, now);
+            jobService.failOwnedJob(job, worker, errorCode, safeMessage, false, now);
             if (job.getStatus() == JobStatus.FAILED) {
-                publication.markFailed(errorCode, errorMessage, now);
+                publication.markFailed(errorCode, safeMessage, now);
                 outcome = PublishingAttemptOutcome.FAILED;
             } else {
                 publication.markPendingForRetry(now);
@@ -209,8 +309,7 @@ public class PublishingService {
         }
         attempts.save(new PublishingAttempt(
                 publication, job, attemptNumber, worker, startedAt, now,
-                outcome, null, null, errorCode, errorMessage));
-        return toSummary(publication);
+                outcome, null, null, errorCode, safeMessage));
     }
 
     private Job requirePublishJob(Worker worker, UUID jobId) {
@@ -246,24 +345,25 @@ public class PublishingService {
         }
     }
 
-    private void validateAssetEligibility(MediaAsset asset) {
-        if (asset.getStatus() != MediaAssetStatus.READY) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Asset is not ready");
-        }
-        if (asset.getInspectionStatus() != MediaInspectionStatus.INSPECTED) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Asset is not inspected");
-        }
-        if (!Boolean.TRUE.equals(asset.getHasVideo())) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Asset must contain video");
-        }
-    }
-
     private void validateAccountEligibility(SocialAccount account) {
         if (account.getStatus() != SocialAccountStatus.ACTIVE) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Social account is not active");
         }
-        if (account.getPlatform() != SocialPlatform.TEST) {
+        if (account.getPlatform() == SocialPlatform.TEST) {
+            return;
+        }
+        if (account.getPlatform() != SocialPlatform.INSTAGRAM) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Platform is not yet supported");
+        }
+        if (!instagramProperties.isConfigured()) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Instagram integration is not configured");
+        }
+        SocialCredentialMetadata credential = credentialService.metadataFor(account);
+        if (!credential.present()) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Instagram account has no stored credential; reconnect it");
+        }
+        if (credential.expired()) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Instagram credential has expired; reconnect the account");
         }
     }
 
@@ -290,6 +390,14 @@ public class PublishingService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, field + " is too long");
         }
         return trimmed;
+    }
+
+    private String trimToNull(String value, int maxLength) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.length() > maxLength ? trimmed.substring(0, maxLength) : trimmed;
     }
 
     private Instant validatePublishedAt(Instant publishedAt, Instant now) {

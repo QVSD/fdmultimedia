@@ -217,4 +217,27 @@ class WorkerAgentClientTest {
         assertTrue(body.get().contains("\"terminal\":true"));
         assertTrue(body.get().contains("\"publicationId\":\"" + publicationId + "\""));
     }
+
+    @Test
+    void driveInstagramPublicationParsesStatus() throws Exception {
+        AtomicReference<String> body = new AtomicReference<>();
+        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/api/worker-agent/publications/00000000-0000-4000-8000-000000000001/instagram/drive", exchange -> {
+            body.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+            byte[] response = "{\"status\":\"IN_PROGRESS\"}".getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.start();
+        WorkerAgentClient client = new WorkerAgentClient(
+                java.net.URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/api/"),
+                "WorkerToken credential.secret");
+
+        InstagramDriveStatus status = client.driveInstagramPublication(
+                UUID.fromString("00000000-0000-4000-8000-000000000001"), "machine-1");
+
+        assertTrue(status.status().equals("IN_PROGRESS"));
+        assertTrue(body.get().contains("\"machineIdentifier\":\"machine-1\""));
+    }
 }

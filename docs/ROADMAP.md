@@ -1,6 +1,6 @@
 # Roadmap
 
-The repository is currently at Phase 10A. Completed phases are marked below;
+The repository is currently at Phase 10B. Completed phases are marked below;
 later phases are planned high-level direction and intentionally do not go into
 implementation detail before they are started.
 
@@ -60,10 +60,24 @@ implementation detail before they are started.
    publishing provider proves the end-to-end pipeline (presigned asset access,
    idempotent retries, stale-worker-safe completion) without any real
    Instagram/TikTok integration. *(complete)*
-18. **FFmpeg processing** — richer automated video processing pipelines.
-19. **Real social platform integrations (Phase 10B+)** — official Instagram
-   and TikTok publishing providers behind the `PublishingProvider` interface
-   introduced in Phase 10A, plus a secret-managed credential store for
-   `SocialAccount`.
-20. **AI content** — AI-assisted content creation.
-21. **Analytics / revenue** — performance analytics and revenue tracking.
+18. **Instagram official publishing integration (Phase 10B)** — real
+   Instagram account connection via Meta's official "Instagram API with
+   Instagram Login" OAuth flow (hashed, single-use, expiring server-side
+   state), an encrypted (AES-256-GCM) server-side credential store with no
+   plaintext fallback, and real video/Reels publishing driven by a bounded
+   backend orchestrator that a Worker only polls — the Worker never holds a
+   provider credential, whether or not it is opted in to drive Instagram
+   jobs. Container-id-based reconciliation avoids duplicate real posts on
+   retry; provider-aware capability gating (a hard filter in the Job claim
+   SQL) stops an unconfigured Worker from ever claiming an Instagram job;
+   and a token-scoped, self-expiring public media delivery endpoint lets
+   Meta fetch source video without making the private MinIO bucket public.
+   Disabled by default; TEST keeps working with none of it configured.
+   *(complete — see docs/ARCHITECTURE.md for the full design and the Phase
+   10B final report for Level A/B acceptance status)*
+19. **FFmpeg processing** — richer automated video processing pipelines.
+20. **Additional platform integrations** — TikTok, YouTube, or other real
+   platforms behind the same provider-boundary pattern Instagram
+   established in Phase 10B.
+21. **AI content** — AI-assisted content creation.
+22. **Analytics / revenue** — performance analytics and revenue tracking.

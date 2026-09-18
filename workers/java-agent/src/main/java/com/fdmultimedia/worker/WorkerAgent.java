@@ -68,6 +68,10 @@ public final class WorkerAgent {
         PublishMediaExecutor publishMediaExecutor = publishingAvailable ? new PublishMediaExecutor(publishingProvider) : null;
         List<String> supportedJobTypes = supportedJobTypes(ffprobeAvailable, ffmpegAvailable, transcriptionAvailable, publishingAvailable);
         List<String> supportedHighlightAnalyzers = supportedHighlightAnalyzers(semanticHighlightAvailable);
+        List<String> supportedPublishingProviders = supportedPublishingProviders(config.instagramPublishingEnabled());
+        if (config.instagramPublishingEnabled()) {
+            System.err.println("Instagram publishing driving enabled on this worker (no credential is ever held here)");
+        }
         AtomicInteger activeJobs = new AtomicInteger(0);
         WorkerTelemetryCollector telemetryCollector = new WorkerTelemetryCollector();
 
@@ -95,7 +99,7 @@ public final class WorkerAgent {
                 activeJobs,
                 supportedJobTypes,
                 supportedHighlightAnalyzers));
-        executor.submit(() -> jobLoop(client, machineIdentifier, config, systemTestExecutor, importMediaExecutor, inspectMediaExecutor, clipExecutor, analyzeHighlightsExecutor, transcribeMediaExecutor, publishMediaExecutor, supportedJobTypes, supportedHighlightAnalyzers, activeJobs));
+        executor.submit(() -> jobLoop(client, machineIdentifier, config, systemTestExecutor, importMediaExecutor, inspectMediaExecutor, clipExecutor, analyzeHighlightsExecutor, transcribeMediaExecutor, publishMediaExecutor, supportedJobTypes, supportedHighlightAnalyzers, supportedPublishingProviders, activeJobs));
         shutdown.await();
     }
 
@@ -137,6 +141,7 @@ public final class WorkerAgent {
             PublishMediaExecutor publishMediaExecutor,
             List<String> supportedJobTypes,
             List<String> supportedHighlightAnalyzers,
+            List<String> supportedPublishingProviders,
             AtomicInteger activeJobs) {
         while (!Thread.currentThread().isInterrupted()) {
             try {
@@ -144,7 +149,7 @@ public final class WorkerAgent {
                     sleep(config.jobPollInterval());
                     continue;
                 }
-                ClaimedJob job = client.claim(machineIdentifier, supportedJobTypes, supportedHighlightAnalyzers);
+                ClaimedJob job = client.claim(machineIdentifier, supportedJobTypes, supportedHighlightAnalyzers, supportedPublishingProviders);
                 if (!job.available()) {
                     sleep(config.jobPollInterval());
                     continue;
@@ -573,6 +578,15 @@ public final class WorkerAgent {
             analyzers.add("TRANSCRIPT_SEMANTIC_V1");
         }
         return List.copyOf(analyzers);
+    }
+
+    private static List<String> supportedPublishingProviders(boolean instagramPublishingEnabled) {
+        List<String> providers = new ArrayList<>();
+        providers.add("TEST");
+        if (instagramPublishingEnabled) {
+            providers.add("INSTAGRAM");
+        }
+        return List.copyOf(providers);
     }
 
     private static TranscriptionProvider transcriptionProvider(WorkerAgentConfig config) {

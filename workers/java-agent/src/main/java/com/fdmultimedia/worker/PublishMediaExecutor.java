@@ -10,8 +10,18 @@ import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.Instant;
 
 final class PublishMediaExecutor {
+
+    // Bounded, and deliberately somewhat longer than the backend's own default
+    // containerProcessingTimeout (5 minutes): in the normal case the backend
+    // detects its own timeout first and returns a proper terminal
+    // INSTAGRAM_PROCESSING_TIMEOUT outcome. This is only a last-resort local
+    // safety net against the Worker looping forever if something prevents the
+    // backend's own check from ever being reached.
+    private static final Duration INSTAGRAM_DRIVE_MAX_DURATION = Duration.ofMinutes(8);
+    private static final Duration INSTAGRAM_DRIVE_POLL_INTERVAL = Duration.ofSeconds(5);
 
     private final PublishingProvider provider;
     private final HttpClient httpClient;
@@ -24,6 +34,13 @@ final class PublishMediaExecutor {
     void execute(WorkerAgentClient client, ClaimedJob job, String machineIdentifier)
             throws IOException, InterruptedException, ImportFailureException {
         PublicationAuthorization authorization = client.authorizePublication(job.jobId(), machineIdentifier);
+        if (!"TEST".equals(authorization.platform())) {
+            // Real providers (Instagram) keep every credential-bearing call on
+            // the backend; the Worker only drives a bounded poll loop and never
+            // downloads media or sees a provider token.
+            driveUntilTerminal(client, job, machineIdentifier, authorization.platform());
+            return;
+        }
         Path media = null;
         try {
             media = Files.createTempFile("fdm-publish-media-", ".media");
@@ -34,6 +51,26 @@ final class PublishMediaExecutor {
             if (media != null) {
                 Files.deleteIfExists(media);
             }
+        }
+    }
+
+    private void driveUntilTerminal(WorkerAgentClient client, ClaimedJob job, String machineIdentifier, String platform)
+            throws IOException, InterruptedException, ImportFailureException {
+        if (!"INSTAGRAM".equals(platform)) {
+            throw new ImportFailureException("PUBLISH_UNSUPPORTED_PLATFORM", "Worker cannot drive platform " + platform, true);
+        }
+        Instant deadline = Instant.now().plus(INSTAGRAM_DRIVE_MAX_DURATION);
+        while (true) {
+            InstagramDriveStatus status = client.driveInstagramPublication(job.jobId(), machineIdentifier);
+            if (!"IN_PROGRESS".equals(status.status())) {
+                // PUBLISHED or FAILED: the backend has already finalized the Job
+                // and Publication as part of that call. Nothing left to report.
+                return;
+            }
+            if (Instant.now().isAfter(deadline)) {
+                throw new ImportFailureException("INSTAGRAM_PROCESSING_TIMEOUT", "Instagram processing did not finish in time", false);
+            }
+            Thread.sleep(INSTAGRAM_DRIVE_POLL_INTERVAL.toMillis());
         }
     }
 

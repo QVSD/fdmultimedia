@@ -10,8 +10,10 @@ import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.S3Configuration;
+import software.amazon.awssdk.core.ResponseInputStream;
 import software.amazon.awssdk.services.s3.model.CreateBucketRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
+import software.amazon.awssdk.services.s3.model.GetObjectResponse;
 import software.amazon.awssdk.services.s3.model.HeadObjectRequest;
 import software.amazon.awssdk.services.s3.model.HeadBucketRequest;
 import software.amazon.awssdk.services.s3.model.NoSuchBucketException;
@@ -82,6 +84,19 @@ public class ObjectStorageService {
                 .build();
         String url = presigner.presignGetObject(presignRequest).url().toString();
         return new StorageAccess(url, properties.getBucket(), key, Instant.now(clock).plus(properties.getPresignedDownloadTtl()));
+    }
+
+    /**
+     * Streams an object's bytes directly through the backend. Used only by the
+     * public-media proxy so an external provider never sees a MinIO/S3 URL or
+     * any storage credential — the backend is the only thing that ever talks
+     * to the storage endpoint.
+     */
+    public ResponseInputStream<GetObjectResponse> getObjectStream(String key) {
+        return s3Client.getObject(GetObjectRequest.builder()
+                .bucket(properties.getBucket())
+                .key(key)
+                .build());
     }
 
     public long objectSize(String key) {

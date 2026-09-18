@@ -56,6 +56,24 @@ class SecurityConfigTest {
     }
 
     @Test
+    void socialAccountsApiRejectsUnauthenticatedUsers() throws Exception {
+        mockMvc.perform(get("/api/social-accounts"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void publicationsApiRejectsUnauthenticatedUsers() throws Exception {
+        mockMvc.perform(get("/api/publications"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void publicMediaEndpointIsReachableWithoutAuthenticationBecauseMetaMustFetchIt() throws Exception {
+        mockMvc.perform(get("/api/public-media/some-token"))
+                .andExpect(status().isNoContent());
+    }
+
+    @Test
     void jobCreationRequiresCsrfToken() throws Exception {
         mockMvc.perform(post("/api/jobs").with(user("owner@example.com")))
                 .andExpect(status().isForbidden());
@@ -97,6 +115,11 @@ class SecurityConfigTest {
         }
 
         @Bean
+        PublicMediaStubController publicMediaStubController() {
+            return new PublicMediaStubController();
+        }
+
+        @Bean
         WorkerAuthenticationFilter workerAuthenticationFilter() {
             return new WorkerAuthenticationFilter(org.mockito.Mockito.mock(WorkerAuthenticationService.class));
         }
@@ -108,6 +131,16 @@ class SecurityConfigTest {
         @PostMapping("/api/protected-post")
         @ResponseStatus(HttpStatus.NO_CONTENT)
         void protectedPost() {
+        }
+    }
+
+    /** Stands in for the real PublicMediaController just to verify the security matcher, not streaming behavior. */
+    @RestController
+    static final class PublicMediaStubController {
+
+        @org.springframework.web.bind.annotation.GetMapping("/api/public-media/{token}")
+        @ResponseStatus(HttpStatus.NO_CONTENT)
+        void get(@org.springframework.web.bind.annotation.PathVariable String token) {
         }
     }
 }

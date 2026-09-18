@@ -149,6 +149,7 @@ public class JobService {
                         worker.getWorkspace().getId(),
                         eligibility.supportedJobTypes(),
                         eligibility.supportedHighlightAnalyzers(),
+                        eligibility.supportedPublishingProviders(),
                         schedulingProperties.safeCandidateLimit());
         JobSchedulingDecision decision = schedulingService.selectJob(worker, candidates, now);
         return decision.job()
@@ -512,10 +513,15 @@ public class JobService {
         String publicationId = uuidString(payload.get("publicationId"), "publicationId");
         String assetId = uuidString(payload.get("assetId"), "assetId");
         String socialAccountId = uuidString(payload.get("socialAccountId"), "socialAccountId");
+        String provider = stringValue(payload.getOrDefault("provider", "TEST"), "provider");
+        if (provider.isBlank() || provider.length() > 32) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "provider is invalid");
+        }
         Map<String, Object> normalized = new LinkedHashMap<>();
         normalized.put("publicationId", publicationId);
         normalized.put("assetId", assetId);
         normalized.put("socialAccountId", socialAccountId);
+        normalized.put("provider", provider);
         return normalized;
     }
 

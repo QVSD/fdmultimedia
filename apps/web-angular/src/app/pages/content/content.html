@@ -242,9 +242,9 @@
                   <section class="detail-panel">
                     <h3>Publish</h3>
                     @if (canPublish(asset)) {
-                      @if (testSocialAccounts().length === 0) {
+                      @if (publishableSocialAccounts().length === 0) {
                         <p class="content__muted">
-                          No social accounts yet. Add a TEST account on the Settings page to try publishing.
+                          No social accounts yet. Connect Instagram or add a TEST account on the Settings page.
                         </p>
                       } @else {
                         <form class="content__publish-form" (ngSubmit)="publish(asset)">
@@ -255,7 +255,7 @@
                               [ngModel]="publishAccountFor(asset)"
                               (ngModelChange)="setPublishAccount(asset, $event)"
                             >
-                              @for (account of testSocialAccounts(); track account.id) {
+                              @for (account of publishableSocialAccounts(); track account.id) {
                                 <option [value]="account.id">{{ account.displayName }} ({{ account.platform }})</option>
                               }
                             </select>
@@ -272,12 +272,19 @@
                             />
                           </label>
                           <button type="submit" [disabled]="publishBusy()[asset.id]">
-                            {{ publishBusy()[asset.id] ? 'Publishing...' : 'Publish to TEST' }}
+                            {{ publishBusy()[asset.id] ? 'Publishing...' : 'Publish' }}
                           </button>
                         </form>
-                        <p class="content__muted">
-                          TEST publishing is not real &mdash; it never contacts Instagram, TikTok, or any external platform.
-                        </p>
+                        @if (selectedAccountFor(asset)?.platform === 'TEST') {
+                          <p class="content__muted">
+                            TEST publishing is not real &mdash; it never contacts Instagram, TikTok, or any external platform.
+                          </p>
+                        } @else if (selectedAccountFor(asset)?.platform === 'INSTAGRAM') {
+                          <p class="content__muted">This publishes a real Reel to the connected Instagram account.</p>
+                          @if (instagramEligibilityHint(asset); as hint) {
+                            <p class="content__error">{{ hint }}</p>
+                          }
+                        }
                       }
                     } @else {
                       <p class="content__muted">Publishing is available for inspected video.</p>
@@ -291,7 +298,9 @@
                               <span [class]="'content__badge content__badge--' + publication.status.toLowerCase()">
                                 {{ publicationStatusLabel(publication.status) }}
                               </span>
-                              <span class="content__badge">{{ publication.platform }} (non-real)</span>
+                              <span class="content__badge">
+                                {{ publication.platform }}{{ publication.platform === 'TEST' ? ' (non-real)' : '' }}
+                              </span>
                               <span class="content__muted">{{ publication.socialAccountDisplayName }}</span>
                               <span class="content__muted">{{ publication.createdAt | date:'medium' }}</span>
                             </div>

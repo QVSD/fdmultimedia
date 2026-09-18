@@ -60,18 +60,25 @@ final class WorkerAgentClient {
         send("/worker-agent/heartbeat", Map.of("machineIdentifier", machineIdentifier), new TypeReference<Map<String, Object>>() {});
     }
 
+    ClaimedJob claim(
+            String machineIdentifier,
+            List<String> supportedJobTypes,
+            List<String> supportedHighlightAnalyzers,
+            List<String> supportedPublishingProviders) throws IOException, InterruptedException {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("machineIdentifier", machineIdentifier);
+        body.put("supportedJobTypes", supportedJobTypes);
+        body.put("supportedHighlightAnalyzers", supportedHighlightAnalyzers);
+        body.put("supportedPublishingProviders", supportedPublishingProviders);
+        return send("/worker-agent/jobs/claim", body, new TypeReference<ClaimedJob>() {});
+    }
+
     ClaimedJob claim(String machineIdentifier, List<String> supportedJobTypes, List<String> supportedHighlightAnalyzers) throws IOException, InterruptedException {
-        return send(
-                "/worker-agent/jobs/claim",
-                Map.of(
-                        "machineIdentifier", machineIdentifier,
-                        "supportedJobTypes", supportedJobTypes,
-                        "supportedHighlightAnalyzers", supportedHighlightAnalyzers),
-                new TypeReference<ClaimedJob>() {});
+        return claim(machineIdentifier, supportedJobTypes, supportedHighlightAnalyzers, List.of("TEST"));
     }
 
     ClaimedJob claim(String machineIdentifier, List<String> supportedJobTypes) throws IOException, InterruptedException {
-        return claim(machineIdentifier, supportedJobTypes, List.of("DETERMINISTIC_V1"));
+        return claim(machineIdentifier, supportedJobTypes, List.of("DETERMINISTIC_V1"), List.of("TEST"));
     }
 
     void started(UUID jobId, String machineIdentifier) throws IOException, InterruptedException {
@@ -345,6 +352,14 @@ final class WorkerAgentClient {
         body.put("errorMessage", errorMessage);
         body.put("terminal", terminal);
         send("/worker-agent/publications/" + jobId + "/fail", body, new TypeReference<Map<String, Object>>() {});
+    }
+
+    InstagramDriveStatus driveInstagramPublication(UUID jobId, String machineIdentifier)
+            throws IOException, InterruptedException {
+        return send(
+                "/worker-agent/publications/" + jobId + "/instagram/drive",
+                Map.of("machineIdentifier", machineIdentifier),
+                new TypeReference<InstagramDriveStatus>() {});
     }
 
     void upload(URI uploadUrl, Path path, String contentType) throws IOException, InterruptedException {
