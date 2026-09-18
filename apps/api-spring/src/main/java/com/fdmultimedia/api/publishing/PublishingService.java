@@ -21,6 +21,7 @@ import com.fdmultimedia.api.jobs.JobType;
 import com.fdmultimedia.api.publishing.instagram.InstagramDriveOutcome;
 import com.fdmultimedia.api.publishing.instagram.InstagramPublishingService;
 import com.fdmultimedia.api.publishing.instagram.InstagramProperties;
+import com.fdmultimedia.api.users.AppUser;
 import com.fdmultimedia.api.workers.Worker;
 import com.fdmultimedia.api.workers.security.WorkerPrincipal;
 import com.fdmultimedia.api.workspaces.Workspace;
@@ -93,13 +94,34 @@ public class PublishingService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Asset not found"));
         SocialAccount account = socialAccounts.findByWorkspaceAndId(workspace, request.socialAccountId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Social account not found"));
+        return createPublicationInternal(workspace, asset, account, request.caption(), membership.getUser(), null);
+    }
+
+    /**
+     * Used by {@code ContentDraftService} so Draft-originated publishes reuse
+     * every eligibility/account/job-creation rule below rather than
+     * duplicating them. The asset and workspace are trusted here because the
+     * caller has already resolved them through a workspace-scoped Draft.
+     */
+    @Transactional
+    public PublicationSummary createPublicationForDraft(
+            AuthenticatedUser principal, MediaAsset asset, UUID socialAccountId, String caption, UUID contentDraftId) {
+        WorkspaceMembership membership = authService.currentMembershipFor(principal);
+        Workspace workspace = membership.getWorkspace();
+        SocialAccount account = socialAccounts.findByWorkspaceAndId(workspace, socialAccountId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Social account not found"));
+        return createPublicationInternal(workspace, asset, account, caption, membership.getUser(), contentDraftId);
+    }
+
+    private PublicationSummary createPublicationInternal(
+            Workspace workspace, MediaAsset asset, SocialAccount account, String rawCaption, AppUser user, UUID contentDraftId) {
         eligibilityService.validateAssetEligibility(asset, account.getPlatform());
         validateAccountEligibility(account);
-        String caption = validateCaption(request.caption());
+        String caption = validateCaption(rawCaption);
 
         Instant now = Instant.now(clock);
         Publication publication = publications.save(new Publication(
-                workspace, asset, account, caption, membership.getUser(), now));
+                workspace, asset, account, caption, user, contentDraftId, now));
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("publicationId", publication.getId().toString());
         payload.put("assetId", asset.getId().toString());
@@ -125,6 +147,13 @@ public class PublishingService {
             rows = publications.findByWorkspaceOrderByCreatedAtDesc(workspace);
         }
         return rows.stream().map(this::toSummary).toList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<PublicationSummary> listForContentDraft(Workspace workspace, UUID contentDraftId) {
+        return publications.findByWorkspaceAndContentDraftIdOrderByCreatedAtDesc(workspace, contentDraftId).stream()
+                .map(this::toSummary)
+                .toList();
     }
 
     @Transactional(readOnly = true)
@@ -440,6 +469,7 @@ public class PublishingService {
                 publication.getCaption(),
                 publication.getProviderRequestId(),
                 publication.getProviderPublicationId(),
+                publication.getContentDraftId(),
                 publication.getCreatedAt(),
                 publication.getUpdatedAt(),
                 publication.getPublishedAt(),

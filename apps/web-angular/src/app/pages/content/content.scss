@@ -63,6 +63,28 @@
   color: #991b1b;
 }
 
+.content__tabs {
+  display: flex;
+  gap: 0.5rem;
+
+  button {
+    min-height: 2.25rem;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    padding: 0.35rem 0.9rem;
+    background: #ffffff;
+    color: #111827;
+    font-weight: 700;
+    cursor: pointer;
+  }
+
+  button.content__tab--active {
+    border-color: #111827;
+    background: #111827;
+    color: #ffffff;
+  }
+}
+
 .asset-list {
   display: grid;
   gap: 1rem;
@@ -191,6 +213,11 @@
 .content__badge--cancelled {
   background: #e5e7eb;
   color: #374151;
+}
+
+.content__badge--draft {
+  background: #fef3c7;
+  color: #92400e;
 }
 
 .content__clip-form {

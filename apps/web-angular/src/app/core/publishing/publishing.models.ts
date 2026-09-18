@@ -29,6 +29,7 @@ export interface PublicationSummary {
   caption: string | null;
   providerRequestId: string | null;
   providerPublicationId: string | null;
+  contentDraftId: string | null;
   createdAt: string;
   updatedAt: string;
   publishedAt: string | null;

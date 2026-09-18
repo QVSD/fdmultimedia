@@ -17,6 +17,7 @@ public record PublicationSummary(
         String caption,
         String providerRequestId,
         String providerPublicationId,
+        UUID contentDraftId,
         Instant createdAt,
         Instant updatedAt,
         Instant publishedAt,

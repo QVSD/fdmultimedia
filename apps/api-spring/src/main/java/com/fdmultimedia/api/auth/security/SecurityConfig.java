@@ -50,6 +50,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/scheduling/**").hasRole("USER")
                         .requestMatchers("/api/social-accounts/**").hasRole("USER")
                         .requestMatchers("/api/publications/**").hasRole("USER")
+                        .requestMatchers("/api/content-drafts/**").hasRole("USER")
                         .anyRequest().authenticated())
                 .exceptionHandling(errors -> errors
                         .authenticationEntryPoint((request, response, exception) ->

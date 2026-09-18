@@ -9,6 +9,8 @@ import { PublishingService } from '../../core/publishing/publishing.service';
 import { PublicationSummary } from '../../core/publishing/publishing.models';
 import { SocialAccountsService } from '../../core/social-accounts/social-accounts.service';
 import { SocialAccountSummary } from '../../core/social-accounts/social-account.models';
+import { ContentDraftsService } from '../../core/content-drafts/content-drafts.service';
+import { ContentDraftStatus, ContentDraftSummary, ContentDraftWorkflowStage } from '../../core/content-drafts/content-draft.models';
 
 type LoadState = 'loading' | 'ready' | 'error';
 
@@ -46,12 +48,30 @@ export class Content implements OnInit, OnDestroy {
   protected readonly publishBusy = signal<Record<string, boolean>>({});
   protected readonly publishErrors = signal<Record<string, string | null>>({});
 
+  protected readonly activeView = signal<'assets' | 'drafts'>('assets');
+  protected readonly drafts = signal<ContentDraftSummary[]>([]);
+  protected readonly draftsLoadState = signal<LoadState>('loading');
+  protected readonly expandedDrafts = signal<Record<string, boolean>>({});
+  protected readonly draftCreateBusy = signal<Record<string, boolean>>({});
+  protected readonly draftCreateErrors = signal<Record<string, string | null>>({});
+  protected readonly draftTitleEdits = signal<Record<string, string>>({});
+  protected readonly draftCaptionEdits = signal<Record<string, string>>({});
+  protected readonly draftSaveBusy = signal<Record<string, boolean>>({});
+  protected readonly draftSaveErrors = signal<Record<string, string | null>>({});
+  protected readonly draftPublishAccountId = signal<Record<string, string>>({});
+  protected readonly draftPublishBusy = signal<Record<string, boolean>>({});
+  protected readonly draftPublishErrors = signal<Record<string, string | null>>({});
+  protected readonly draftRetryBusy = signal<Record<string, boolean>>({});
+  protected readonly draftRetryErrors = signal<Record<string, string | null>>({});
+
   private subscription?: Subscription;
+  private draftsSubscription?: Subscription;
 
   constructor(
     private readonly assetsService: AssetsService,
     private readonly publishingService: PublishingService,
     private readonly socialAccountsService: SocialAccountsService,
+    private readonly contentDraftsService: ContentDraftsService,
   ) {}
 
   ngOnInit(): void {
@@ -79,10 +99,28 @@ export class Content implements OnInit, OnDestroy {
         this.refreshTranscripts(assets);
         this.refreshPublications(assets);
       });
+
+    this.draftsSubscription = interval(5000)
+      .pipe(
+        startWith(0),
+        switchMap(() =>
+          this.contentDraftsService.list().pipe(
+            catchError(() => {
+              this.draftsLoadState.set('error');
+              return EMPTY;
+            }),
+          ),
+        ),
+      )
+      .subscribe((drafts) => {
+        this.drafts.set(drafts);
+        this.draftsLoadState.set('ready');
+      });
   }
 
   ngOnDestroy(): void {
     this.subscription?.unsubscribe();
+    this.draftsSubscription?.unsubscribe();
   }
 
   protected importMedia(): void {
@@ -547,6 +585,176 @@ export class Content implements OnInit, OnDestroy {
           this.highlightAnalyses.update((currentAnalyses) => ({ ...currentAnalyses, [asset.id]: analyses[0] ?? null }));
         });
     }
+  }
+
+  protected switchView(view: 'assets' | 'drafts'): void {
+    this.activeView.set(view);
+  }
+
+  protected canCreateDraft(asset: MediaAssetSummary): boolean {
+    return asset.status === 'READY' && asset.inspectionStatus === 'INSPECTED' && asset.hasVideo === true;
+  }
+
+  protected createDraftFromAsset(asset: MediaAssetSummary): void {
+    this.draftCreateErrors.update((errors) => ({ ...errors, [asset.id]: null }));
+    this.draftCreateBusy.update((busy) => ({ ...busy, [asset.id]: true }));
+    this.contentDraftsService
+      .createFromAsset(asset.id, null, null)
+      .pipe(finalize(() => this.draftCreateBusy.update((busy) => ({ ...busy, [asset.id]: false }))))
+      .subscribe({
+        next: (draft) => {
+          this.drafts.set([draft, ...this.drafts().filter((existing) => existing.id !== draft.id)]);
+          this.draftsLoadState.set('ready');
+          this.activeView.set('drafts');
+        },
+        error: () => this.draftCreateErrors.update((errors) => ({ ...errors, [asset.id]: 'Draft could not be created.' })),
+      });
+  }
+
+  protected createDraftFromCandidate(candidate: HighlightCandidateSummary): void {
+    this.draftCreateErrors.update((errors) => ({ ...errors, [candidate.id]: null }));
+    this.draftCreateBusy.update((busy) => ({ ...busy, [candidate.id]: true }));
+    this.contentDraftsService
+      .createFromHighlightCandidate(candidate.id)
+      .pipe(finalize(() => this.draftCreateBusy.update((busy) => ({ ...busy, [candidate.id]: false }))))
+      .subscribe({
+        next: (draft) => {
+          this.drafts.set([draft, ...this.drafts().filter((existing) => existing.id !== draft.id)]);
+          this.draftsLoadState.set('ready');
+          this.activeView.set('drafts');
+        },
+        error: () => this.draftCreateErrors.update((errors) => ({ ...errors, [candidate.id]: 'Draft could not be created.' })),
+      });
+  }
+
+  protected isDraftExpanded(draft: ContentDraftSummary): boolean {
+    return this.expandedDrafts()[draft.id] ?? false;
+  }
+
+  protected toggleDraft(draft: ContentDraftSummary): void {
+    this.expandedDrafts.update((items) => ({ ...items, [draft.id]: !(items[draft.id] ?? false) }));
+  }
+
+  protected draftTitle(draft: ContentDraftSummary): string {
+    return draft.title || draft.mediaAssetFilename || 'Untitled draft';
+  }
+
+  protected draftSourceTitle(draft: ContentDraftSummary): string {
+    const source = this.assets().find((item) => item.id === draft.sourceAssetId);
+    return source ? this.assetTitle(source) : draft.sourceAssetId.slice(0, 8);
+  }
+
+  protected draftMediaTitle(draft: ContentDraftSummary): string {
+    return draft.mediaAssetFilename || draft.mediaAssetId.slice(0, 8);
+  }
+
+  protected draftStatusLabel(status: ContentDraftStatus): string {
+    switch (status) {
+      case 'DRAFT':
+        return 'Preparing';
+      case 'READY':
+        return 'Ready';
+      case 'PUBLISHING':
+        return 'Publishing';
+      case 'PUBLISHED':
+        return 'Published';
+      case 'FAILED':
+        return 'Failed';
+    }
+  }
+
+  protected draftStageLabel(stage: ContentDraftWorkflowStage): string {
+    switch (stage) {
+      case 'CLIP_PENDING':
+        return 'Creating clip';
+      case 'VERTICAL_PENDING':
+        return 'Preparing vertical';
+      case 'READY':
+        return 'Ready';
+    }
+  }
+
+  protected draftTitleFor(draft: ContentDraftSummary): string {
+    return this.draftTitleEdits()[draft.id] ?? draft.title ?? '';
+  }
+
+  protected setDraftTitle(draft: ContentDraftSummary, value: string): void {
+    this.draftTitleEdits.update((edits) => ({ ...edits, [draft.id]: value }));
+  }
+
+  protected draftCaptionFor(draft: ContentDraftSummary): string {
+    return this.draftCaptionEdits()[draft.id] ?? draft.caption ?? '';
+  }
+
+  protected setDraftCaption(draft: ContentDraftSummary, value: string): void {
+    this.draftCaptionEdits.update((edits) => ({ ...edits, [draft.id]: value }));
+  }
+
+  protected saveDraftEdits(draft: ContentDraftSummary): void {
+    this.draftSaveErrors.update((errors) => ({ ...errors, [draft.id]: null }));
+    this.draftSaveBusy.update((busy) => ({ ...busy, [draft.id]: true }));
+    const title = this.draftTitleFor(draft).trim() || null;
+    const caption = this.draftCaptionFor(draft).trim() || null;
+    this.contentDraftsService
+      .update(draft.id, title, caption)
+      .pipe(finalize(() => this.draftSaveBusy.update((busy) => ({ ...busy, [draft.id]: false }))))
+      .subscribe({
+        next: (updated) => this.replaceDraft(updated),
+        error: () => this.draftSaveErrors.update((errors) => ({ ...errors, [draft.id]: 'Draft could not be saved.' })),
+      });
+  }
+
+  protected draftPublishAccountFor(draft: ContentDraftSummary): string {
+    return this.draftPublishAccountId()[draft.id] ?? this.publishableSocialAccounts()[0]?.id ?? '';
+  }
+
+  protected setDraftPublishAccount(draft: ContentDraftSummary, value: string): void {
+    this.draftPublishAccountId.update((ids) => ({ ...ids, [draft.id]: value }));
+  }
+
+  protected canPublishDraft(draft: ContentDraftSummary): boolean {
+    return draft.status === 'READY' || draft.status === 'PUBLISHED';
+  }
+
+  protected publishDraft(draft: ContentDraftSummary): void {
+    this.draftPublishErrors.update((errors) => ({ ...errors, [draft.id]: null }));
+    const socialAccountId = this.draftPublishAccountFor(draft);
+    if (!this.canPublishDraft(draft)) {
+      this.draftPublishErrors.update((errors) => ({ ...errors, [draft.id]: 'Draft is not ready to publish.' }));
+      return;
+    }
+    if (!socialAccountId) {
+      this.draftPublishErrors.update((errors) => ({ ...errors, [draft.id]: 'Connect a social account first.' }));
+      return;
+    }
+    this.draftPublishBusy.update((busy) => ({ ...busy, [draft.id]: true }));
+    this.contentDraftsService
+      .publish(draft.id, socialAccountId)
+      .pipe(finalize(() => this.draftPublishBusy.update((busy) => ({ ...busy, [draft.id]: false }))))
+      .subscribe({
+        next: (updated) => this.replaceDraft(updated),
+        error: () => this.draftPublishErrors.update((errors) => ({ ...errors, [draft.id]: 'Publication could not be started.' })),
+      });
+  }
+
+  protected canRetryDraft(draft: ContentDraftSummary): boolean {
+    return draft.status === 'FAILED';
+  }
+
+  protected retryDraftPreparation(draft: ContentDraftSummary): void {
+    this.draftRetryErrors.update((errors) => ({ ...errors, [draft.id]: null }));
+    this.draftRetryBusy.update((busy) => ({ ...busy, [draft.id]: true }));
+    this.contentDraftsService
+      .retryPreparation(draft.id)
+      .pipe(finalize(() => this.draftRetryBusy.update((busy) => ({ ...busy, [draft.id]: false }))))
+      .subscribe({
+        next: (updated) => this.replaceDraft(updated),
+        error: () => this.draftRetryErrors.update((errors) => ({ ...errors, [draft.id]: 'Retry could not be started.' })),
+      });
+  }
+
+  private replaceDraft(draft: ContentDraftSummary): void {
+    this.drafts.set(this.drafts().map((existing) => (existing.id === draft.id ? draft : existing)));
   }
 
   private refreshTranscripts(assets: MediaAssetSummary[]): void {

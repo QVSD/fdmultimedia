@@ -201,6 +201,41 @@ class PublishingServiceTest {
     }
 
     @Test
+    void createPublicationForDraftLinksContentDraftAndSnapshotsCaptionAtCallTime() {
+        MediaAsset asset = readyInspectedVideoAsset();
+        when(socialAccounts.findByWorkspaceAndId(workspace, account.getId())).thenReturn(Optional.of(account));
+        Job job = publishJob(asset.getId(), account.getId());
+        when(jobService.createForWorkspace(any(), any(JobCreateRequest.class))).thenReturn(jobSummary(job));
+        when(jobService.getJobEntityForWorkspace(workspace, job.getId())).thenReturn(Optional.of(job));
+        UUID draftId = UUID.randomUUID();
+
+        PublicationSummary summary = service.createPublicationForDraft(user, asset, account.getId(), "Caption at publish time", draftId);
+
+        assertThat(summary.contentDraftId()).isEqualTo(draftId);
+        assertThat(summary.caption()).isEqualTo("Caption at publish time");
+        ArgumentCaptor<Publication> saved = ArgumentCaptor.forClass(Publication.class);
+        verify(publications).save(saved.capture());
+        assertThat(saved.getValue().getContentDraftId()).isEqualTo(draftId);
+        // Later Draft caption edits happen on the ContentDraft entity only, never
+        // on this Publication row — the caption above is a copy, not a live link.
+        assertThat(saved.getValue().getCaption()).isEqualTo("Caption at publish time");
+    }
+
+    @Test
+    void directPublicationHasNoContentDraftId() {
+        MediaAsset asset = readyInspectedVideoAsset();
+        when(assets.findByWorkspaceAndId(workspace, asset.getId())).thenReturn(Optional.of(asset));
+        when(socialAccounts.findByWorkspaceAndId(workspace, account.getId())).thenReturn(Optional.of(account));
+        Job job = publishJob(asset.getId(), account.getId());
+        when(jobService.createForWorkspace(any(), any(JobCreateRequest.class))).thenReturn(jobSummary(job));
+        when(jobService.getJobEntityForWorkspace(workspace, job.getId())).thenReturn(Optional.of(job));
+
+        PublicationSummary summary = service.createPublication(user, asset.getId(), new CreatePublicationRequest(account.getId(), "Hello"));
+
+        assertThat(summary.contentDraftId()).isNull();
+    }
+
+    @Test
     void rejectsCaptionOverMaxLength() {
         MediaAsset asset = readyInspectedVideoAsset();
         when(assets.findByWorkspaceAndId(workspace, asset.getId())).thenReturn(Optional.of(asset));

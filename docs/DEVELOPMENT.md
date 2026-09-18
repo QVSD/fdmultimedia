@@ -98,12 +98,14 @@ npm run build      # production build
 ## Adding a new backend module
 
 `accounts` and `publishing` are implemented as of Phase 10A; `publishing.instagram`
-(the real Instagram Graph API integration) was added in Phase 10B. `robots`,
+(the real Instagram Graph API integration) was added in Phase 10B;
+`contentdrafts` (bridging a source asset/highlight candidate to a Publication
+as one editable product object) was added in Phase 11A. `robots`,
 `analytics`, and `revenue` remain placeholders. The package layout under
 `com.fdmultimedia.api` (`auth`, `users`, `workspaces`, `accounts`, `robots`,
-`assets`, `jobs`, `workers`, `publishing`, `analytics`, `revenue`, `shared`)
-is where new domain logic should land. See [ARCHITECTURE.md](ARCHITECTURE.md)
-for what each package is for.
+`assets`, `jobs`, `workers`, `publishing`, `contentdrafts`, `analytics`,
+`revenue`, `shared`) is where new domain logic should land. See
+[ARCHITECTURE.md](ARCHITECTURE.md) for what each package is for.
 
 ## Testing Instagram publishing locally
 

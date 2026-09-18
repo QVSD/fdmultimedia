@@ -26,6 +26,185 @@
     <p class="content__state content__state--error">{{ importError() }}</p>
   }
 
+  <nav class="content__tabs" aria-label="Content views">
+    <button type="button" [class.content__tab--active]="activeView() === 'assets'" (click)="switchView('assets')">Assets</button>
+    <button type="button" [class.content__tab--active]="activeView() === 'drafts'" (click)="switchView('drafts')">
+      Drafts @if (drafts().length > 0) { ({{ drafts().length }}) }
+    </button>
+  </nav>
+
+  @if (activeView() === 'drafts') {
+    @switch (draftsLoadState()) {
+      @case ('loading') {
+        <p class="content__state">Loading drafts...</p>
+      }
+      @case ('error') {
+        <p class="content__state content__state--error">Drafts could not be loaded.</p>
+      }
+      @case ('ready') {
+        @if (drafts().length === 0) {
+          <p class="content__state">
+            No drafts yet. Use "Create Draft" on a ready asset or a highlight candidate to start one.
+          </p>
+        } @else {
+          <div class="asset-list">
+            @for (draft of drafts(); track draft.id) {
+              <article class="asset-card" [class.asset-card--failed]="draft.status === 'FAILED'">
+                <div class="asset-card__summary">
+                  <div class="asset-card__title">
+                    <span class="asset-card__kind">Draft</span>
+                    <h2>{{ draftTitle(draft) }}</h2>
+                    <p>From {{ draftSourceTitle(draft) }}</p>
+                  </div>
+
+                  <div class="asset-card__meta">
+                    <span [class]="'content__badge content__badge--' + draft.status.toLowerCase()">
+                      {{ draftStatusLabel(draft.status) }}
+                    </span>
+                    @if (draft.status === 'DRAFT') {
+                      <span>{{ draftStageLabel(draft.workflowStage) }}</span>
+                    }
+                    @if (draft.caption) {
+                      <span>&ldquo;{{ draft.caption.length > 60 ? (draft.caption.slice(0, 57) + '...') : draft.caption }}&rdquo;</span>
+                    }
+                    <span>{{ draft.createdAt | date:'medium' }}</span>
+                  </div>
+
+                  <div class="asset-card__actions" aria-label="Draft actions">
+                    @if (canRetryDraft(draft)) {
+                      <button type="button" (click)="retryDraftPreparation(draft)" [disabled]="draftRetryBusy()[draft.id]">
+                        {{ draftRetryBusy()[draft.id] ? 'Retrying...' : 'Retry' }}
+                      </button>
+                    }
+                    <button class="button-secondary" type="button" (click)="toggleDraft(draft)" [attr.aria-expanded]="isDraftExpanded(draft)">
+                      {{ isDraftExpanded(draft) ? 'Hide Details' : 'Details' }}
+                    </button>
+                  </div>
+                </div>
+
+                @if (draft.failureMessage) {
+                  <p class="content__error">{{ draft.failureCode }}: {{ draft.failureMessage }}</p>
+                }
+                @if (draftRetryErrors()[draft.id]) {
+                  <p class="content__error">{{ draftRetryErrors()[draft.id] }}</p>
+                }
+
+                @if (isDraftExpanded(draft)) {
+                  <div class="asset-details">
+                    <section class="detail-panel">
+                      <h3>Provenance</h3>
+                      <dl class="detail-grid">
+                        <div><dt>Source</dt><dd>{{ draftSourceTitle(draft) }}</dd></div>
+                        <div><dt>Selected media</dt><dd>{{ draftMediaTitle(draft) }}</dd></div>
+                        <div><dt>Workflow stage</dt><dd>{{ draftStageLabel(draft.workflowStage) }}</dd></div>
+                        <div><dt>Created</dt><dd>{{ draft.createdAt | date:'medium' }}</dd></div>
+                      </dl>
+                    </section>
+
+                    <section class="detail-panel">
+                      <h3>Caption</h3>
+                      <form class="content__publish-form" (ngSubmit)="saveDraftEdits(draft)">
+                        <label>
+                          <span>Title</span>
+                          <input
+                            name="draft-title-{{ draft.id }}"
+                            type="text"
+                            maxlength="200"
+                            placeholder="Optional title"
+                            [ngModel]="draftTitleFor(draft)"
+                            (ngModelChange)="setDraftTitle(draft, $event)"
+                          />
+                        </label>
+                        <label>
+                          <span>Caption</span>
+                          <input
+                            name="draft-caption-{{ draft.id }}"
+                            type="text"
+                            maxlength="2200"
+                            placeholder="Optional caption"
+                            [ngModel]="draftCaptionFor(draft)"
+                            (ngModelChange)="setDraftCaption(draft, $event)"
+                          />
+                        </label>
+                        <button type="submit" [disabled]="draftSaveBusy()[draft.id]">
+                          {{ draftSaveBusy()[draft.id] ? 'Saving...' : 'Save' }}
+                        </button>
+                      </form>
+                      @if (draftSaveErrors()[draft.id]) {
+                        <p class="content__error">{{ draftSaveErrors()[draft.id] }}</p>
+                      }
+                    </section>
+
+                    <section class="detail-panel">
+                      <h3>Publish</h3>
+                      @if (canPublishDraft(draft)) {
+                        @if (publishableSocialAccounts().length === 0) {
+                          <p class="content__muted">
+                            No social accounts yet. Connect Instagram or add a TEST account on the Settings page.
+                          </p>
+                        } @else {
+                          <form class="content__publish-form" (ngSubmit)="publishDraft(draft)">
+                            <label>
+                              <span>Account</span>
+                              <select
+                                name="draft-account-{{ draft.id }}"
+                                [ngModel]="draftPublishAccountFor(draft)"
+                                (ngModelChange)="setDraftPublishAccount(draft, $event)"
+                              >
+                                @for (account of publishableSocialAccounts(); track account.id) {
+                                  <option [value]="account.id">{{ account.displayName }} ({{ account.platform }})</option>
+                                }
+                              </select>
+                            </label>
+                            <button type="submit" [disabled]="draftPublishBusy()[draft.id]">
+                              {{ draftPublishBusy()[draft.id] ? 'Publishing...' : 'Publish' }}
+                            </button>
+                          </form>
+                        }
+                      } @else if (draft.status === 'DRAFT') {
+                        <p class="content__muted">Preparing media before this draft can be published.</p>
+                      } @else if (draft.status === 'FAILED') {
+                        <p class="content__muted">Fix preparation before publishing (retry above).</p>
+                      } @else {
+                        <p class="content__muted">This draft is currently publishing.</p>
+                      }
+                      @if (draftPublishErrors()[draft.id]) {
+                        <p class="content__error">{{ draftPublishErrors()[draft.id] }}</p>
+                      }
+
+                      @if (draft.publications.length > 0) {
+                        <div class="publication-list">
+                          @for (publication of draft.publications; track publication.id) {
+                            <div class="publication-card">
+                              <div class="publication-card__header">
+                                <span [class]="'content__badge content__badge--' + publication.status.toLowerCase()">
+                                  {{ publicationStatusLabel(publication.status) }}
+                                </span>
+                                <span class="content__badge">
+                                  {{ publication.platform }}{{ publication.platform === 'TEST' ? ' (non-real)' : '' }}
+                                </span>
+                                <span class="content__muted">{{ publication.socialAccountDisplayName }}</span>
+                                <span class="content__muted">{{ publication.createdAt | date:'medium' }}</span>
+                              </div>
+                              @if (publication.failureMessage) {
+                                <p class="content__error">{{ publication.failureCode }}: {{ publication.failureMessage }}</p>
+                              }
+                            </div>
+                          }
+                        </div>
+                      }
+                    </section>
+                  </div>
+                }
+              </article>
+            }
+          </div>
+        }
+      }
+    }
+  }
+
+  @if (activeView() === 'assets') {
   @switch (loadState()) {
     @case ('loading') {
       <p class="content__state">Loading assets...</p>
@@ -78,6 +257,11 @@
                       {{ verticalBusy()[asset.id] ? 'Creating...' : 'Make 9:16' }}
                     </button>
                   }
+                  @if (canCreateDraft(asset)) {
+                    <button type="button" (click)="createDraftFromAsset(asset)" [disabled]="draftCreateBusy()[asset.id]">
+                      {{ draftCreateBusy()[asset.id] ? 'Creating...' : 'Create Draft' }}
+                    </button>
+                  }
                   @if (canPublish(asset)) {
                     <button type="button" (click)="toggleAsset(asset)">Publish</button>
                   }
@@ -89,6 +273,9 @@
 
               @if (asset.errorMessage) {
                 <p class="content__error">{{ asset.errorCode }}: {{ asset.errorMessage }}</p>
+              }
+              @if (draftCreateErrors()[asset.id]) {
+                <p class="content__error">{{ draftCreateErrors()[asset.id] }}</p>
               }
               @if (transcriptErrors()[asset.id]) {
                 <p class="content__error">{{ transcriptErrors()[asset.id] }}</p>
@@ -179,11 +366,22 @@
                               <p>{{ candidate.reason }}</p>
                               <button
                                 type="button"
+                                (click)="createDraftFromCandidate(candidate)"
+                                [disabled]="draftCreateBusy()[candidate.id]"
+                              >
+                                {{ draftCreateBusy()[candidate.id] ? 'Creating...' : 'Create Draft' }}
+                              </button>
+                              <button
+                                class="button-secondary"
+                                type="button"
                                 (click)="createClipFromCandidate(candidate)"
                                 [disabled]="candidateClipBusy()[candidate.id]"
                               >
                                 {{ candidateClipBusy()[candidate.id] ? 'Creating...' : 'Create Clip' }}
                               </button>
+                              @if (draftCreateErrors()[candidate.id]) {
+                                <span class="content__error">{{ draftCreateErrors()[candidate.id] }}</span>
+                              }
                               @if (candidateClipErrors()[candidate.id]) {
                                 <span class="content__error">{{ candidateClipErrors()[candidate.id] }}</span>
                               }
@@ -341,5 +539,6 @@
         </div>
       }
     }
+  }
   }
 </section>

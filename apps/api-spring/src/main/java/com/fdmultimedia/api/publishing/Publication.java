@@ -61,6 +61,9 @@ public class Publication {
     @Column(name = "provider_publication_id")
     private String providerPublicationId;
 
+    @Column(name = "content_draft_id")
+    private UUID contentDraftId;
+
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "created_by_user_id", nullable = false)
     private AppUser createdByUser;
@@ -90,6 +93,17 @@ public class Publication {
             String caption,
             AppUser createdByUser,
             Instant now) {
+        this(workspace, asset, socialAccount, caption, createdByUser, null, now);
+    }
+
+    public Publication(
+            Workspace workspace,
+            MediaAsset asset,
+            SocialAccount socialAccount,
+            String caption,
+            AppUser createdByUser,
+            UUID contentDraftId,
+            Instant now) {
         this.id = UUID.randomUUID();
         this.workspace = workspace;
         this.asset = asset;
@@ -97,6 +111,7 @@ public class Publication {
         this.status = PublicationStatus.PENDING;
         this.caption = caption;
         this.createdByUser = createdByUser;
+        this.contentDraftId = contentDraftId;
         this.createdAt = now;
         this.updatedAt = now;
     }
@@ -174,6 +189,7 @@ public class Publication {
     public String getCaption() { return caption; }
     public String getProviderRequestId() { return providerRequestId; }
     public String getProviderPublicationId() { return providerPublicationId; }
+    public UUID getContentDraftId() { return contentDraftId; }
     public AppUser getCreatedByUser() { return createdByUser; }
     public Instant getCreatedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }

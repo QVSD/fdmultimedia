@@ -7,6 +7,8 @@ import { PublishingService } from '../../core/publishing/publishing.service';
 import { PublicationSummary } from '../../core/publishing/publishing.models';
 import { SocialAccountsService } from '../../core/social-accounts/social-accounts.service';
 import { SocialAccountSummary } from '../../core/social-accounts/social-account.models';
+import { ContentDraftsService } from '../../core/content-drafts/content-drafts.service';
+import { ContentDraftSummary } from '../../core/content-drafts/content-draft.models';
 import { Content } from './content';
 
 describe('Content', () => {
@@ -26,6 +28,10 @@ describe('Content', () => {
   >;
   let publishingService: Pick<PublishingService, 'createPublication' | 'listForAsset'>;
   let socialAccountsService: Pick<SocialAccountsService, 'list' | 'create'>;
+  let contentDraftsService: Pick<
+    ContentDraftsService,
+    'list' | 'createFromAsset' | 'createFromHighlightCandidate' | 'update' | 'publish' | 'retryPreparation'
+  >;
 
   beforeEach(async () => {
     assetsService = {
@@ -53,6 +59,14 @@ describe('Content', () => {
       createPublication: vi.fn().mockReturnValue(of(publication('PENDING'))),
       listForAsset: vi.fn().mockReturnValue(of([])),
     };
+    contentDraftsService = {
+      list: vi.fn().mockReturnValue(of([])),
+      createFromAsset: vi.fn().mockReturnValue(of(draft('DRAFT', 'CLIP_PENDING'))),
+      createFromHighlightCandidate: vi.fn().mockReturnValue(of(draft('DRAFT', 'CLIP_PENDING'))),
+      update: vi.fn().mockReturnValue(of(draft('READY', 'READY'))),
+      publish: vi.fn().mockReturnValue(of(draft('PUBLISHING', 'READY'))),
+      retryPreparation: vi.fn().mockReturnValue(of(draft('DRAFT', 'CLIP_PENDING'))),
+    };
 
     await TestBed.configureTestingModule({
       imports: [Content],
@@ -60,6 +74,7 @@ describe('Content', () => {
         { provide: AssetsService, useValue: assetsService },
         { provide: PublishingService, useValue: publishingService },
         { provide: SocialAccountsService, useValue: socialAccountsService },
+        { provide: ContentDraftsService, useValue: contentDraftsService },
       ],
     }).compileComponents();
 
@@ -321,6 +336,114 @@ describe('Content', () => {
     expect(component['highlightAnalysis'](ready)?.candidates[0].rank).toBe(1);
   });
 
+  it('shows the empty drafts state', () => {
+    fixture.detectChanges();
+    component['switchView']('drafts');
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.textContent).toContain('No drafts yet.');
+  });
+
+  it('creates a draft from an eligible existing asset and switches to the drafts view', () => {
+    fixture.detectChanges();
+    const ready = component['assets']().find((item) => item.status === 'READY')!;
+
+    component['createDraftFromAsset'](ready);
+
+    expect(contentDraftsService.createFromAsset).toHaveBeenCalledWith(ready.id, null, null);
+    expect(component['activeView']()).toBe('drafts');
+    expect(component['drafts']()[0].id).toBe('draft-1');
+  });
+
+  it('creates a draft from a highlight candidate', () => {
+    fixture.detectChanges();
+    const candidate = analysis('SUCCEEDED').candidates[0];
+
+    component['createDraftFromCandidate'](candidate);
+
+    expect(contentDraftsService.createFromHighlightCandidate).toHaveBeenCalledWith(candidate.id);
+    expect(component['drafts']()[0].id).toBe('draft-1');
+  });
+
+  it('shows draft processing progress while a clip is pending', () => {
+    vi.mocked(contentDraftsService.list).mockReturnValue(of([draft('DRAFT', 'CLIP_PENDING')]));
+    fixture = TestBed.createComponent(Content);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+    component['switchView']('drafts');
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.textContent).toContain('Preparing');
+    expect(fixture.nativeElement.textContent).toContain('Creating clip');
+  });
+
+  it('lets a READY draft be edited and published to a TEST account', () => {
+    vi.mocked(contentDraftsService.list).mockReturnValue(of([draft('READY', 'READY')]));
+    fixture = TestBed.createComponent(Content);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+    component['switchView']('drafts');
+    const readyDraft = component['drafts']()[0];
+
+    component['toggleDraft'](readyDraft);
+    component['setDraftTitle'](readyDraft, 'My draft');
+    component['setDraftCaption'](readyDraft, 'Caption text');
+    component['saveDraftEdits'](readyDraft);
+
+    expect(contentDraftsService.update).toHaveBeenCalledWith(readyDraft.id, 'My draft', 'Caption text');
+
+    component['setDraftPublishAccount'](readyDraft, 'account-1');
+    component['publishDraft'](readyDraft);
+
+    expect(contentDraftsService.publish).toHaveBeenCalledWith(readyDraft.id, 'account-1');
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('Publishing');
+  });
+
+  it('labels TEST publications on a draft as non-real', () => {
+    vi.mocked(contentDraftsService.list).mockReturnValue(of([draft('PUBLISHING', 'READY')]));
+    fixture = TestBed.createComponent(Content);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+    component['switchView']('drafts');
+    const publishingDraft = component['drafts']()[0];
+    component['toggleDraft'](publishingDraft);
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.textContent).toContain('non-real');
+  });
+
+  it('surfaces a failed draft preparation and allows retry without destroying the draft', () => {
+    vi.mocked(contentDraftsService.list).mockReturnValue(of([draft('FAILED', 'CLIP_PENDING')]));
+    fixture = TestBed.createComponent(Content);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+    component['switchView']('drafts');
+    fixture.detectChanges();
+    const failedDraft = component['drafts']()[0];
+
+    expect(fixture.nativeElement.textContent).toContain('Encoding failed');
+    expect(component['canRetryDraft'](failedDraft)).toBe(true);
+
+    component['retryDraftPreparation'](failedDraft);
+
+    expect(contentDraftsService.retryPreparation).toHaveBeenCalledWith(failedDraft.id);
+  });
+
+  it('shows an error state when drafts fail to load and renders without null/undefined leaking through', () => {
+    vi.mocked(contentDraftsService.list).mockReturnValue(throwError(() => new Error('Network failure')));
+    fixture = TestBed.createComponent(Content);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+    component['switchView']('drafts');
+    fixture.detectChanges();
+
+    const text = fixture.nativeElement.textContent as string;
+    expect(text).toContain('Drafts could not be loaded.');
+    expect(text).not.toContain('undefined');
+    expect(text).not.toContain('NaN');
+  });
+
   function asset(status: MediaAssetStatus): MediaAssetSummary {
     return {
       id: `${status}-asset`,
@@ -440,12 +563,37 @@ describe('Content', () => {
       caption: 'Hello from the TEST provider',
       providerRequestId: status === 'PUBLISHED' ? 'test-req-publication-1' : null,
       providerPublicationId: status === 'PUBLISHED' ? 'test-pub-publication-1' : null,
+      contentDraftId: null,
       createdAt: '2026-09-10T08:03:00Z',
       updatedAt: '2026-09-10T08:03:10Z',
       publishedAt: status === 'PUBLISHED' ? '2026-09-10T08:03:10Z' : null,
       failureCode: status === 'FAILED' ? 'PUBLISH_MEDIA_FAILED' : null,
       failureMessage: status === 'FAILED' ? 'Publishing failed' : null,
       attempts: [],
+    };
+  }
+
+  function draft(
+    status: ContentDraftSummary['status'],
+    workflowStage: ContentDraftSummary['workflowStage'],
+  ): ContentDraftSummary {
+    return {
+      id: 'draft-1',
+      sourceAssetId: 'READY-asset',
+      mediaAssetId: status === 'DRAFT' ? 'clip-asset' : 'READY-asset',
+      mediaAssetFilename: status === 'DRAFT' ? null : 'video.mp4',
+      sourceHighlightCandidateId: 'candidate-1',
+      title: null,
+      caption: null,
+      status,
+      workflowStage,
+      pendingJobId: status === 'DRAFT' ? 'clip-job' : null,
+      failureCode: status === 'FAILED' ? 'FFMPEG_ERROR' : null,
+      failureMessage: status === 'FAILED' ? 'Encoding failed' : null,
+      createdAt: '2026-09-10T08:05:00Z',
+      updatedAt: '2026-09-10T08:05:10Z',
+      publishedAt: null,
+      publications: status === 'PUBLISHING' ? [publication('PENDING')] : [],
     };
   }
 

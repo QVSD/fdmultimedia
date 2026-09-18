@@ -13,6 +13,8 @@ public interface PublicationRepository extends JpaRepository<Publication, UUID> 
 
     List<Publication> findByWorkspaceAndAssetOrderByCreatedAtDesc(Workspace workspace, MediaAsset asset);
 
+    List<Publication> findByWorkspaceAndContentDraftIdOrderByCreatedAtDesc(Workspace workspace, UUID contentDraftId);
+
     Optional<Publication> findByWorkspaceAndId(Workspace workspace, UUID id);
 
     Optional<Publication> findByJobId(UUID jobId);

@@ -1,6 +1,6 @@
 # Roadmap
 
-The repository is currently at Phase 10B. Completed phases are marked below;
+The repository is currently at Phase 11A. Completed phases are marked below;
 later phases are planned high-level direction and intentionally do not go into
 implementation detail before they are started.
 
@@ -75,9 +75,32 @@ implementation detail before they are started.
    Disabled by default; TEST keeps working with none of it configured.
    *(complete — see docs/ARCHITECTURE.md for the full design and the Phase
    10B final report for Level A/B acceptance status)*
-19. **FFmpeg processing** — richer automated video processing pipelines.
-20. **Additional platform integrations** — TikTok, YouTube, or other real
+19. **Content drafts & end-to-end content workflow (Phase 11A)** — a
+   workspace-scoped `ContentDraft` bridges a source `MediaAsset` (or a
+   `HighlightCandidate`) to a `Publication` as a coherent product object,
+   without becoming a second media-processing system: it orchestrates the
+   existing `CREATE_CLIP` / `CREATE_SOCIAL_VERTICAL` Jobs through
+   `MediaAssetService` and creates Publications through `PublishingService`,
+   never running FFmpeg or duplicating either service's logic itself. Durable
+   `status` (DRAFT/READY/PUBLISHING/PUBLISHED/FAILED) and `workflowStage`
+   (CLIP_PENDING/VERTICAL_PENDING/READY) columns on the draft row — reconciled
+   idempotently, under a row lock, on every draft read — let preparation
+   survive polling, refresh, and restart without an in-memory callback or a
+   second derivative being queued. A candidate-originated draft always
+   resolves to the 9:16 social vertical; an existing eligible asset becomes a
+   draft directly. `Publication` gained an optional `contentDraftId` so a
+   draft can carry more than one Publication over time (future multi-platform
+   fan-out) while remaining the historical, unedited record of what was
+   actually submitted — caption edits on the draft after a Publication exists
+   never alter it. A failed Publication reverts the draft's display status to
+   READY rather than a dead end; a failed clip/vertical derivative moves the
+   draft to FAILED with a user-triggered, idempotent retry. The Content page
+   gained a Drafts view alongside Assets, and "Create Draft" actions on
+   eligible assets and highlight candidates, without replacing the existing
+   Phase 10A direct-publish flow. *(complete)*
+20. **FFmpeg processing** — richer automated video processing pipelines.
+21. **Additional platform integrations** — TikTok, YouTube, or other real
    platforms behind the same provider-boundary pattern Instagram
    established in Phase 10B.
-21. **AI content** — AI-assisted content creation.
-22. **Analytics / revenue** — performance analytics and revenue tracking.
+22. **AI content** — AI-assisted content creation.
+23. **Analytics / revenue** — performance analytics and revenue tracking.

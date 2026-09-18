@@ -62,6 +62,25 @@ Out of scope for this phase: TikTok, YouTube, Facebook publishing, Stories,
 carousels, image posts, engagement automation, scheduled/recurring
 publishing, and AI-generated captions/hashtags.
 
+## Phase 11A scope
+
+Phase 11A turns the separate technical actions built in Phases 7–10B (clip,
+social vertical, highlight candidate, publish) into one coherent product
+workflow: a workspace-scoped `ContentDraft` that represents content being
+prepared for publishing. It is deliberately not a Job, a Publication, a
+MediaAsset, or a Robot. See
+[Content drafts (Phase 11A)](#content-drafts-phase-11a) below for the full
+design: the two creation paths (an already-eligible asset, or a highlight
+candidate that starts a clip derivation immediately); durable,
+row-lock-guarded workflow reconciliation that advances the draft only when
+the derivative it is waiting on reaches a terminal state, so repeated polling
+or a restart never queues a duplicate `CREATE_CLIP`/`CREATE_SOCIAL_VERTICAL`
+Job; the caption-snapshot rule that keeps a `Publication` immutable once
+created even as the draft's own caption keeps being edited; and how a failed
+Publication reverts the draft to READY instead of destroying it. Out of scope
+for this phase: autonomous Robots, automatic/scheduled publishing, a generic
+workflow engine, TikTok, and AI-generated captions.
+
 ## High-level architecture
 
 ```
@@ -890,6 +909,101 @@ fetched 2026-09). Requirements this service cannot determine from existing
 metadata (exact codec/GOP/bitrate details) are left for Meta's own
 validation at container-creation time; Phase 10B never silently transforms
 media to force compliance.
+
+## Content drafts (Phase 11A)
+
+`ContentDraft` (`com.fdmultimedia.api.contentdrafts`) is the product bridge
+between a source `MediaAsset`, an optional `HighlightCandidate`, and a
+`Publication`. It carries `sourceAssetId` (the original/source media,
+provenance only) and `mediaAssetId` (the asset currently intended for
+publishing, updated as preparation progresses) separately, so a candidate can
+flow original → clip → social vertical while the draft always shows both the
+original source and the final selected media without duplicating any
+MediaAsset. `ContentDraftService` holds a `MediaAssetService` dependency and
+calls `createClip`/`createSocialVertical` directly — exactly the reuse
+pattern `HighlightService.createClipFromCandidate` already established — so
+FFmpeg execution, output-asset creation, and Job creation are never
+reimplemented. Publishing likewise goes through a small
+`PublishingService.createPublicationForDraft` overload that shares every
+eligibility/account/Job-creation rule with the Phase 10A direct-publish path.
+
+### Two creation paths
+
+- **Existing asset → draft** (`POST /api/content-drafts`): the selected
+  `MediaAsset` must already be READY, INSPECTED, and video. The draft is
+  created directly at `status=READY`, `workflowStage=READY` — no processing
+  needed, `sourceAssetId == mediaAssetId`.
+- **Highlight candidate → draft** (`POST /api/content-drafts/from-highlight/{candidateId}`):
+  requires a `SUCCEEDED` `HighlightAnalysis`. The endpoint synchronously calls
+  `MediaAssetService.createClip` (a DB insert + Job creation, not FFmpeg
+  itself — the same thing `POST /api/highlight-candidates/{id}/create-clip`
+  already does) and creates the draft at `status=DRAFT`,
+  `workflowStage=CLIP_PENDING`, pointing `mediaAssetId` at the in-progress
+  clip. A candidate-originated draft always targets the 9:16 social vertical
+  as its final asset, matching the short-form publishing target.
+
+### Durable, idempotent workflow reconciliation
+
+`workflow_stage` (`CLIP_PENDING` → `VERTICAL_PENDING` → `READY`) and
+`pending_job_id` live as plain columns on `content_drafts` — no second
+workflow-state table, no in-memory callback. `ContentDraftService.reconcile`
+runs inside every single-draft read (`GET /api/content-drafts/{id}`, and once
+per draft on `GET /api/content-drafts`), fetching the row with
+`ContentDraftRepository.findByWorkspaceAndIdForUpdate`
+(`SELECT ... FOR UPDATE`) before inspecting it:
+
+- If the pending derivative's own `MediaAsset` has failed, the draft moves to
+  `FAILED` with a copy of the derivative's error — no exception escapes to
+  the caller.
+- If it has reached READY+INSPECTED, the draft advances exactly one stage
+  (`CLIP_PENDING` → calls `createSocialVertical` once and moves to
+  `VERTICAL_PENDING`; `VERTICAL_PENDING` → moves to `READY`).
+- Otherwise the read is a no-op.
+
+The row lock plus the stage field itself as the idempotency guard means
+concurrent or repeated reads/polls of the same draft cannot both observe
+`CLIP_PENDING` and each queue a `CREATE_SOCIAL_VERTICAL` Job — the first
+reconciliation to commit advances the stage, and every later read sees the
+new stage and does nothing further. Because reconciliation reads only
+persisted `MediaAsset`/`Job` state, a preparing draft survives an API
+restart, a Worker restart, or a Job retry exactly like any other
+Job-observing read in this codebase — nothing depends on which process or
+Worker instance happened to run the derivative.
+
+User-triggered retry (`POST /api/content-drafts/{id}/retry-preparation`,
+only valid from `FAILED`) re-derives the failed stage rather than replaying a
+generic retry: a failed clip re-runs `createClip` from the original candidate
+timing; a failed vertical re-runs `createSocialVertical` from the failed
+asset's own `parentAsset` (the successful clip), located through the same
+`MediaAsset` derivation lineage Phase 7/8 already established. Each retry
+click creates exactly one new Job — never an automatic retry loop.
+
+### Publication linkage and caption snapshot
+
+`publications.content_draft_id` is a plain nullable UUID column (not a JPA
+relationship) so the `publishing` package never has to depend on
+`contentdrafts` — only `contentdrafts` depends on `publishing`, avoiding a
+package cycle. It is intentionally not a required one-to-one link: a draft
+may accumulate more than one `Publication` over time (a failed attempt
+followed by a successful retry, or, when a platform beyond TEST/Instagram
+exists, one Publication per platform), and `Publication` remains the
+unedited historical record of exactly what was submitted. `ContentDraft.caption`
+is the editable, in-progress product state; the moment
+`createPublicationForDraft` runs, the current caption is copied into the new
+`Publication` row, and every later edit to the draft's caption has no way to
+reach that row again — there is no back-reference, only the one-time copy at
+construction.
+
+Draft `status` is *derived* from its linked Publications on every
+reconciled read, never treated as an independent source of truth once a
+Publication exists: any `PENDING`/`PUBLISHING` Publication shows the draft as
+`PUBLISHING`; any `PUBLISHED` Publication shows it as `PUBLISHED` (and copies
+its `publishedAt`); if every Publication has reached a terminal failure, the
+draft reverts to `READY` rather than staying stuck — a failed publish must
+never make a draft permanently unusable. Publishing again from `READY` or
+`PUBLISHED` creates a new `Publication` (never mutates a prior one), which is
+how a draft becomes reusable after a failure and how the schema already
+supports a future multi-platform fan-out without redesigning `ContentDraft`.
 
 ## An important architectural rule: Robots are not workers
 

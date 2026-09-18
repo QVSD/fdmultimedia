@@ -5,9 +5,9 @@ social-media content workflows, video processing workers running across
 multiple laptops/cloud machines, scheduling, AI-assisted content creation,
 publishing, analytics, and revenue tracking.
 
-## Phase 10B scope
+## Phase 11A scope
 
-This repository is currently at **Phase 10B: Instagram official publishing integration**.
+This repository is currently at **Phase 11A: content drafts & end-to-end content workflow**.
 Phase 9A introduced current Worker telemetry and per-attempt execution metrics;
 Phase 9B introduced deterministic `TELEMETRY_AWARE_V1` selection; Phase 9C
 persisted successful claim decisions and exposed bounded workspace-scoped
@@ -21,7 +21,13 @@ a deterministic, **explicitly non-real** `TEST` publishing provider. Phase
 official "Instagram API with Instagram Login" and Content Publishing API
 (video/Reels), disabled by default and requiring explicit Meta app
 configuration plus an AES-256-GCM credential encryption key to enable. TEST
-keeps working unchanged either way.
+keeps working unchanged either way. Phase 11A adds `ContentDraft`, turning
+the separate clip/vertical/highlight/publish actions into one coherent
+content workflow: a draft can be created from an existing eligible asset or
+from a highlight candidate (which reuses the existing `CREATE_CLIP` /
+`CREATE_SOCIAL_VERTICAL` pipeline, never a second media-processing system),
+tracks durable preparation progress that survives polling and restarts, and
+publishes through the same `PublishingService` used since Phase 10A.
 
 Claim decisions are written in the same transaction as assignment. Empty polls
 and capacity rejections are not persisted, preventing poll-noise growth. Decision
@@ -96,6 +102,20 @@ That means:
   delivery endpoint, and how duplicate real posts are avoided on retry.
   Disabled and fully optional: the app starts and TEST publishing works with
   none of this configured.
+- Workspace-scoped `ContentDraft`s (`GET/POST /api/content-drafts`,
+  `GET/PATCH /api/content-drafts/{id}`,
+  `POST /api/content-drafts/from-highlight/{candidateId}`,
+  `POST /api/content-drafts/{id}/publish`,
+  `POST /api/content-drafts/{id}/retry-preparation`) bridging a source
+  `MediaAsset`/`HighlightCandidate` to a `Publication` as one editable
+  product object, with a durable `DRAFT`/`READY`/`PUBLISHING`/`PUBLISHED`/`FAILED`
+  status and idempotent workflow reconciliation — see
+  [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#content-drafts-phase-11a) for
+  the full design, including the caption-snapshot rule and why a failed
+  Publication reverts a draft to READY instead of destroying it. The Content
+  page has a Drafts view alongside Assets, with "Create Draft" actions on
+  eligible assets and highlight candidates; the Phase 10A direct-publish flow
+  still works unchanged.
 
 No thumbnails, TikTok/YouTube/other platform integrations, AI, analytics, or
 billing are implemented yet — see [docs/ROADMAP.md](docs/ROADMAP.md) for what
