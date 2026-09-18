@@ -93,6 +93,17 @@ app:
       calendar-max-days: ${PUBLISH_SCHEDULE_CALENDAR_MAX_DAYS:90}
       history-max-results: ${PUBLISH_SCHEDULE_HISTORY_MAX_RESULTS:100}
       poll-interval-ms: ${PUBLISH_SCHEDULER_POLL_MS:15000}
+  robots:
+    automation-enabled: ${ROBOT_AUTOMATION_ENABLED:true}
+    min-cadence-interval-hours: ${ROBOT_MIN_CADENCE_INTERVAL_HOURS:1}
+    max-cadence-interval-hours: ${ROBOT_MAX_CADENCE_INTERVAL_HOURS:168}
+    min-schedule-delay-minutes: ${ROBOT_MIN_SCHEDULE_DELAY_MINUTES:1}
+    max-schedule-delay-minutes: ${ROBOT_MAX_SCHEDULE_DELAY_MINUTES:10080}
+    max-runs-per-day-limit: ${ROBOT_MAX_RUNS_PER_DAY_LIMIT:24}
+    max-active-runs-per-workspace: ${ROBOT_MAX_ACTIVE_RUNS_PER_WORKSPACE:5}
+    dispatch-batch-size: ${ROBOT_DISPATCH_BATCH_SIZE:10}
+    reconciliation-batch-size: ${ROBOT_RECONCILIATION_BATCH_SIZE:50}
+    poll-interval-ms: ${ROBOT_SCHEDULER_POLL_MS:15000}
   storage:
     endpoint: ${STORAGE_ENDPOINT:http://localhost:9000}
     public-endpoint: ${STORAGE_PUBLIC_ENDPOINT:${STORAGE_ENDPOINT:http://localhost:9000}}

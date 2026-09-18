@@ -198,6 +198,9 @@
                         <div><dt>Selected media</dt><dd>{{ draftMediaTitle(draft) }}</dd></div>
                         <div><dt>Workflow stage</dt><dd>{{ draftStageLabel(draft.workflowStage) }}</dd></div>
                         <div><dt>Created</dt><dd>{{ draft.createdAt | date:'medium' }}</dd></div>
+                        @if (draft.robotRunId) {
+                          <div><dt>Created by</dt><dd>Robot (run {{ draft.robotRunId.slice(0, 8) }})</dd></div>
+                        }
                       </dl>
                     </section>
 

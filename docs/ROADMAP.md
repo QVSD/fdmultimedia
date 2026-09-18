@@ -1,6 +1,6 @@
 # Roadmap
 
-The repository is currently at Phase 11B. Completed phases are marked below;
+The repository is currently at Phase 11C. Completed phases are marked below;
 later phases are planned high-level direction and intentionally do not go into
 implementation detail before they are started.
 
@@ -120,9 +120,37 @@ implementation detail before they are started.
    rewritten back onto the schedule. The Content page gained a Schedule
    action on READY/PUBLISHED Drafts and a chronological Upcoming/History
    view. *(complete)*
-21. **FFmpeg processing** — richer automated video processing pipelines.
-22. **Additional platform integrations** — TikTok, YouTube, or other real
+21. **Robots & automation foundation (Phase 11C)** — a workspace-scoped
+   `Robot` is a persistent automation *policy* ("what should happen"), not a
+   Worker and not a Job — it orchestrates the existing `HighlightService`,
+   `ContentDraftService`, and `PublishScheduleService` exactly as a human
+   using the Content page would, without a second media pipeline or a second
+   publishing path. Three autonomy modes bound how far a Robot may act
+   without a human: `DRAFT_ONLY` stops at a READY draft, `REVIEW_REQUIRED`
+   creates a `RobotApproval` and waits for a human decision, and
+   `AUTO_SCHEDULE` creates a `PublishSchedule` unattended — but only against
+   the `TEST` provider; the backend hard-rejects
+   `AUTO_SCHEDULE` targeting any real provider (Instagram) with
+   `AUTONOMOUS_PROVIDER_NOT_ALLOWED`, so unattended posting to a real
+   account is impossible regardless of configuration. A durable `RobotRun`
+   audit record tracks provenance (`highlightAnalysisId` →
+   `highlightCandidateId` → `contentDraftId` → `publishScheduleId`) and is
+   reconciled idempotently under a row lock, the same pattern `ContentDraft`
+   established in Phase 11A. A central `@Scheduled` poller claims due Robots
+   under `SELECT ... FOR UPDATE SKIP LOCKED` — the same idiom `JobRepository`
+   and `PublishSchedule` already use — and reserves no Worker or Job before
+   real media work exists. Per-robot Pause and a global
+   `ROBOT_AUTOMATION_ENABLED` kill switch stop new automation without
+   touching Jobs, Drafts, or Schedules already in flight; a DB-level partial
+   unique index enforces at most one active `RobotRun` per Robot, and
+   duplicate-source protection allows at most one successful run per
+   Robot+source asset by default. Sources are restricted to existing,
+   already-imported assets — no arbitrary URL ingestion or scraping. The
+   Content page's Provenance panel now shows when a draft was created by a
+   Robot run. *(complete)*
+22. **FFmpeg processing** — richer automated video processing pipelines.
+23. **Additional platform integrations** — TikTok, YouTube, or other real
    platforms behind the same provider-boundary pattern Instagram
    established in Phase 10B.
-23. **AI content** — AI-assisted content creation.
-24. **Analytics / revenue** — performance analytics and revenue tracking.
+24. **AI content** — AI-assisted content creation.
+25. **Analytics / revenue** — performance analytics and revenue tracking.

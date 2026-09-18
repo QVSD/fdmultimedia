@@ -5,9 +5,9 @@ social-media content workflows, video processing workers running across
 multiple laptops/cloud machines, scheduling, AI-assisted content creation,
 publishing, analytics, and revenue tracking.
 
-## Phase 11B scope
+## Phase 11C scope
 
-This repository is currently at **Phase 11B: content scheduling & publishing calendar**.
+This repository is currently at **Phase 11C: robots & automation foundation**.
 Phase 9A introduced current Worker telemetry and per-attempt execution metrics;
 Phase 9B introduced deterministic `TELEMETRY_AWARE_V1` selection; Phase 9C
 persisted successful claim decisions and exposed bounded workspace-scoped
@@ -39,6 +39,17 @@ same atomic `FOR UPDATE SKIP LOCKED` pattern the Job queue already uses, and
 turns each one into a normal Publication through the existing
 `PublishingService`. A Worker being offline at due time just means the
 resulting `PUBLISH_MEDIA` Job sits queued normally until one claims it.
+Phase 11C adds `Robot`: a persistent automation *policy*, not a Worker and
+not a Job — it orchestrates the same highlight/draft/schedule services a
+human uses from the Content page. Three autonomy modes bound how far a
+Robot may act unattended: `DRAFT_ONLY` stops at a READY draft,
+`REVIEW_REQUIRED` waits for a human `RobotApproval` decision, and
+`AUTO_SCHEDULE` creates a `PublishSchedule` with no human step — but the
+backend hard-rejects `AUTO_SCHEDULE` against any real provider (Instagram),
+so unattended posting to a real account is impossible regardless of
+configuration. A durable `RobotRun` audit record and a central
+`FOR UPDATE SKIP LOCKED` poller mean no in-memory pipeline or waiting
+thread: a restart mid-run loses nothing.
 
 Claim decisions are written in the same transaction as assignment. Empty polls
 and capacity rejections are not persisted, preventing poll-noise growth. Decision
@@ -140,11 +151,27 @@ That means:
   Postgres sessions), and offline-Worker/offline-server misfire semantics.
   The Content page has a Schedule tab (Upcoming/History) and a Schedule
   action on READY/PUBLISHED Drafts, alongside the existing immediate Publish.
+- Workspace-scoped `Robot`s (`GET/POST /api/robots`, `GET/PATCH
+  /api/robots/{id}`, `POST /api/robots/{id}/run|pause|resume`,
+  `GET /api/robots/{id}/runs`, `GET/POST /api/robot-runs*`,
+  `GET/POST /api/robot-approvals*`) — a persistent automation policy that
+  reuses `HighlightService`, `ContentDraftService`, and
+  `PublishScheduleService` unchanged; see
+  [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#robots--automation-foundation-phase-11c)
+  for the full design, including the three autonomy modes, the
+  backend-enforced real-provider safety boundary (`AUTO_SCHEDULE` can never
+  target Instagram or any other real provider), the durable `RobotRun`
+  reconciliation model, workload limits, duplicate-source protection, and
+  the Pause/`ROBOT_AUTOMATION_ENABLED` kill switches. The Content page's
+  Provenance panel shows when a draft was created by a Robot run, and a new
+  Robots page lets a user create Robots, run them on demand, and
+  approve/reject `REVIEW_REQUIRED` proposals.
 
-No thumbnails, TikTok/YouTube/other platform integrations, AI, analytics, or
-billing are implemented yet — see [docs/ROADMAP.md](docs/ROADMAP.md) for what
-comes next and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how the
-pieces fit together.
+No thumbnails, TikTok/YouTube/other platform integrations, AI content
+generation, analytics, or billing are implemented yet — see
+[docs/ROADMAP.md](docs/ROADMAP.md) for what comes next and
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how the pieces fit
+together.
 
 ## Prerequisites
 

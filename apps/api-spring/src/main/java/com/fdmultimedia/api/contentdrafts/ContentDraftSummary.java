@@ -21,5 +21,6 @@ public record ContentDraftSummary(
         Instant createdAt,
         Instant updatedAt,
         Instant publishedAt,
-        List<PublicationSummary> publications) {
+        List<PublicationSummary> publications,
+        UUID robotRunId) {
 }

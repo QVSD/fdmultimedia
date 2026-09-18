@@ -311,7 +311,7 @@ public class ContentDraftService {
                 summary.id(), summary.sourceAssetId(), summary.mediaAssetId(), summary.mediaAssetFilename(),
                 summary.sourceHighlightCandidateId(), summary.title(), summary.caption(), summary.status(),
                 summary.workflowStage(), summary.pendingJobId(), summary.failureCode(), summary.failureMessage(),
-                summary.createdAt(), summary.updatedAt(), summary.publishedAt(), merged);
+                summary.createdAt(), summary.updatedAt(), summary.publishedAt(), merged, summary.robotRunId());
     }
 
     private ContentDraftSummary toSummary(ContentDraft draft, Workspace workspace) {
@@ -332,6 +332,7 @@ public class ContentDraftService {
                 draft.getCreatedAt(),
                 draft.getUpdatedAt(),
                 draft.getPublishedAt(),
-                publicationSummaries);
+                publicationSummaries,
+                draft.getRobotRunId());
     }
 }

@@ -20,4 +20,5 @@ export interface ContentDraftSummary {
   updatedAt: string;
   publishedAt: string | null;
   publications: PublicationSummary[];
+  robotRunId: string | null;
 }

@@ -80,6 +80,24 @@ class SecurityConfigTest {
     }
 
     @Test
+    void robotsApiRejectsUnauthenticatedUsers() throws Exception {
+        mockMvc.perform(get("/api/robots"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void robotRunsApiRejectsUnauthenticatedUsers() throws Exception {
+        mockMvc.perform(get("/api/robot-runs"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void robotApprovalsApiRejectsUnauthenticatedUsers() throws Exception {
+        mockMvc.perform(get("/api/robot-approvals"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
     void publicMediaEndpointIsReachableWithoutAuthenticationBecauseMetaMustFetchIt() throws Exception {
         mockMvc.perform(get("/api/public-media/some-token"))
                 .andExpect(status().isNoContent());

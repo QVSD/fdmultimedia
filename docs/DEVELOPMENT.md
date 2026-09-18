@@ -104,12 +104,17 @@ as one editable product object) was added in Phase 11A; `publishschedules`
 (user-controlled future scheduling of a Draft's publication) was added in
 Phase 11B — note this is deliberately a separate package from the Worker/Job
 scheduling code in `jobs` (`SchedulingDecision` etc.); they solve different
-problems and the naming is meant to keep them from being confused. `robots`,
-`analytics`, and `revenue` remain placeholders. The package layout under
-`com.fdmultimedia.api` (`auth`, `users`, `workspaces`, `accounts`, `robots`,
-`assets`, `jobs`, `workers`, `publishing`, `contentdrafts`, `publishschedules`,
-`analytics`, `revenue`, `shared`) is where new domain logic should land. See
-[ARCHITECTURE.md](ARCHITECTURE.md) for what each package is for.
+problems and the naming is meant to keep them from being confused. `robots`
+(persistent automation policies that orchestrate `contentdrafts` and
+`publishschedules` unattended, within backend-enforced autonomy/provider
+limits) was added in Phase 11C — a third, independent scheduling layer from
+both `jobs` and `publishschedules`, with no `Robot -> Worker` relationship
+anywhere. `analytics` and `revenue` remain placeholders. The package layout
+under `com.fdmultimedia.api` (`auth`, `users`, `workspaces`, `accounts`,
+`robots`, `assets`, `jobs`, `workers`, `publishing`, `contentdrafts`,
+`publishschedules`, `analytics`, `revenue`, `shared`) is where new domain
+logic should land. See [ARCHITECTURE.md](ARCHITECTURE.md) for what each
+package is for.
 
 ## Testing Instagram publishing locally
 
@@ -147,6 +152,37 @@ leaves the resulting `PUBLISH_MEDIA` Job `QUEUED`). Set
 `PUBLISH_SCHEDULER_ENABLED=false` to disable the dispatcher entirely (e.g.
 for a deployment that only wants immediate publishing) — schedules can still
 be created and cancelled, they simply never dispatch.
+
+## Testing robot automation locally
+
+`ROBOT_AUTOMATION_ENABLED=true` (the default) and no other configuration is
+needed for TEST-provider automation — create a Robot
+(`POST /api/robots`) with an existing READY+INSPECTED source asset and
+`autonomyMode: "AUTO_SCHEDULE"` against a TEST `SocialAccount`, then either
+`POST /api/robots/{id}/run` for an immediate run or set `cadenceType:
+"INTERVAL"` and wait for `ROBOT_SCHEDULER_POLL_MS` (default 15s) to claim it.
+`GET /api/robot-runs/{id}` shows the run walking through its provenance
+columns (`highlightAnalysisId` → `highlightCandidateId` → `contentDraftId` →
+`publishScheduleId`) to `SUCCEEDED`, with a normal `PUBLISH_MEDIA` Job queued
+for a Worker exactly as if a human had scheduled the same Draft by hand. Try
+the same Robot with `autonomyMode: "REVIEW_REQUIRED"` to see a
+`RobotApproval` appear at `GET /api/robot-approvals?status=PENDING` instead
+of an immediate schedule, and `POST /api/robot-approvals/{id}/approve` (or
+`/reject`) to resolve it.
+
+To exercise the real-provider safety boundary without an Instagram account,
+attempt `POST /api/robots` with `autonomyMode: "AUTO_SCHEDULE"` against any
+non-`TEST` account (or `PATCH` an existing Robot to point at one) — the API
+rejects it with 409 `AUTONOMOUS_PROVIDER_NOT_ALLOWED` regardless of Meta
+configuration; `DRAFT_ONLY`/`REVIEW_REQUIRED` allow any account, including
+Instagram, because a human still decides before anything publishes.
+
+Set `ROBOT_AUTOMATION_ENABLED=false` to stop the scheduler from claiming or
+reconciling anything (a global kill switch, verifiable with a plain
+`docker compose up -d api` restart) while every other API keeps working; a
+per-robot `POST /api/robots/{id}/pause` stops just that Robot from starting
+new runs without touching Jobs/Drafts/Schedules its past runs already
+created.
 
 ## Database migrations
 

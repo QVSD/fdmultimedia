@@ -78,6 +78,14 @@ public class ContentDraft {
     @Column(name = "published_at")
     private Instant publishedAt;
 
+    /**
+     * Plain UUID, no JPA relationship — mirrors {@code Publication.contentDraftId}.
+     * Provenance only: which RobotRun (Phase 11C) created this draft, if any.
+     * A manually-created draft leaves this null.
+     */
+    @Column(name = "robot_run_id")
+    private UUID robotRunId;
+
     protected ContentDraft() {
     }
 
@@ -197,6 +205,11 @@ public class ContentDraft {
         this.updatedAt = now;
     }
 
+    /** Set once, immediately after creation, by the RobotRun that created this draft. */
+    public void attachRobotRun(UUID robotRunId) {
+        this.robotRunId = robotRunId;
+    }
+
     public void applyPublishingDisplayState(ContentDraftStatus derived, Instant publishedAt, Instant now) {
         if (this.status == derived && (publishedAt == null || publishedAt.equals(this.publishedAt))) {
             return;
@@ -228,4 +241,5 @@ public class ContentDraft {
     public Instant getCreatedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
     public Instant getPublishedAt() { return publishedAt; }
+    public UUID getRobotRunId() { return robotRunId; }
 }

@@ -743,6 +743,7 @@ describe('Content', () => {
       updatedAt: '2026-09-10T08:05:10Z',
       publishedAt: null,
       publications: status === 'PUBLISHING' ? [publication('PENDING')] : [],
+      robotRunId: null,
     };
   }
 

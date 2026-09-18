@@ -96,6 +96,27 @@ concurrent Postgres sessions); cancellation, rescheduling, and misfire
 semantics. Out of scope for this phase: recurring/cron schedules, automatic
 best-time selection, AI scheduling, TikTok, and notifications.
 
+## Phase 11C scope
+
+Phase 11C adds a workspace-scoped `Robot`: a persistent automation *policy*
+built entirely on top of Phases 11A/11B, not a fourth media or publishing
+pipeline. See
+[Robots & automation foundation (Phase 11C)](#robots--automation-foundation-phase-11c)
+below for the full design: the Robot/Worker/Job distinction and the three
+independent scheduling layers this leaves in the system; the three autonomy
+modes (`DRAFT_ONLY`, `REVIEW_REQUIRED`, `AUTO_SCHEDULE`) and the
+backend-enforced real-provider safety boundary that makes unattended
+`AUTO_SCHEDULE` publishing to Instagram (or any non-`TEST` provider)
+impossible regardless of configuration; the durable, provenance-column
+`RobotRun` reconciliation model and its `@Scheduled`-poller/`@Transactional`-
+service bean split; why the highlight strategy is deliberately narrowed to
+one deterministic option; workload limits and duplicate-source protection;
+and the Pause/`ROBOT_AUTOMATION_ENABLED` kill switches and their misfire
+semantics. Out of scope for this phase: autonomous web scraping, arbitrary
+URL ingestion, social discovery/engagement automation, unattended real-
+provider publishing, TikTok/YouTube, AI content generation, and a generic
+workflow/cron/webhook engine.
+
 ## High-level architecture
 
 ```
@@ -1171,21 +1192,167 @@ future — avoiding a "schedule for right now" race — and at most
 `PUBLISH_SCHEDULE_CALENDAR_MAX_DAYS` (default 90) server-side; the frontend
 does not get to request an unbounded range.
 
-## An important architectural rule: Robots are not workers
+## Robots & automation foundation (Phase 11C)
 
-A **Robot** is a logical content-automation entity — think of it as "a
-personality/pipeline that posts to a specific channel" or "an automated
-workflow the user configured." A **Worker** is a physical or virtual compute
-resource (a laptop, a cloud VM) that executes jobs.
+### Robot, Worker, and Job are three different words on purpose
 
-**A Robot MUST NOT be coupled 1:1 to a physical worker.** Workers are
-interchangeable, disposable compute — any worker with the right
-capabilities should be able to pick up any job for any robot. A robot's
-identity, configuration, and history must never depend on which specific
-machine happened to run its jobs. This separation is what allows workers to
-be added, removed, or replaced (a laptop goes offline, a cloud instance is
-scaled up) without affecting the robots whose jobs they process.
+A **Robot** (`com.fdmultimedia.api.robots.Robot`) is a workspace-scoped
+automation *policy* — "what should happen": which source asset to watch,
+which highlight strategy to use, how far it is allowed to act on its own
+(its autonomy mode), and how often. A Robot never executes anything itself.
+A **Worker** (`com.fdmultimedia.api.jobs`) is interchangeable, disposable
+compute that claims and executes `Job` rows — it has no notion of "Robot"
+at all and nothing changed about it in this phase. A **Job** is one unit of
+media work (`CREATE_CLIP`, `ANALYZE_HIGHLIGHTS`, `PUBLISH_MEDIA`, ...). A
+Robot is coupled 1:1 to none of these: it orchestrates the same
+`HighlightService`, `ContentDraftService`, and `PublishScheduleService` a
+human uses from the Content page, and those services create/claim ordinary
+Jobs exactly as they always have. There is deliberately no
+`Robot -> Worker` relationship anywhere in the schema or the code.
 
-Phase 4 lets workers execute generic platform jobs, but still does not tie
-robots to workers. `SYSTEM_TEST` is a controlled pipeline proof, not media
-execution or robot automation.
+This also means there are now three independent scheduling layers in the
+system, each solving a different problem and each unaware of the other two:
+`com.fdmultimedia.api.jobs`'s telemetry-aware scheduler decides *which
+already-queued Job a compatible Worker should claim next*;
+`com.fdmultimedia.api.publishschedules`'s dispatcher (Phase 11B) decides
+*when a Publication is created from an already-`READY` Draft*; and
+`com.fdmultimedia.api.robots`'s `RobotAutomationScheduler` (this phase)
+decides *when a Robot should start a new run at all*. None of them reserve
+work for the other, and none of them was modified to know about the others.
+
+### Autonomy modes and the real-provider safety boundary
+
+A Robot's `autonomyMode` is the single knob controlling how far a run is
+allowed to go without a human:
+
+- `DRAFT_ONLY` — stop once a `ContentDraft` reaches `READY`. A human decides
+  when and where to publish, exactly as with any hand-created Draft.
+- `REVIEW_REQUIRED` — prepare the Draft, then create a `RobotApproval` and
+  stop; a human must explicitly `approve` (optionally overriding the
+  proposed time) or `reject` before anything is scheduled.
+- `AUTO_SCHEDULE` — prepare the Draft and create a `PublishSchedule`
+  unattended, no human step at all.
+
+Because `AUTO_SCHEDULE` is the one mode with no human in the loop before a
+post is scheduled, `RobotService.resolveAndValidateAccount` and
+`RobotRunOrchestrator.autoSchedule` both independently reject it (409
+`AUTONOMOUS_PROVIDER_NOT_ALLOWED`) against any `SocialAccount` whose
+platform is not `TEST` — once at Robot-creation time and again, defensively,
+at the moment a run would actually create the schedule, so the boundary
+holds even if a Robot's target account were somehow reassigned after
+creation. `DRAFT_ONLY` and `REVIEW_REQUIRED` may target any account,
+including Instagram, because a human still makes the final call. This is
+the same provider-boundary shape Phase 10B established for Instagram
+credentials: a hard backend check, not a frontend convention.
+
+### RobotRun: a durable audit record, not an in-memory pipeline
+
+`RobotRun` tracks one execution as a chain of nullable provenance columns —
+`highlightAnalysisId` → `highlightCandidateId` → `contentDraftId` →
+`publishScheduleId` — rather than growing the `RobotRunStatus` enum for
+every intermediate step. `RobotRunOrchestrator.reconcileOne(runId)` re-reads
+a run under a `FOR UPDATE SKIP LOCKED` lock and advances it exactly one step
+past whatever provenance is already set, the same "reconcile from durable
+state, not from memory" pattern `ContentDraft` established in Phase 11A:
+there is no long-lived thread or callback waiting on a run, so a server
+restart mid-run loses nothing — the next poll simply re-reconciles from
+whatever column was last committed. `RobotAutomationDispatchService` and
+`RobotRunOrchestrator` are deliberately separate `@Service` beans from
+`RobotAutomationScheduler` (the thin `@Scheduled` poll loop with no
+`@Transactional` methods of its own), for the identical reason Phase 11B
+split `PublishScheduleDispatcher` from `PublishScheduleDispatchService`: a
+same-bean self-invocation of an `@Transactional` method bypasses Spring's
+AOP proxy and silently runs with no transaction. The one safe exception is
+`RobotRunOrchestrator`'s own private `doReconcile(RobotRun run)`, called via
+plain `this.doReconcile(...)` — safe only because every public caller
+(`reconcileOne`, `getFor`, `listFor`) is itself already `@Transactional`, so
+an ambient transaction is always open before the private helper runs.
+
+### Reusing existing services from background code
+
+`RobotRunOrchestrator` calls `HighlightService.createAnalysis`,
+`ContentDraftService.createFromHighlightCandidate`/`getFor`, and
+`PublishScheduleService.create` — the exact same principal-scoped service
+methods the HTTP controllers call — by constructing a plain
+`AuthenticatedUser(robot.getCreatedByUser())` from the Robot's stored
+creator. This works with zero new overloads or a parallel "system
+principal" concept because `AuthenticatedUser` was already a plain
+`UserDetails` wrapper with no HTTP/session coupling, and
+`AuthService.currentMembershipFor` is a plain database lookup — so
+orchestration code reconciling in a `@Scheduled` poll thread is
+indistinguishable, from those services' point of view, from an HTTP request
+made by that same user. `ContentDraft.robotRunId` (a plain UUID column, no
+JPA relationship, mirroring `Publication.contentDraftId` from 11A/11B) is
+set via `ContentDraft.attachRobotRun(...)` immediately after
+`createFromHighlightCandidate` returns, so a Draft's origin is visible
+(`GET /api/content-drafts/{id}` and the Content page's Provenance panel)
+without `contentdrafts` ever importing anything from `robots`.
+
+### Highlight strategy is deliberately narrowed to one deterministic option
+
+`RobotHighlightStrategy` has exactly one value, `TOP_HIGHLIGHT`, which reuses
+the existing deterministic highlight analyzer
+(`HighlightProperties.getDeterministicAnalyzerType()`) and always picks the
+rank-1 `HighlightCandidate`. The semantic analyzer (`TRANSCRIPT_SEMANTIC_V1`)
+exists in this codebase (`HighlightService`, the worker's
+`OllamaSemanticHighlightAnalyzer`) but depends on a local Ollama runtime that
+was observed disabled in this environment's own Worker logs ("Semantic
+highlight provider unavailable"); shipping unattended automation on top of a
+provider that can silently be unavailable would make Robot runs fail in a
+way a user could not diagnose from the product. Restricting the enum to the
+one reliable, always-available strategy is an intentional reliability
+choice, not an oversight — documented in `RobotHighlightStrategy`'s Javadoc
+so a future phase adding semantic support does so deliberately.
+
+### Workload limits and duplicate-source protection
+
+Every Robot run passes through the same ordered checks
+(`RobotAutomationDispatchService.validateCanStartRun`): no other non-terminal
+run already active for this Robot (also enforced at the database level by a
+partial unique index, `robot_runs_one_active_per_robot`, so even a bug in the
+application check could not create two); no prior *successful* run already
+against this exact source asset (`SOURCE_ALREADY_PROCESSED`) — the default
+duplicate-source protection; the Robot's own `maxRunsPerDay` (checked against
+runs created since UTC midnight); and the workspace-wide
+`ROBOT_MAX_ACTIVE_RUNS_PER_WORKSPACE` cap. A scheduled Robot whose run is
+blocked by one of these still has `advanceNextRunAt` called *before*
+validation runs, unconditionally — otherwise a permanently-blocked Robot
+(e.g. its one eligible source was already processed) would be
+reclaimed and rechecked on every single poll cycle forever instead of moving
+its next check forward like a healthy Robot.
+
+### Kill switches and misfire semantics
+
+Pausing a Robot (`RobotStatus.PAUSED`) stops it from being claimed by the
+scheduler for *new* automation; it does not touch any Job, Draft, Publication,
+or Schedule already produced by its past runs, which continue exactly as
+they would if a human had created them by hand. `ROBOT_AUTOMATION_ENABLED`
+is a global kill switch checked at the top of both `dispatchOne()` and the
+scheduler's `poll()` — set false, the entire Robot subsystem stops claiming
+or reconciling anything while every other API (`/api/content-drafts`,
+`/api/publish-schedules`, ...) keeps working unaffected; this was verified
+with an actual Docker container restart (`ROBOT_AUTOMATION_ENABLED=false`),
+not just a unit test. A Robot due while the server was offline fires at most
+once when polling resumes — `RobotRepository.findNextDueForUpdate` finds it
+due, and the very next `advanceNextRunAt` moves `nextRunAt` forward from
+`now`, not from the missed time, so there is no backlog of catch-up runs to
+work through.
+
+### Concurrency proof
+
+`Robot.nextRunAt` claiming uses the identical `SELECT ... FOR UPDATE SKIP
+LOCKED LIMIT 1` idiom already proven for `Job` and `PublishSchedule`
+claiming. With no Testcontainers infrastructure in this repository, the same
+substitute used in Phase 11B was reused here: two concurrent `psql` sessions
+against the running Postgres container running the identical claim query,
+one holding its `FOR UPDATE` lock for 3 seconds while the other, issued 0.5s
+later, returned zero rows instead of blocking or double-claiming the same
+Robot.
+
+### Out of scope for this phase
+
+Autonomous web scraping or browsing, arbitrary URL ingestion, social
+discovery or engagement automation, CAPTCHA/anti-bot bypass, automatic
+Instagram publishing without human approval, TikTok/YouTube, AI content
+generation, multi-post campaigns, a generic workflow/cron/webhook engine,
+and any change to Worker scheduling or cloud autoscaling.

@@ -1,4 +1,230 @@
-<section>
-  <h1>Robots</h1>
-  <p>Logical content-automation entities. A robot is not tied 1:1 to any single physical worker.</p>
+<section class="robots">
+  <header>
+    <h1>Robots</h1>
+    <p class="robots__lead">
+      A Robot is a persistent automation policy — <strong>what should happen</strong>. It is not a Worker and
+      does not do compute itself; it orchestrates the same Drafts, Schedules, and Jobs you can also create by hand.
+    </p>
+  </header>
+
+  <nav class="robots__tabs" aria-label="Robot views">
+    <button type="button" [class.robots__tab--active]="activeView() === 'robots'" (click)="switchView('robots')">Robots</button>
+    <button type="button" [class.robots__tab--active]="activeView() === 'approvals'" (click)="switchView('approvals')">
+      Approvals @if (pendingApprovalCount() > 0) { ({{ pendingApprovalCount() }}) }
+    </button>
+  </nav>
+
+  @if (activeView() === 'robots') {
+    <button type="button" (click)="toggleCreateForm()">
+      {{ showCreateForm() ? 'Cancel' : 'Create Robot' }}
+    </button>
+
+    @if (showCreateForm()) {
+      <form class="robots__form" (ngSubmit)="createRobot()">
+        <label>
+          <span>Name</span>
+          <input type="text" maxlength="200" [ngModel]="createName()" (ngModelChange)="createName.set($event)" name="name" required />
+        </label>
+        <label>
+          <span>Description</span>
+          <input type="text" maxlength="2000" [ngModel]="createDescription()" (ngModelChange)="createDescription.set($event)" name="description" />
+        </label>
+        <label>
+          <span>Source asset</span>
+          <select [ngModel]="createSourceAssetId()" (ngModelChange)="createSourceAssetId.set($event)" name="sourceAssetId" required>
+            <option value="" disabled>Choose an eligible asset</option>
+            @for (asset of eligibleAssets(); track asset.id) {
+              <option [value]="asset.id">{{ asset.originalFilename || asset.id.slice(0, 8) }}</option>
+            }
+          </select>
+        </label>
+        <label>
+          <span>Autonomy mode</span>
+          <select [ngModel]="createAutonomyMode()" (ngModelChange)="createAutonomyMode.set($event)" name="autonomyMode">
+            <option value="DRAFT_ONLY">Draft only</option>
+            <option value="REVIEW_REQUIRED">Review required</option>
+            <option value="AUTO_SCHEDULE">Auto schedule</option>
+          </select>
+          <p class="robots__muted">{{ autonomyModeExplanation(createAutonomyMode()) }}</p>
+        </label>
+        @if (requiresAccount(createAutonomyMode())) {
+          <label>
+            <span>Target account</span>
+            <select [ngModel]="createTargetAccountId()" (ngModelChange)="createTargetAccountId.set($event)" name="targetAccountId">
+              <option value="" disabled>Choose an account</option>
+              @for (account of accountOptionsFor(createAutonomyMode()); track account.id) {
+                <option [value]="account.id">{{ account.displayName }} ({{ account.platform }})</option>
+              }
+            </select>
+            @if (createAutonomyMode() === 'AUTO_SCHEDULE') {
+              <p class="robots__muted">Auto-schedule only supports TEST accounts in this phase &mdash; Instagram requires human review.</p>
+            }
+          </label>
+        }
+        <label>
+          <span>Cadence</span>
+          <select [ngModel]="createCadenceType()" (ngModelChange)="createCadenceType.set($event)" name="cadenceType">
+            <option value="MANUAL_ONLY">Manual only (Run Now)</option>
+            <option value="INTERVAL">Every N hours</option>
+          </select>
+        </label>
+        @if (createCadenceType() === 'INTERVAL') {
+          <label>
+            <span>Interval (hours, 1&ndash;168)</span>
+            <input type="number" min="1" max="168" [ngModel]="createCadenceIntervalHours()" (ngModelChange)="createCadenceIntervalHours.set($event)" name="cadenceIntervalHours" />
+          </label>
+        }
+        @if (requiresDelay(createAutonomyMode())) {
+          <label>
+            <span>Schedule delay after Draft is ready (minutes)</span>
+            <input type="number" min="1" [ngModel]="createScheduleDelayMinutes()" (ngModelChange)="createScheduleDelayMinutes.set($event)" name="scheduleDelayMinutes" />
+          </label>
+        }
+        <label>
+          <span>Max runs per day</span>
+          <input type="number" min="1" max="24" [ngModel]="createMaxRunsPerDay()" (ngModelChange)="createMaxRunsPerDay.set($event)" name="maxRunsPerDay" />
+        </label>
+        <button type="submit" [disabled]="createBusy()">{{ createBusy() ? 'Creating...' : 'Create' }}</button>
+        @if (createError()) {
+          <p class="robots__error">{{ createError() }}</p>
+        }
+      </form>
+    }
+
+    @switch (robotsLoadState()) {
+      @case ('loading') {
+        <p class="robots__state">Loading robots...</p>
+      }
+      @case ('error') {
+        <p class="robots__state robots__state--error">Robots could not be loaded.</p>
+      }
+      @case ('ready') {
+        @if (robots().length === 0) {
+          <p class="robots__state">No robots yet. Create one to automate a bounded content workflow.</p>
+        } @else {
+          <div class="robot-list">
+            @for (robot of robots(); track robot.id) {
+              <article class="robot-card">
+                <div class="robot-card__summary">
+                  <div class="robot-card__title">
+                    <h2>{{ robot.name }}</h2>
+                    @if (robot.description) {
+                      <p>{{ robot.description }}</p>
+                    }
+                  </div>
+                  <div class="robot-card__meta">
+                    <span [class]="'robots__badge robots__badge--' + robot.status.toLowerCase()">{{ robotStatusLabel(robot.status) }}</span>
+                    <span class="robots__badge">{{ robot.autonomyMode }}</span>
+                    <span>{{ robot.sourceAssetFilename || robot.sourceAssetId.slice(0, 8) }}</span>
+                    <span>{{ robot.cadenceType === 'INTERVAL' ? 'Every ' + robot.cadenceIntervalHours + 'h' : 'Manual only' }}</span>
+                    @if (robot.targetSocialAccountDisplayName) {
+                      <span>{{ robot.targetSocialAccountDisplayName }}</span>
+                    }
+                    <span>Latest run: {{ latestRunStatusFor(robot) }}</span>
+                    @if (robot.nextRunAt) {
+                      <span>Next run: {{ robot.nextRunAt | date:'medium' }}</span>
+                    }
+                  </div>
+                  <div class="robot-card__actions">
+                    <button type="button" (click)="runNow(robot)" [disabled]="!canRunNow(robot) || runNowBusy()[robot.id]">
+                      {{ runNowBusy()[robot.id] ? 'Starting...' : 'Run Now' }}
+                    </button>
+                    <button class="button-secondary" type="button" (click)="togglePause(robot)" [disabled]="pauseResumeBusy()[robot.id] || robot.status === 'DISABLED'">
+                      {{ robot.status === 'ACTIVE' ? 'Pause' : 'Resume' }}
+                    </button>
+                    <button class="button-secondary" type="button" (click)="toggleExpanded(robot)" [attr.aria-expanded]="isExpanded(robot)">
+                      {{ isExpanded(robot) ? 'Hide Details' : 'Details' }}
+                    </button>
+                  </div>
+                </div>
+                @if (runNowErrors()[robot.id]) {
+                  <p class="robots__error">{{ runNowErrors()[robot.id] }}</p>
+                }
+
+                @if (isExpanded(robot)) {
+                  <div class="robot-card__runs">
+                    <h3>Recent runs</h3>
+                    @if (runsForRobot(robot).length === 0) {
+                      <p class="robots__muted">No runs yet.</p>
+                    } @else {
+                      @for (run of runsForRobot(robot); track run.id) {
+                        <div class="run-row">
+                          <span [class]="'robots__badge robots__badge--run-' + run.status.toLowerCase()">{{ runStatusLabel(run.status) }}</span>
+                          <span class="robots__muted">{{ run.triggerType }}</span>
+                          <span class="robots__muted">{{ run.startedAt | date:'medium' }}</span>
+                          @if (run.contentDraftId) {
+                            <span class="robots__muted">Draft: {{ run.contentDraftId.slice(0, 8) }}</span>
+                          }
+                          @if (run.publishScheduleId) {
+                            <span class="robots__muted">Schedule: {{ run.publishScheduleId.slice(0, 8) }}</span>
+                          }
+                          @if (run.failureMessage) {
+                            <span class="robots__error">{{ run.failureCode }}: {{ run.failureMessage }}</span>
+                          }
+                        </div>
+                      }
+                    }
+                  </div>
+                }
+              </article>
+            }
+          </div>
+        }
+      }
+    }
+  }
+
+  @if (activeView() === 'approvals') {
+    @switch (approvalsLoadState()) {
+      @case ('loading') {
+        <p class="robots__state">Loading approvals...</p>
+      }
+      @case ('error') {
+        <p class="robots__state robots__state--error">Approvals could not be loaded.</p>
+      }
+      @case ('ready') {
+        @if (approvalsForList().length === 0) {
+          <p class="robots__state">No approvals yet. A REVIEW_REQUIRED Robot creates one once its Draft is ready.</p>
+        } @else {
+          <div class="robot-list">
+            @for (approval of approvalsForList(); track approval.id) {
+              <article class="robot-card">
+                <div class="robot-card__summary">
+                  <div class="robot-card__title">
+                    <h2>{{ approval.draftTitle || 'Untitled draft' }}</h2>
+                    <p>From robot: {{ approval.robotName }}</p>
+                  </div>
+                  <div class="robot-card__meta">
+                    <span [class]="'robots__badge robots__badge--' + approval.status.toLowerCase()">{{ approvalStatusLabel(approval.status) }}</span>
+                    @if (approval.socialAccountDisplayName) {
+                      <span>{{ approval.socialAccountDisplayName }}</span>
+                    }
+                    @if (approval.proposedScheduledFor) {
+                      <span>Proposed: {{ approval.proposedScheduledFor | date:'medium' }}</span>
+                    }
+                  </div>
+                  @if (approval.status === 'PENDING') {
+                    <div class="robot-card__actions">
+                      <button type="button" (click)="approve(approval)" [disabled]="approveBusy()[approval.id]">
+                        {{ approveBusy()[approval.id] ? 'Approving...' : 'Approve' }}
+                      </button>
+                      <button class="button-secondary" type="button" (click)="reject(approval)" [disabled]="rejectBusy()[approval.id]">
+                        {{ rejectBusy()[approval.id] ? 'Rejecting...' : 'Reject' }}
+                      </button>
+                    </div>
+                  }
+                </div>
+                @if (approval.draftCaption) {
+                  <p class="robots__muted">&ldquo;{{ approval.draftCaption }}&rdquo;</p>
+                }
+                @if (approveErrors()[approval.id]) {
+                  <p class="robots__error">{{ approveErrors()[approval.id] }}</p>
+                }
+              </article>
+            }
+          </div>
+        }
+      }
+    }
+  }
 </section>
