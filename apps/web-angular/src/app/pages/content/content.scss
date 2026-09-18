@@ -220,6 +220,16 @@
   color: #92400e;
 }
 
+.content__badge--scheduled {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.content__badge--dispatched {
+  background: #dcfce7;
+  color: #166534;
+}
+
 .content__clip-form {
   display: grid;
   grid-template-columns: repeat(2, minmax(7rem, 1fr)) auto;

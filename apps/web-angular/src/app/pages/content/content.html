@@ -31,7 +31,107 @@
     <button type="button" [class.content__tab--active]="activeView() === 'drafts'" (click)="switchView('drafts')">
       Drafts @if (drafts().length > 0) { ({{ drafts().length }}) }
     </button>
+    <button type="button" [class.content__tab--active]="activeView() === 'schedule'" (click)="switchView('schedule')">
+      Schedule @if (upcomingSchedules().length > 0) { ({{ upcomingSchedules().length }}) }
+    </button>
   </nav>
+
+  @if (activeView() === 'schedule') {
+    <p class="content__muted">Times are shown in your local timezone ({{ localTimeZone }}).</p>
+    @switch (schedulesLoadState()) {
+      @case ('loading') {
+        <p class="content__state">Loading schedules...</p>
+      }
+      @case ('error') {
+        <p class="content__state content__state--error">Schedules could not be loaded.</p>
+      }
+      @case ('ready') {
+        <section class="detail-panel">
+          <h3>Upcoming</h3>
+          @if (upcomingSchedules().length === 0) {
+            <p class="content__state">
+              Nothing scheduled yet. Use "Schedule" on a ready Draft to publish it at a future date and time.
+            </p>
+          } @else {
+            <div class="publication-list">
+              @for (schedule of upcomingSchedules(); track schedule.id) {
+                <div class="publication-card">
+                  <div class="publication-card__header">
+                    <span [class]="'content__badge content__badge--' + schedule.status.toLowerCase()">
+                      {{ scheduleStatusLabel(schedule.status) }}
+                    </span>
+                    <span class="content__badge">
+                      {{ schedule.platform }}{{ schedule.platform === 'TEST' ? ' (non-real)' : '' }}
+                    </span>
+                    <span class="content__muted">{{ schedule.draftTitle || schedule.mediaAssetFilename || 'Untitled draft' }}</span>
+                    <span class="content__muted">{{ schedule.socialAccountDisplayName }}</span>
+                    <strong>{{ schedule.scheduledFor | date:'medium' }}</strong>
+                  </div>
+                  @if (schedule.captionSnapshot) {
+                    <p class="content__muted">&ldquo;{{ schedule.captionSnapshot }}&rdquo;</p>
+                  }
+                  <div class="asset-card__actions">
+                    @if (canCancelSchedule(schedule)) {
+                      @if (isRescheduling(schedule)) {
+                        <input
+                          type="datetime-local"
+                          [ngModel]="rescheduleDateTimeFor(schedule)"
+                          (ngModelChange)="setRescheduleDateTime(schedule, $event)"
+                        />
+                        <button type="button" (click)="submitReschedule(schedule)" [disabled]="rescheduleBusy()[schedule.id]">
+                          {{ rescheduleBusy()[schedule.id] ? 'Saving...' : 'Save time' }}
+                        </button>
+                        <button class="button-secondary" type="button" (click)="cancelRescheduleEdit(schedule)">Back</button>
+                      } @else {
+                        <button class="button-secondary" type="button" (click)="startReschedule(schedule)">Reschedule</button>
+                        <button type="button" (click)="cancelSchedule(schedule)" [disabled]="scheduleCancelBusy()[schedule.id]">
+                          {{ scheduleCancelBusy()[schedule.id] ? 'Cancelling...' : 'Cancel' }}
+                        </button>
+                      }
+                    }
+                  </div>
+                  @if (rescheduleErrors()[schedule.id]) {
+                    <p class="content__error">{{ rescheduleErrors()[schedule.id] }}</p>
+                  }
+                  @if (scheduleCancelErrors()[schedule.id]) {
+                    <p class="content__error">{{ scheduleCancelErrors()[schedule.id] }}</p>
+                  }
+                </div>
+              }
+            </div>
+          }
+        </section>
+
+        <section class="detail-panel">
+          <h3>History</h3>
+          @if (scheduleHistory().length === 0) {
+            <p class="content__muted">No dispatched, cancelled, or failed schedules yet.</p>
+          } @else {
+            <div class="publication-list">
+              @for (schedule of scheduleHistory(); track schedule.id) {
+                <div class="publication-card">
+                  <div class="publication-card__header">
+                    <span [class]="'content__badge content__badge--' + schedule.status.toLowerCase()">
+                      {{ scheduleStatusLabel(schedule.status) }}
+                    </span>
+                    <span class="content__badge">{{ schedule.platform }}</span>
+                    <span class="content__muted">{{ schedule.draftTitle || schedule.mediaAssetFilename || 'Untitled draft' }}</span>
+                    <span class="content__muted">Was: {{ schedule.scheduledFor | date:'medium' }}</span>
+                    @if (schedule.dispatchedAt) {
+                      <span class="content__muted">Dispatched: {{ schedule.dispatchedAt | date:'medium' }}</span>
+                    }
+                  </div>
+                  @if (schedule.failureMessage) {
+                    <p class="content__error">{{ schedule.failureCode }}: {{ schedule.failureMessage }}</p>
+                  }
+                </div>
+              }
+            </div>
+          }
+        </section>
+      }
+    }
+  }
 
   @if (activeView() === 'drafts') {
     @switch (draftsLoadState()) {
@@ -188,6 +288,77 @@
                               </div>
                               @if (publication.failureMessage) {
                                 <p class="content__error">{{ publication.failureCode }}: {{ publication.failureMessage }}</p>
+                              }
+                            </div>
+                          }
+                        </div>
+                      }
+                    </section>
+
+                    <section class="detail-panel">
+                      <h3>Schedule</h3>
+                      @if (canSchedule(draft)) {
+                        @if (publishableSocialAccounts().length === 0) {
+                          <p class="content__muted">
+                            No social accounts yet. Connect Instagram or add a TEST account on the Settings page.
+                          </p>
+                        } @else {
+                          <p class="content__muted">
+                            Scheduled posts keep the media, caption, and account selected when the schedule is created — editing this draft afterward will not change an already-scheduled post.
+                          </p>
+                          <form class="content__publish-form" (ngSubmit)="scheduleDraft(draft)">
+                            <label>
+                              <span>Account</span>
+                              <select
+                                name="draft-schedule-account-{{ draft.id }}"
+                                [ngModel]="draftScheduleAccountFor(draft)"
+                                (ngModelChange)="setDraftScheduleAccount(draft, $event)"
+                              >
+                                @for (account of publishableSocialAccounts(); track account.id) {
+                                  <option [value]="account.id">{{ account.displayName }} ({{ account.platform }})</option>
+                                }
+                              </select>
+                            </label>
+                            <label>
+                              <span>Local date &amp; time</span>
+                              <input
+                                type="datetime-local"
+                                name="draft-schedule-time-{{ draft.id }}"
+                                [ngModel]="draftScheduleDateTimeFor(draft)"
+                                (ngModelChange)="setDraftScheduleDateTime(draft, $event)"
+                              />
+                            </label>
+                            <button type="submit" [disabled]="scheduleCreateBusy()[draft.id]">
+                              {{ scheduleCreateBusy()[draft.id] ? 'Scheduling...' : 'Schedule' }}
+                            </button>
+                          </form>
+                        }
+                      } @else {
+                        <p class="content__muted">Scheduling is available once this draft is ready to publish.</p>
+                      }
+                      @if (scheduleCreateErrors()[draft.id]) {
+                        <p class="content__error">{{ scheduleCreateErrors()[draft.id] }}</p>
+                      }
+
+                      @if (schedulesForDraft(draft).length > 0) {
+                        <div class="publication-list">
+                          @for (schedule of schedulesForDraft(draft); track schedule.id) {
+                            <div class="publication-card">
+                              <div class="publication-card__header">
+                                <span [class]="'content__badge content__badge--' + schedule.status.toLowerCase()">
+                                  {{ scheduleStatusLabel(schedule.status) }}
+                                </span>
+                                <span class="content__badge">{{ schedule.platform }}</span>
+                                <span class="content__muted">{{ schedule.socialAccountDisplayName }}</span>
+                                <strong>{{ schedule.scheduledFor | date:'medium' }}</strong>
+                              </div>
+                              @if (schedule.failureMessage) {
+                                <p class="content__error">{{ schedule.failureCode }}: {{ schedule.failureMessage }}</p>
+                              }
+                              @if (canCancelSchedule(schedule)) {
+                                <button type="button" (click)="cancelSchedule(schedule)" [disabled]="scheduleCancelBusy()[schedule.id]">
+                                  {{ scheduleCancelBusy()[schedule.id] ? 'Cancelling...' : 'Cancel' }}
+                                </button>
                               }
                             </div>
                           }

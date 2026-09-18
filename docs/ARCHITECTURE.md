@@ -81,6 +81,21 @@ Publication reverts the draft to READY instead of destroying it. Out of scope
 for this phase: autonomous Robots, automatic/scheduled publishing, a generic
 workflow engine, TikTok, and AI-generated captions.
 
+## Phase 11B scope
+
+Phase 11B adds *user-controlled* future scheduling on top of Phase 11A's
+`ContentDraft`: "publish this Draft to this SocialAccount at this instant."
+It is not autonomous Robots, not a generic cron/recurring scheduler, and does
+not choose posting times or content on its own. See
+[Content publishing schedule (Phase 11B)](#content-publishing-schedule-phase-11b)
+below for the full design: the `PublishSchedule` entity and its snapshot
+semantics; why a future schedule holds no Worker, Job lease, or
+`PUBLISH_MEDIA` Job until due; the central-server-owned dispatcher and its
+`SELECT ... FOR UPDATE SKIP LOCKED` atomic claim (proven against two
+concurrent Postgres sessions); cancellation, rescheduling, and misfire
+semantics. Out of scope for this phase: recurring/cron schedules, automatic
+best-time selection, AI scheduling, TikTok, and notifications.
+
 ## High-level architecture
 
 ```
@@ -1004,6 +1019,157 @@ never make a draft permanently unusable. Publishing again from `READY` or
 `PUBLISHED` creates a new `Publication` (never mutates a prior one), which is
 how a draft becomes reusable after a failure and how the schema already
 supports a future multi-platform fan-out without redesigning `ContentDraft`.
+
+## Content publishing schedule (Phase 11B)
+
+`PublishSchedule` (`com.fdmultimedia.api.publishschedules`) represents one
+thing: "publish this `ContentDraft` to this `SocialAccount` at this instant."
+It is not a Job, a Publication, a `ContentDraft`, or a Robot, and it is
+deliberately a *different* kind of scheduling from the Worker/Job scheduling
+system in `com.fdmultimedia.api.jobs` (`SchedulingDecision`,
+telemetry-aware placement, etc.) — that subsystem decides which compatible
+Worker executes an already-queued Job; `PublishSchedule` decides *when a
+Publication is even created in the first place*.
+
+### Snapshot semantics
+
+Exactly like a Draft's caption is copied into a Publication at publish time
+(Phase 11A), everything a schedule needs is copied out of the Draft once, at
+schedule-creation time, and never re-read from the live Draft again:
+`mediaAssetId`, `socialAccountId`, and `captionSnapshot` are plain columns on
+`publish_schedules`. Editing the Draft's title, caption, or selected media
+afterward — even scheduling it again with different values — has no way to
+reach an existing schedule's snapshot. This was verified at runtime: a
+schedule created with caption A survived a Draft caption edit to caption B
+made before due time, and the eventual Publication still carried caption A.
+
+### Time representation and the browser boundary
+
+`scheduledFor` is a plain `Instant`, persisted as `timestamptz` — an absolute
+point in time, never a naive local date/time and never dependent on the
+server's timezone (the API already runs on `Clock.systemUTC()` throughout).
+The browser is the only place local time exists: the Content page's
+scheduling form uses a native `datetime-local` input, and converts it with
+`new Date(value).toISOString()` — the browser's own `Date` parser interprets
+a timezone-less string as the *viewer's* local time, and `toISOString()`
+converts that to an unambiguous UTC instant, so no manual UTC-offset
+arithmetic is written anywhere in this codebase (the classic source of DST
+bugs). Display works the same way in reverse: Angular's `DatePipe` renders a
+stored instant in the browser's local timezone automatically, and the
+Schedule tab shows the resolved IANA zone name once
+(`Intl.DateTimeFormat().resolvedOptions().timeZone`) so what "local" means is
+never ambiguous to the user.
+
+### No pre-due reservation
+
+Before its due time, a `PublishSchedule` row is the *only* thing that exists
+— no Worker, no Job lease, no `PUBLISH_MEDIA` Job. This was verified at
+runtime immediately after creating a schedule: `GET
+/api/publish-schedules/{id}` showed `publicationId: null`, and no Publication
+was linked to the schedule's Draft. `PublishScheduleDispatcher` is a
+`@Scheduled(fixedDelayString = "${app.publishing.schedule.poll-interval-ms}")`
+component (default 15s, `PUBLISH_SCHEDULER_POLL_MS`) that repeatedly asks a
+separate `PublishScheduleDispatchService` for one due schedule at a time.
+
+### Atomic, idempotent dispatch
+
+`PublishScheduleDispatchService.dispatchOne()` is `@Transactional` and does
+everything for one schedule in a single transaction: claim (row-locked) →
+revalidate the account/media are still eligible → create a Publication and
+its `PUBLISH_MEDIA` Job through `PublishingService.createPublicationForSchedule`
+(a small overload sharing every eligibility/account/Job-creation rule with
+the Phase 10A/11A publish paths — no duplicated logic) → link the
+`publicationId` → mark `DISPATCHED`, all-or-nothing. The due-schedule claim
+itself,
+
+```sql
+SELECT * FROM publish_schedules
+WHERE status = 'SCHEDULED' AND scheduled_for <= :now
+ORDER BY scheduled_for ASC LIMIT 1 FOR UPDATE SKIP LOCKED
+```
+
+is the exact `FOR UPDATE SKIP LOCKED` idiom `JobRepository` already uses for
+atomic Job claiming, scoped globally (not per-workspace — the dispatcher is
+a background process, not a workspace-scoped request). Two API instances (or
+two overlapping poll cycles) can never dispatch the same schedule twice: this
+was proven directly against the running Postgres container with two
+concurrent `psql` sessions running the identical claim query — the first
+session's `FOR UPDATE` held the row for 3 seconds, and the second session's
+identical query, issued 0.5s later while the first was still open, returned
+zero rows instead of blocking or double-claiming.
+
+`PublishScheduleDispatchService` is deliberately a *separate Spring bean*
+from `PublishScheduleDispatcher` (the `@Scheduled` poll loop), not a second
+method on the same class. A same-class self-invocation
+(`this.dispatchOne()`) bypasses Spring's `@Transactional` proxy entirely —
+this was an actual bug caught during runtime acceptance (a
+`LazyInitializationException` because no transaction, and therefore no
+Hibernate session, was ever open), fixed by moving the transactional method
+to its own bean so the call always crosses the proxy.
+
+There is no `DISPATCHING` status: because claim, create, link, and
+mark-`DISPATCHED` are one transaction, no intermediate state is ever
+observable — either all of it commits, or none of it does and the row is
+simply `SCHEDULED` again for the next poll to find, including after a crash
+or restart. Every dispatch outcome — including a truly unexpected exception
+— ends by moving the schedule to a terminal state (`DISPATCHED` or `FAILED`)
+so one broken schedule can never block the rest of a poll's batch (bounded by
+`PUBLISH_SCHEDULE_DISPATCH_BATCH_SIZE`, default 50) and a busy day never
+retries a doomed schedule forever.
+
+### Misfire / overdue semantics
+
+A schedule is due the moment `scheduledFor <= now`; there is no "exact time
+or skip it" window. If the server was offline (or, as happened once during
+this phase's own runtime acceptance, its dispatcher was silently broken by
+the self-invocation bug above) past a schedule's due time, the schedule
+dispatches once as soon as a working dispatcher resumes polling — this was
+observed directly: a schedule that missed its window by several minutes
+during debugging dispatched cleanly on the next successful poll after the
+fix, with `dispatchDelayMs` (`dispatchedAt - scheduledFor`, returned in the
+schedule DTO) making the delay observable rather than silently swallowed.
+
+### Offline Worker vs. offline server
+
+These are different failure modes and both were verified at runtime. If the
+*server* is down at due time, nothing dispatches until it resumes (above). If
+a *Worker* is offline at due time, dispatch still happens exactly on
+schedule — a Publication and a `PUBLISH_MEDIA` Job are created normally — but
+the Job simply sits `QUEUED`, like any other Job, until a compatible Worker
+polls and claims it. This was verified by creating a schedule with no Worker
+process running, confirming the Job reached `QUEUED` with the Publication
+`PENDING`, and only then starting a Worker and watching it claim and publish
+within seconds.
+
+### Cancel and reschedule
+
+`POST /api/publish-schedules/{id}/cancel` and
+`PATCH /api/publish-schedules/{id}` (reschedule) both take the same
+`findByWorkspaceAndIdForUpdate` row lock the dispatcher uses, and both are
+rejected once a schedule has left `SCHEDULED` — there is no "cancel a
+Publication" story here; once dispatch has created a Publication, that
+Publication's own state machine is authoritative, and the schedule's
+responsibility (dispatching) is already complete. Rescheduling only changes
+`scheduledFor`; the caption/media/account snapshot is untouched, so a
+rescheduled post still publishes exactly what was originally scheduled. Both
+were verified at runtime: a cancelled schedule never dispatched even after
+its original due time passed, and a rescheduled schedule did not dispatch at
+its original time but did dispatch exactly once at the new time.
+
+### Validation
+
+`POST /api/content-drafts/{draftId}/schedules` requires the Draft to be
+`READY` or `PUBLISHED` (reusable, mirroring immediate publish), the account
+to be workspace-scoped and `ACTIVE`, and reuses
+`PublishingEligibilityService.validateAssetEligibility` so an obviously
+platform-ineligible schedule (e.g. an Instagram Reel under 3 seconds) is
+rejected at creation rather than silently failing at due time. `scheduledFor`
+must be at least `PUBLISH_SCHEDULE_MIN_LEAD_SECONDS` (default 30) in the
+future — avoiding a "schedule for right now" race — and at most
+`PUBLISH_SCHEDULE_MAX_DAYS` (default 365) out. The calendar endpoint
+(`GET /api/publish-schedules/calendar?from=&to=`) bounds its span to
+`PUBLISH_SCHEDULE_CALENDAR_MAX_DAYS` (default 90) server-side; the frontend
+does not get to request an unbounded range.
 
 ## An important architectural rule: Robots are not workers
 

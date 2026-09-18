@@ -74,6 +74,12 @@ class SecurityConfigTest {
     }
 
     @Test
+    void publishSchedulesApiRejectsUnauthenticatedUsers() throws Exception {
+        mockMvc.perform(get("/api/publish-schedules"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
     void publicMediaEndpointIsReachableWithoutAuthenticationBecauseMetaMustFetchIt() throws Exception {
         mockMvc.perform(get("/api/public-media/some-token"))
                 .andExpect(status().isNoContent());

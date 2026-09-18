@@ -85,6 +85,14 @@ app:
       oauth-redirect-uri: ${META_OAUTH_REDIRECT_URI:}
       public-base-url: ${META_PUBLIC_BASE_URL:}
       graph-api-version: ${META_GRAPH_API_VERSION:v25.0}
+    schedule:
+      enabled: ${PUBLISH_SCHEDULER_ENABLED:true}
+      min-lead: ${PUBLISH_SCHEDULE_MIN_LEAD_SECONDS:30}s
+      max-horizon-days: ${PUBLISH_SCHEDULE_MAX_DAYS:365}
+      dispatch-batch-size: ${PUBLISH_SCHEDULE_DISPATCH_BATCH_SIZE:50}
+      calendar-max-days: ${PUBLISH_SCHEDULE_CALENDAR_MAX_DAYS:90}
+      history-max-results: ${PUBLISH_SCHEDULE_HISTORY_MAX_RESULTS:100}
+      poll-interval-ms: ${PUBLISH_SCHEDULER_POLL_MS:15000}
   storage:
     endpoint: ${STORAGE_ENDPOINT:http://localhost:9000}
     public-endpoint: ${STORAGE_PUBLIC_ENDPOINT:${STORAGE_ENDPOINT:http://localhost:9000}}

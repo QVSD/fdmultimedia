@@ -113,6 +113,19 @@ public class PublishingService {
         return createPublicationInternal(workspace, asset, account, caption, membership.getUser(), contentDraftId);
     }
 
+    /**
+     * Used by {@code PublishScheduleDispatcher} at due time. There is no
+     * {@link AuthenticatedUser} in a background dispatch — the workspace,
+     * account, and media are already resolved (and freshly re-validated) by
+     * the caller from a locked {@code PublishSchedule} row, and the
+     * Publication is attributed to whoever created the schedule.
+     */
+    @Transactional
+    public PublicationSummary createPublicationForSchedule(
+            Workspace workspace, MediaAsset asset, SocialAccount account, String caption, UUID contentDraftId, AppUser createdByUser) {
+        return createPublicationInternal(workspace, asset, account, caption, createdByUser, contentDraftId);
+    }
+
     private PublicationSummary createPublicationInternal(
             Workspace workspace, MediaAsset asset, SocialAccount account, String rawCaption, AppUser user, UUID contentDraftId) {
         eligibilityService.validateAssetEligibility(asset, account.getPlatform());

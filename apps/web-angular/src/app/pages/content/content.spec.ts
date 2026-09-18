@@ -9,6 +9,8 @@ import { SocialAccountsService } from '../../core/social-accounts/social-account
 import { SocialAccountSummary } from '../../core/social-accounts/social-account.models';
 import { ContentDraftsService } from '../../core/content-drafts/content-drafts.service';
 import { ContentDraftSummary } from '../../core/content-drafts/content-draft.models';
+import { PublishSchedulesService } from '../../core/publish-schedules/publish-schedules.service';
+import { PublishScheduleSummary } from '../../core/publish-schedules/publish-schedule.models';
 import { Content } from './content';
 
 describe('Content', () => {
@@ -32,6 +34,7 @@ describe('Content', () => {
     ContentDraftsService,
     'list' | 'createFromAsset' | 'createFromHighlightCandidate' | 'update' | 'publish' | 'retryPreparation'
   >;
+  let publishSchedulesService: Pick<PublishSchedulesService, 'list' | 'create' | 'cancel' | 'reschedule'>;
 
   beforeEach(async () => {
     assetsService = {
@@ -67,6 +70,12 @@ describe('Content', () => {
       publish: vi.fn().mockReturnValue(of(draft('PUBLISHING', 'READY'))),
       retryPreparation: vi.fn().mockReturnValue(of(draft('DRAFT', 'CLIP_PENDING'))),
     };
+    publishSchedulesService = {
+      list: vi.fn().mockReturnValue(of([])),
+      create: vi.fn().mockReturnValue(of(schedule('SCHEDULED'))),
+      cancel: vi.fn().mockReturnValue(of(schedule('CANCELLED'))),
+      reschedule: vi.fn().mockReturnValue(of(schedule('SCHEDULED'))),
+    };
 
     await TestBed.configureTestingModule({
       imports: [Content],
@@ -75,6 +84,7 @@ describe('Content', () => {
         { provide: PublishingService, useValue: publishingService },
         { provide: SocialAccountsService, useValue: socialAccountsService },
         { provide: ContentDraftsService, useValue: contentDraftsService },
+        { provide: PublishSchedulesService, useValue: publishSchedulesService },
       ],
     }).compileComponents();
 
@@ -444,6 +454,145 @@ describe('Content', () => {
     expect(text).not.toContain('NaN');
   });
 
+  it('shows the empty schedule state', () => {
+    fixture.detectChanges();
+    component['switchView']('schedule');
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.textContent).toContain('Nothing scheduled yet.');
+  });
+
+  it('creates a schedule from a READY draft using a local-time input converted to an ISO instant', () => {
+    vi.mocked(contentDraftsService.list).mockReturnValue(of([draft('READY', 'READY')]));
+    fixture = TestBed.createComponent(Content);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+    const readyDraft = component['drafts']()[0];
+
+    component['setDraftScheduleAccount'](readyDraft, 'account-1');
+    component['setDraftScheduleDateTime'](readyDraft, '2026-09-20T18:30');
+    component['scheduleDraft'](readyDraft);
+
+    expect(publishSchedulesService.create).toHaveBeenCalledTimes(1);
+    const [draftId, accountId, scheduledFor] = vi.mocked(publishSchedulesService.create).mock.calls[0];
+    expect(draftId).toBe(readyDraft.id);
+    expect(accountId).toBe('account-1');
+    expect(scheduledFor).not.toContain('undefined');
+    expect(() => new Date(scheduledFor)).not.toThrow();
+    expect(Number.isNaN(new Date(scheduledFor).getTime())).toBe(false);
+  });
+
+  it('rejects scheduling without a chosen date/time', () => {
+    vi.mocked(contentDraftsService.list).mockReturnValue(of([draft('READY', 'READY')]));
+    fixture = TestBed.createComponent(Content);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+    const readyDraft = component['drafts']()[0];
+
+    component['setDraftScheduleAccount'](readyDraft, 'account-1');
+    component['scheduleDraft'](readyDraft);
+
+    expect(publishSchedulesService.create).not.toHaveBeenCalled();
+    expect(component['scheduleCreateErrors']()[readyDraft.id]).toBe('Choose a valid future date and time.');
+  });
+
+  it('shows upcoming schedules with local time, draft title, and TEST labeled as non-real', () => {
+    vi.mocked(publishSchedulesService.list).mockReturnValue(of([schedule('SCHEDULED')]));
+    fixture = TestBed.createComponent(Content);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+    component['switchView']('schedule');
+    fixture.detectChanges();
+
+    const text = fixture.nativeElement.textContent as string;
+    expect(text).toContain('My draft');
+    expect(text).toContain('Scheduled');
+    expect(text).toContain('non-real');
+    expect(text).not.toContain('undefined');
+    expect(text).not.toContain('Invalid Date');
+    expect(text).not.toContain('NaN');
+  });
+
+  it('cancels a scheduled item', () => {
+    vi.mocked(publishSchedulesService.list).mockReturnValue(of([schedule('SCHEDULED')]));
+    fixture = TestBed.createComponent(Content);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+    const upcoming = component['upcomingSchedules']()[0];
+
+    component['cancelSchedule'](upcoming);
+
+    expect(publishSchedulesService.cancel).toHaveBeenCalledWith('schedule-1');
+    expect(component['schedules']()[0].status).toBe('CANCELLED');
+  });
+
+  it('reschedules an item to a new local time', () => {
+    vi.mocked(publishSchedulesService.list).mockReturnValue(of([schedule('SCHEDULED')]));
+    fixture = TestBed.createComponent(Content);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+    const upcoming = component['upcomingSchedules']()[0];
+
+    component['startReschedule'](upcoming);
+    component['setRescheduleDateTime'](upcoming, '2026-09-25T09:00');
+    component['submitReschedule'](upcoming);
+
+    expect(publishSchedulesService.reschedule).toHaveBeenCalledTimes(1);
+    const [scheduleId, scheduledFor] = vi.mocked(publishSchedulesService.reschedule).mock.calls[0];
+    expect(scheduleId).toBe('schedule-1');
+    expect(Number.isNaN(new Date(scheduledFor).getTime())).toBe(false);
+  });
+
+  it('shows dispatched schedules as history, separate from a failed publication state', () => {
+    vi.mocked(publishSchedulesService.list).mockReturnValue(of([schedule('DISPATCHED')]));
+    fixture = TestBed.createComponent(Content);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+    component['switchView']('schedule');
+    fixture.detectChanges();
+
+    expect(component['upcomingSchedules']().length).toBe(0);
+    expect(component['scheduleHistory']().length).toBe(1);
+    expect(fixture.nativeElement.textContent).toContain('Dispatched');
+  });
+
+  it('shows a failed schedule with its bounded failure reason', () => {
+    vi.mocked(publishSchedulesService.list).mockReturnValue(of([schedule('FAILED')]));
+    fixture = TestBed.createComponent(Content);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+    component['switchView']('schedule');
+    fixture.detectChanges();
+
+    const text = fixture.nativeElement.textContent as string;
+    expect(text).toContain('MEDIA_UNAVAILABLE');
+    expect(text).toContain('Scheduled media is no longer ready');
+  });
+
+  it('shows an error state when the schedule list API fails', () => {
+    vi.mocked(publishSchedulesService.list).mockReturnValue(throwError(() => new Error('Network failure')));
+    fixture = TestBed.createComponent(Content);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+    component['switchView']('schedule');
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.textContent).toContain('Schedules could not be loaded.');
+  });
+
+  it('shows the snapshot note for a schedulable draft', () => {
+    vi.mocked(contentDraftsService.list).mockReturnValue(of([draft('READY', 'READY')]));
+    fixture = TestBed.createComponent(Content);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+    component['switchView']('drafts');
+    const readyDraft = component['drafts']()[0];
+    component['toggleDraft'](readyDraft);
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.textContent).toContain('editing this draft afterward will not change an already-scheduled post');
+  });
+
   function asset(status: MediaAssetStatus): MediaAssetSummary {
     return {
       id: `${status}-asset`,
@@ -594,6 +743,30 @@ describe('Content', () => {
       updatedAt: '2026-09-10T08:05:10Z',
       publishedAt: null,
       publications: status === 'PUBLISHING' ? [publication('PENDING')] : [],
+    };
+  }
+
+  function schedule(status: PublishScheduleSummary['status']): PublishScheduleSummary {
+    return {
+      id: 'schedule-1',
+      contentDraftId: 'draft-1',
+      draftTitle: 'My draft',
+      mediaAssetId: 'READY-asset',
+      mediaAssetFilename: 'video.mp4',
+      socialAccountId: 'account-1',
+      socialAccountDisplayName: 'My TEST Account',
+      platform: 'TEST',
+      captionSnapshot: 'Scheduled caption',
+      scheduledFor: '2026-09-20T18:30:00Z',
+      status,
+      publicationId: status === 'DISPATCHED' ? 'publication-1' : null,
+      createdAt: '2026-09-10T08:10:00Z',
+      updatedAt: '2026-09-10T08:10:00Z',
+      dispatchedAt: status === 'DISPATCHED' ? '2026-09-20T18:30:05Z' : null,
+      cancelledAt: status === 'CANCELLED' ? '2026-09-10T08:11:00Z' : null,
+      failureCode: status === 'FAILED' ? 'MEDIA_UNAVAILABLE' : null,
+      failureMessage: status === 'FAILED' ? 'Scheduled media is no longer ready' : null,
+      dispatchDelayMs: status === 'DISPATCHED' ? 5000 : null,
     };
   }
 

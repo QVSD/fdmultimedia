@@ -1,6 +1,6 @@
 # Roadmap
 
-The repository is currently at Phase 11A. Completed phases are marked below;
+The repository is currently at Phase 11B. Completed phases are marked below;
 later phases are planned high-level direction and intentionally do not go into
 implementation detail before they are started.
 
@@ -98,9 +98,31 @@ implementation detail before they are started.
    gained a Drafts view alongside Assets, and "Create Draft" actions on
    eligible assets and highlight candidates, without replacing the existing
    Phase 10A direct-publish flow. *(complete)*
-20. **FFmpeg processing** — richer automated video processing pipelines.
-21. **Additional platform integrations** — TikTok, YouTube, or other real
+20. **Content scheduling & publishing calendar (Phase 11B)** — a
+   workspace-scoped `PublishSchedule` lets a user schedule a READY
+   `ContentDraft` for a future instant: "publish this Draft to this
+   SocialAccount at this time," with the destination media, caption, and
+   account fixed (snapshotted) at creation so a later Draft edit can never
+   silently change what an already-scheduled post will publish. A future
+   schedule reserves no Worker, Job lease, or `PUBLISH_MEDIA` Job — the
+   central server owns dispatch: a `@Scheduled` poller claims due schedules
+   under `SELECT ... FOR UPDATE SKIP LOCKED` (the same idiom `JobRepository`
+   already uses for Job claiming, proven safe against two concurrent
+   claimers with a live two-session Postgres test) and, in one transaction
+   per schedule, creates a normal Publication through the existing
+   `PublishingService` — no second publishing pipeline, no new Job type. If
+   no Worker is online at due time, the resulting `PUBLISH_MEDIA` Job simply
+   sits durably queued, exactly like any other Job, until one claims it. A
+   schedule can be cancelled or rescheduled any time before dispatch;
+   dispatch itself is a one-way door — once a Publication exists, the
+   schedule is `DISPATCHED` and whatever happens to that Publication
+   afterward (success or failure) is tracked on the Publication, never
+   rewritten back onto the schedule. The Content page gained a Schedule
+   action on READY/PUBLISHED Drafts and a chronological Upcoming/History
+   view. *(complete)*
+21. **FFmpeg processing** — richer automated video processing pipelines.
+22. **Additional platform integrations** — TikTok, YouTube, or other real
    platforms behind the same provider-boundary pattern Instagram
    established in Phase 10B.
-22. **AI content** — AI-assisted content creation.
-23. **Analytics / revenue** — performance analytics and revenue tracking.
+23. **AI content** — AI-assisted content creation.
+24. **Analytics / revenue** — performance analytics and revenue tracking.

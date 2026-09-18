@@ -5,9 +5,9 @@ social-media content workflows, video processing workers running across
 multiple laptops/cloud machines, scheduling, AI-assisted content creation,
 publishing, analytics, and revenue tracking.
 
-## Phase 11A scope
+## Phase 11B scope
 
-This repository is currently at **Phase 11A: content drafts & end-to-end content workflow**.
+This repository is currently at **Phase 11B: content scheduling & publishing calendar**.
 Phase 9A introduced current Worker telemetry and per-attempt execution metrics;
 Phase 9B introduced deterministic `TELEMETRY_AWARE_V1` selection; Phase 9C
 persisted successful claim decisions and exposed bounded workspace-scoped
@@ -27,7 +27,18 @@ content workflow: a draft can be created from an existing eligible asset or
 from a highlight candidate (which reuses the existing `CREATE_CLIP` /
 `CREATE_SOCIAL_VERTICAL` pipeline, never a second media-processing system),
 tracks durable preparation progress that survives polling and restarts, and
-publishes through the same `PublishingService` used since Phase 10A.
+publishes through the same `PublishingService` used since Phase 10A. Phase
+11B adds `PublishSchedule`: a user picks a future date/time (converted from
+local browser time to an unambiguous UTC instant, never a naive
+timezone-less string) and a destination account for a READY Draft; the
+media, caption, and account are snapshotted at that moment so a later Draft
+edit can never silently change an already-scheduled post. Nothing is
+reserved before the due time — no Worker, no Job, no Publication — the
+central server's own `@Scheduled` dispatcher claims due schedules with the
+same atomic `FOR UPDATE SKIP LOCKED` pattern the Job queue already uses, and
+turns each one into a normal Publication through the existing
+`PublishingService`. A Worker being offline at due time just means the
+resulting `PUBLISH_MEDIA` Job sits queued normally until one claims it.
 
 Claim decisions are written in the same transaction as assignment. Empty polls
 and capacity rejections are not persisted, preventing poll-noise growth. Decision
@@ -116,6 +127,19 @@ That means:
   page has a Drafts view alongside Assets, with "Create Draft" actions on
   eligible assets and highlight candidates; the Phase 10A direct-publish flow
   still works unchanged.
+- Workspace-scoped `PublishSchedule`s
+  (`POST /api/content-drafts/{draftId}/schedules`,
+  `GET /api/publish-schedules`, `GET /api/publish-schedules/{id}`,
+  `GET /api/publish-schedules/calendar`,
+  `POST /api/publish-schedules/{id}/cancel`,
+  `PATCH /api/publish-schedules/{id}`) let a user schedule a READY Draft for
+  a future instant, with media/caption/account snapshotted at creation — see
+  [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#content-publishing-schedule-phase-11b)
+  for the full design, including why nothing is reserved before due time, the
+  atomic `FOR UPDATE SKIP LOCKED` dispatcher (proven against two concurrent
+  Postgres sessions), and offline-Worker/offline-server misfire semantics.
+  The Content page has a Schedule tab (Upcoming/History) and a Schedule
+  action on READY/PUBLISHED Drafts, alongside the existing immediate Publish.
 
 No thumbnails, TikTok/YouTube/other platform integrations, AI, analytics, or
 billing are implemented yet — see [docs/ROADMAP.md](docs/ROADMAP.md) for what

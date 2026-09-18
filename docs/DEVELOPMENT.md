@@ -100,11 +100,15 @@ npm run build      # production build
 `accounts` and `publishing` are implemented as of Phase 10A; `publishing.instagram`
 (the real Instagram Graph API integration) was added in Phase 10B;
 `contentdrafts` (bridging a source asset/highlight candidate to a Publication
-as one editable product object) was added in Phase 11A. `robots`,
+as one editable product object) was added in Phase 11A; `publishschedules`
+(user-controlled future scheduling of a Draft's publication) was added in
+Phase 11B — note this is deliberately a separate package from the Worker/Job
+scheduling code in `jobs` (`SchedulingDecision` etc.); they solve different
+problems and the naming is meant to keep them from being confused. `robots`,
 `analytics`, and `revenue` remain placeholders. The package layout under
 `com.fdmultimedia.api` (`auth`, `users`, `workspaces`, `accounts`, `robots`,
-`assets`, `jobs`, `workers`, `publishing`, `contentdrafts`, `analytics`,
-`revenue`, `shared`) is where new domain logic should land. See
+`assets`, `jobs`, `workers`, `publishing`, `contentdrafts`, `publishschedules`,
+`analytics`, `revenue`, `shared`) is where new domain logic should land. See
 [ARCHITECTURE.md](ARCHITECTURE.md) for what each package is for.
 
 ## Testing Instagram publishing locally
@@ -129,6 +133,20 @@ exercise the Instagram code paths locally without real Meta credentials:
 - Without those prerequisites, leave `INSTAGRAM_ENABLED=false` (the
   default) — the app starts normally, the Settings page shows "Instagram is
   not configured on this server yet", and TEST publishing is unaffected.
+
+## Testing scheduled publishing locally
+
+`PUBLISH_SCHEDULER_ENABLED=true` (the default) is all TEST scheduling needs —
+create a `ContentDraft`, `POST /api/content-drafts/{id}/schedules` a few
+seconds beyond `PUBLISH_SCHEDULE_MIN_LEAD_SECONDS` (default 30) out to a TEST
+account, and watch it: `GET /api/publish-schedules/{id}` shows no
+`publicationId` until due, then `DISPATCHED` with one linked Publication
+within one `PUBLISH_SCHEDULER_POLL_MS` cycle (default 15s) after the due
+time, whether or not a Worker is currently running (an offline Worker just
+leaves the resulting `PUBLISH_MEDIA` Job `QUEUED`). Set
+`PUBLISH_SCHEDULER_ENABLED=false` to disable the dispatcher entirely (e.g.
+for a deployment that only wants immediate publishing) — schedules can still
+be created and cancelled, they simply never dispatch.
 
 ## Database migrations
 

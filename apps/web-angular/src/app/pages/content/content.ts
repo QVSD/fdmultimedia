@@ -11,6 +11,8 @@ import { SocialAccountsService } from '../../core/social-accounts/social-account
 import { SocialAccountSummary } from '../../core/social-accounts/social-account.models';
 import { ContentDraftsService } from '../../core/content-drafts/content-drafts.service';
 import { ContentDraftStatus, ContentDraftSummary, ContentDraftWorkflowStage } from '../../core/content-drafts/content-draft.models';
+import { PublishSchedulesService } from '../../core/publish-schedules/publish-schedules.service';
+import { PublishScheduleStatus, PublishScheduleSummary } from '../../core/publish-schedules/publish-schedule.models';
 
 type LoadState = 'loading' | 'ready' | 'error';
 
@@ -48,7 +50,7 @@ export class Content implements OnInit, OnDestroy {
   protected readonly publishBusy = signal<Record<string, boolean>>({});
   protected readonly publishErrors = signal<Record<string, string | null>>({});
 
-  protected readonly activeView = signal<'assets' | 'drafts'>('assets');
+  protected readonly activeView = signal<'assets' | 'drafts' | 'schedule'>('assets');
   protected readonly drafts = signal<ContentDraftSummary[]>([]);
   protected readonly draftsLoadState = signal<LoadState>('loading');
   protected readonly expandedDrafts = signal<Record<string, boolean>>({});
@@ -64,14 +66,32 @@ export class Content implements OnInit, OnDestroy {
   protected readonly draftRetryBusy = signal<Record<string, boolean>>({});
   protected readonly draftRetryErrors = signal<Record<string, string | null>>({});
 
+  protected readonly draftScheduleAccountId = signal<Record<string, string>>({});
+  protected readonly draftScheduleDateTime = signal<Record<string, string>>({});
+  protected readonly scheduleCreateBusy = signal<Record<string, boolean>>({});
+  protected readonly scheduleCreateErrors = signal<Record<string, string | null>>({});
+
+  protected readonly schedules = signal<PublishScheduleSummary[]>([]);
+  protected readonly schedulesLoadState = signal<LoadState>('loading');
+  protected readonly scheduleCancelBusy = signal<Record<string, boolean>>({});
+  protected readonly scheduleCancelErrors = signal<Record<string, string | null>>({});
+  protected readonly rescheduleEditing = signal<Record<string, boolean>>({});
+  protected readonly rescheduleDateTime = signal<Record<string, string>>({});
+  protected readonly rescheduleBusy = signal<Record<string, boolean>>({});
+  protected readonly rescheduleErrors = signal<Record<string, string | null>>({});
+
+  protected readonly localTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
   private subscription?: Subscription;
   private draftsSubscription?: Subscription;
+  private schedulesSubscription?: Subscription;
 
   constructor(
     private readonly assetsService: AssetsService,
     private readonly publishingService: PublishingService,
     private readonly socialAccountsService: SocialAccountsService,
     private readonly contentDraftsService: ContentDraftsService,
+    private readonly publishSchedulesService: PublishSchedulesService,
   ) {}
 
   ngOnInit(): void {
@@ -116,11 +136,29 @@ export class Content implements OnInit, OnDestroy {
         this.drafts.set(drafts);
         this.draftsLoadState.set('ready');
       });
+
+    this.schedulesSubscription = interval(5000)
+      .pipe(
+        startWith(0),
+        switchMap(() =>
+          this.publishSchedulesService.list().pipe(
+            catchError(() => {
+              this.schedulesLoadState.set('error');
+              return EMPTY;
+            }),
+          ),
+        ),
+      )
+      .subscribe((schedules) => {
+        this.schedules.set(schedules);
+        this.schedulesLoadState.set('ready');
+      });
   }
 
   ngOnDestroy(): void {
     this.subscription?.unsubscribe();
     this.draftsSubscription?.unsubscribe();
+    this.schedulesSubscription?.unsubscribe();
   }
 
   protected importMedia(): void {
@@ -587,7 +625,7 @@ export class Content implements OnInit, OnDestroy {
     }
   }
 
-  protected switchView(view: 'assets' | 'drafts'): void {
+  protected switchView(view: 'assets' | 'drafts' | 'schedule'): void {
     this.activeView.set(view);
   }
 
@@ -755,6 +793,156 @@ export class Content implements OnInit, OnDestroy {
 
   private replaceDraft(draft: ContentDraftSummary): void {
     this.drafts.set(this.drafts().map((existing) => (existing.id === draft.id ? draft : existing)));
+  }
+
+  protected canSchedule(draft: ContentDraftSummary): boolean {
+    return draft.status === 'READY' || draft.status === 'PUBLISHED';
+  }
+
+  protected draftScheduleAccountFor(draft: ContentDraftSummary): string {
+    return this.draftScheduleAccountId()[draft.id] ?? this.publishableSocialAccounts()[0]?.id ?? '';
+  }
+
+  protected setDraftScheduleAccount(draft: ContentDraftSummary, value: string): void {
+    this.draftScheduleAccountId.update((ids) => ({ ...ids, [draft.id]: value }));
+  }
+
+  protected draftScheduleDateTimeFor(draft: ContentDraftSummary): string {
+    return this.draftScheduleDateTime()[draft.id] ?? '';
+  }
+
+  protected setDraftScheduleDateTime(draft: ContentDraftSummary, value: string): void {
+    this.draftScheduleDateTime.update((values) => ({ ...values, [draft.id]: value }));
+  }
+
+  protected scheduleDraft(draft: ContentDraftSummary): void {
+    this.scheduleCreateErrors.update((errors) => ({ ...errors, [draft.id]: null }));
+    const socialAccountId = this.draftScheduleAccountFor(draft);
+    const localDateTime = this.draftScheduleDateTimeFor(draft);
+    if (!socialAccountId) {
+      this.scheduleCreateErrors.update((errors) => ({ ...errors, [draft.id]: 'Connect a social account first.' }));
+      return;
+    }
+    const scheduledFor = this.toIsoInstant(localDateTime);
+    if (!scheduledFor) {
+      this.scheduleCreateErrors.update((errors) => ({ ...errors, [draft.id]: 'Choose a valid future date and time.' }));
+      return;
+    }
+    this.scheduleCreateBusy.update((busy) => ({ ...busy, [draft.id]: true }));
+    this.publishSchedulesService
+      .create(draft.id, socialAccountId, scheduledFor)
+      .pipe(finalize(() => this.scheduleCreateBusy.update((busy) => ({ ...busy, [draft.id]: false }))))
+      .subscribe({
+        next: (schedule) => {
+          this.schedules.set([schedule, ...this.schedules()]);
+          this.draftScheduleDateTime.update((values) => ({ ...values, [draft.id]: '' }));
+        },
+        error: () => this.scheduleCreateErrors.update((errors) => ({ ...errors, [draft.id]: 'Schedule could not be created.' })),
+      });
+  }
+
+  /** datetime-local values have no timezone; the browser's Date parses them as
+   *  local time, and toISOString() converts that to an unambiguous UTC instant. */
+  private toIsoInstant(localDateTime: string): string | null {
+    if (!localDateTime) {
+      return null;
+    }
+    const parsed = new Date(localDateTime);
+    if (Number.isNaN(parsed.getTime())) {
+      return null;
+    }
+    return parsed.toISOString();
+  }
+
+  protected upcomingSchedules(): PublishScheduleSummary[] {
+    return this.schedules()
+      .filter((schedule) => schedule.status === 'SCHEDULED')
+      .sort((a, b) => a.scheduledFor.localeCompare(b.scheduledFor));
+  }
+
+  protected scheduleHistory(): PublishScheduleSummary[] {
+    return this.schedules()
+      .filter((schedule) => schedule.status !== 'SCHEDULED')
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  }
+
+  protected schedulesForDraft(draft: ContentDraftSummary): PublishScheduleSummary[] {
+    return this.schedules()
+      .filter((schedule) => schedule.contentDraftId === draft.id)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  protected scheduleStatusLabel(status: PublishScheduleStatus): string {
+    switch (status) {
+      case 'SCHEDULED':
+        return 'Scheduled';
+      case 'DISPATCHED':
+        return 'Dispatched';
+      case 'CANCELLED':
+        return 'Cancelled';
+      case 'FAILED':
+        return 'Failed';
+    }
+  }
+
+  protected canCancelSchedule(schedule: PublishScheduleSummary): boolean {
+    return schedule.status === 'SCHEDULED';
+  }
+
+  protected cancelSchedule(schedule: PublishScheduleSummary): void {
+    this.scheduleCancelErrors.update((errors) => ({ ...errors, [schedule.id]: null }));
+    this.scheduleCancelBusy.update((busy) => ({ ...busy, [schedule.id]: true }));
+    this.publishSchedulesService
+      .cancel(schedule.id)
+      .pipe(finalize(() => this.scheduleCancelBusy.update((busy) => ({ ...busy, [schedule.id]: false }))))
+      .subscribe({
+        next: (updated) => this.replaceSchedule(updated),
+        error: () => this.scheduleCancelErrors.update((errors) => ({ ...errors, [schedule.id]: 'Could not cancel schedule.' })),
+      });
+  }
+
+  protected isRescheduling(schedule: PublishScheduleSummary): boolean {
+    return this.rescheduleEditing()[schedule.id] ?? false;
+  }
+
+  protected startReschedule(schedule: PublishScheduleSummary): void {
+    this.rescheduleEditing.update((items) => ({ ...items, [schedule.id]: true }));
+  }
+
+  protected cancelRescheduleEdit(schedule: PublishScheduleSummary): void {
+    this.rescheduleEditing.update((items) => ({ ...items, [schedule.id]: false }));
+  }
+
+  protected rescheduleDateTimeFor(schedule: PublishScheduleSummary): string {
+    return this.rescheduleDateTime()[schedule.id] ?? '';
+  }
+
+  protected setRescheduleDateTime(schedule: PublishScheduleSummary, value: string): void {
+    this.rescheduleDateTime.update((values) => ({ ...values, [schedule.id]: value }));
+  }
+
+  protected submitReschedule(schedule: PublishScheduleSummary): void {
+    this.rescheduleErrors.update((errors) => ({ ...errors, [schedule.id]: null }));
+    const scheduledFor = this.toIsoInstant(this.rescheduleDateTimeFor(schedule));
+    if (!scheduledFor) {
+      this.rescheduleErrors.update((errors) => ({ ...errors, [schedule.id]: 'Choose a valid future date and time.' }));
+      return;
+    }
+    this.rescheduleBusy.update((busy) => ({ ...busy, [schedule.id]: true }));
+    this.publishSchedulesService
+      .reschedule(schedule.id, scheduledFor)
+      .pipe(finalize(() => this.rescheduleBusy.update((busy) => ({ ...busy, [schedule.id]: false }))))
+      .subscribe({
+        next: (updated) => {
+          this.replaceSchedule(updated);
+          this.rescheduleEditing.update((items) => ({ ...items, [schedule.id]: false }));
+        },
+        error: () => this.rescheduleErrors.update((errors) => ({ ...errors, [schedule.id]: 'Could not reschedule.' })),
+      });
+  }
+
+  private replaceSchedule(schedule: PublishScheduleSummary): void {
+    this.schedules.set(this.schedules().map((existing) => (existing.id === schedule.id ? schedule : existing)));
   }
 
   private refreshTranscripts(assets: MediaAssetSummary[]): void {
