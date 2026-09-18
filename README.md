@@ -5,9 +5,18 @@ social-media content workflows, video processing workers running across
 multiple laptops/cloud machines, scheduling, AI-assisted content creation,
 publishing, analytics, and revenue tracking.
 
-## Phase 9B scope
+## Phase 9C scope
 
-This repository is currently at **Phase 9B: telemetry-aware smart scheduling**.
+This repository is currently at **Phase 9C: scheduling observability and performance feedback**.
+Phase 9A introduced current Worker telemetry and per-attempt execution metrics;
+Phase 9B introduced deterministic `TELEMETRY_AWARE_V1` selection; Phase 9C now
+persists only successful claim decisions and exposes bounded workspace-scoped
+queue, execution, Worker/job-type, fallback, and starvation statistics.
+
+Claim decisions are written in the same transaction as assignment. Empty polls
+and capacity rejections are not persisted, preventing poll-noise growth. Decision
+history defaults to a 24-hour query window, supports `1h`, `24h`, `7d`, and `30d`,
+and is retained for 30 days by default.
 That means:
 
 - A clean monorepo layout (`apps/`, `workers/`, `infra/`, `docs/`).

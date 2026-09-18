@@ -57,7 +57,8 @@ public class WorkerSchedulingService {
                 worker.getId(),
                 selected.score(),
                 selected.reasonCodes());
-        return JobSchedulingDecision.selected(selected.job(), selected.reasonCodes());
+        return JobSchedulingDecision.selected(
+                selected.job(), selected.reasonCodes(), selected.score(), hasFreshTelemetry(worker, now));
     }
 
     public boolean hasFreshTelemetry(Worker worker, Instant now) {

@@ -1,6 +1,6 @@
 # workers
 
-Phase 9A includes a standalone Java worker agent in `java-agent/`. It registers
+The standalone Java worker agent in `java-agent/` registers
 the current machine with the Spring control plane, sends periodic heartbeats,
 polls for work, executes the safe `SYSTEM_TEST` job type, and imports direct
 HTTP/HTTPS media files through `IMPORT_MEDIA`. When FFprobe is available, it
@@ -69,6 +69,11 @@ Temporary server/network failures are logged and retried on the next poll.
 single-job-at-a-time, so it avoids claim polling while its local active job
 count is at capacity. The API also records that capacity and uses fresh
 heartbeat telemetry as a server-side scheduling guard.
+
+Phase 9C does not alter the Worker protocol or claim behavior. The server records
+one compact decision only after a real claim, in the same transaction as job
+assignment. Compute exposes current capacity alongside workspace-scoped recent
+execution history; it does not assign a global Worker rank or speed score.
 
 `SYSTEM_TEST` accepts only a bounded message and duration. It never executes
 shell commands, video processing, AI workloads, browser automation, publishing,

@@ -44,6 +44,7 @@ public class JobService {
     private final WorkerEligibilityService eligibilityService;
     private final WorkerSchedulingService schedulingService;
     private final JobExecutionMetricService executionMetrics;
+    private final SchedulingDecisionRepository schedulingDecisions;
     private final JobProperties properties;
     private final WorkerSchedulingProperties schedulingProperties;
     private final Clock clock;
@@ -60,6 +61,7 @@ public class JobService {
             WorkerEligibilityService eligibilityService,
             WorkerSchedulingService schedulingService,
             JobExecutionMetricService executionMetrics,
+            SchedulingDecisionRepository schedulingDecisions,
             JobProperties properties,
             WorkerSchedulingProperties schedulingProperties,
             Clock clock) {
@@ -74,6 +76,7 @@ public class JobService {
         this.eligibilityService = eligibilityService;
         this.schedulingService = schedulingService;
         this.executionMetrics = executionMetrics;
+        this.schedulingDecisions = schedulingDecisions;
         this.properties = properties;
         this.schedulingProperties = schedulingProperties;
         this.clock = clock;
@@ -146,6 +149,8 @@ public class JobService {
         return decision.job()
                 .map(job -> {
                     job.claim(worker, now, now.plus(properties.getLeaseDuration()));
+                    schedulingDecisions.save(new SchedulingDecision(
+                            job, worker, decision, schedulingProperties.getPolicyId(), now));
                     return new WorkerJobClaimResponse(
                             true,
                             job.getId(),

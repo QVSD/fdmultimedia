@@ -179,6 +179,19 @@ Useful worker environment variables:
 - `TRANSCRIPTION_TIMEOUT_SECONDS` — inference timeout, default 900 seconds.
 
 The Phase 9B worker registers, heartbeats with lightweight telemetry, polls for
+jobs, and remains compatible with the Phase 9C observability layer.
+
+Phase 9C operational APIs are available to authenticated workspace users:
+
+* `GET /api/scheduling/overview?window=24h`
+* `GET /api/scheduling/workers?window=24h`
+* `GET /api/scheduling/decisions?window=24h&limit=25`
+
+Supported windows are `1h`, `24h`, `7d`, and `30d`; decision limits are clamped
+to 1–100. Configure retention with `SCHEDULING_DECISION_RETENTION_DAYS` and the
+low-frequency cleanup schedule with `SCHEDULING_DECISION_CLEANUP_CRON`.
+
+The Phase 9B worker registers, heartbeats with lightweight telemetry, polls for
 a job, starts it, executes
 `SYSTEM_TEST`, `IMPORT_MEDIA`, `INSPECT_MEDIA`, `CREATE_CLIP`, or
 `CREATE_SOCIAL_VERTICAL`, `ANALYZE_HIGHLIGHTS`, or `TRANSCRIBE_MEDIA`, renews active

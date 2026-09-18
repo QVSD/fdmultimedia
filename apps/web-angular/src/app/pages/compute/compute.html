@@ -110,6 +110,20 @@
                 }
               </section>
 
+              <section class="compute__history" aria-label="Recent execution history">
+                <h3>24h performance</h3>
+                @if (performanceFor(worker.id).length === 0) {
+                  <p>No recent execution history.</p>
+                } @else {
+                  @for (metric of performanceFor(worker.id); track metric.jobType) {
+                    <div>
+                      <strong>{{ metric.jobType }}</strong>
+                      <span>{{ metric.successes }} / {{ metric.attempts }} succeeded · avg {{ formatDuration(metric.averageExecutionMs) }}</span>
+                    </div>
+                  }
+                }
+              </section>
+
               <footer class="compute__footer">
                 Last seen {{ worker.lastSeenAt | date:'medium' }}
               </footer>
@@ -118,5 +132,63 @@
         </div>
       }
     }
+  }
+
+  @if (overview(); as metrics) {
+    <section class="compute__observability" aria-labelledby="scheduling-heading">
+      <header>
+        <div>
+          <h2 id="scheduling-heading">Scheduling & performance</h2>
+          <p>Current queue and per-attempt execution history for the last {{ metrics.window }}.</p>
+        </div>
+      </header>
+
+      <div class="compute__summary-grid">
+        <div><span>Queued</span><strong>{{ metrics.queue.queued }}</strong></div>
+        <div><span>Running</span><strong>{{ metrics.queue.running }}</strong></div>
+        <div><span>Claims</span><strong>{{ metrics.scheduling.claims }}</strong></div>
+        <div><span>Fallback</span><strong>{{ metrics.scheduling.fallbackClaims }}</strong></div>
+        <div><span>Oldest queued</span><strong>{{ formatDuration(metrics.queue.oldestQueuedAgeMs) }}</strong></div>
+      </div>
+
+      <div class="compute__table-wrap">
+        <table class="compute__table">
+          <thead><tr><th>Job type</th><th>Attempts</th><th>Succeeded</th><th>Queue wait</th><th>Execution</th><th>Total</th></tr></thead>
+          <tbody>
+            @for (metric of metrics.execution; track metric.jobType) {
+              <tr>
+                <td>{{ metric.jobType }}</td>
+                <td>{{ metric.attempts }}</td>
+                <td>{{ metric.successes }}</td>
+                <td>{{ formatDuration(metric.averageQueueWaitMs) }}</td>
+                <td>{{ formatDuration(metric.averageExecutionMs) }}</td>
+                <td>{{ formatDuration(metric.averageTotalLatencyMs) }}</td>
+              </tr>
+            } @empty {
+              <tr><td colspan="6">No execution history in this window.</td></tr>
+            }
+          </tbody>
+        </table>
+      </div>
+
+      <div class="compute__decisions">
+        <h3>Recent claims</h3>
+        @for (decision of decisions(); track decision.jobId + '-' + decision.attempt) {
+          <article>
+            <div>
+              <strong>{{ decision.jobType }}</strong>
+              <span>{{ decision.workerName }} · attempt {{ decision.attempt }} · {{ decision.timestamp | date:'medium' }}</span>
+            </div>
+            <div class="compute__flags">
+              <span>{{ decision.policy }}</span>
+              @if (decision.fallbackUsed) { <span class="compute__flag--warning">Fallback</span> }
+              @if (decision.starvationOverride) { <span class="compute__flag--warning">Starvation override</span> }
+            </div>
+          </article>
+        } @empty {
+          <p>No scheduling decisions in this window.</p>
+        }
+      </div>
+    </section>
   }
 </section>

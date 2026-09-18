@@ -39,6 +39,8 @@ describe('Jobs', () => {
     expect(text).toContain('SUCCEEDED');
     expect(text).toContain('FAILED');
     expect(text).toContain('Node A');
+    expect(text).toContain('1.0 s queue');
+    expect(text).toContain('1.0 s execution');
   });
 
   it('renders empty state', async () => {

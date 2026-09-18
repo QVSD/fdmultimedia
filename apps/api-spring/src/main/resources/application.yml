@@ -64,6 +64,9 @@ app:
     min-historical-samples: ${SCHEDULING_MIN_HISTORICAL_SAMPLES:3}
     critical-memory-available-ratio: ${SCHEDULING_CRITICAL_MEMORY_AVAILABLE_RATIO:0.05}
     history-reference-execution-ms: ${SCHEDULING_HISTORY_REFERENCE_EXECUTION_MS:60000}
+    observability:
+      decision-retention-days: ${SCHEDULING_DECISION_RETENTION_DAYS:30}
+      cleanup-cron: ${SCHEDULING_DECISION_CLEANUP_CRON:0 17 3 * * *}
   media:
     max-download-size-bytes: ${MEDIA_MAX_DOWNLOAD_SIZE_BYTES:524288000}
     connect-timeout: ${MEDIA_CONNECT_TIMEOUT:10s}

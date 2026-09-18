@@ -13,6 +13,17 @@ import org.springframework.data.repository.query.Param;
 
 public interface JobRepository extends JpaRepository<Job, UUID> {
 
+    @Query(value = """
+            SELECT COUNT(*) FILTER (WHERE status = 'QUEUED') AS queued,
+                   COUNT(*) FILTER (WHERE status = 'ASSIGNED') AS assigned,
+                   COUNT(*) FILTER (WHERE status = 'RUNNING') AS running,
+                   COUNT(*) FILTER (WHERE status = 'SUCCEEDED' AND finished_at >= :since) AS succeeded,
+                   COUNT(*) FILTER (WHERE status = 'FAILED' AND finished_at >= :since) AS failed,
+                   MIN(queued_at) FILTER (WHERE status = 'QUEUED') AS "oldestQueuedAt"
+            FROM jobs WHERE workspace_id = :workspaceId
+            """, nativeQuery = true)
+    QueueSnapshotView schedulingQueueSnapshot(@Param("workspaceId") UUID workspaceId, @Param("since") Instant since);
+
     List<Job> findByWorkspaceOrderByQueuedAtDesc(Workspace workspace);
 
     Optional<Job> findByWorkspaceAndId(Workspace workspace, UUID id);

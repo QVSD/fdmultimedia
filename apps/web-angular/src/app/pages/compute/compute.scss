@@ -133,6 +133,118 @@
   font-size: 0.85rem;
 }
 
+.compute__history {
+  border-top: 1px solid #e5e7eb;
+  padding-top: 0.8rem;
+
+  h3,
+  p {
+    margin: 0;
+  }
+
+  h3 {
+    margin-bottom: 0.55rem;
+    font-size: 0.82rem;
+  }
+
+  p,
+  span {
+    color: var(--color-text-muted);
+    font-size: 0.8rem;
+  }
+
+  div {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.3rem 0;
+  }
+}
+
+.compute__observability {
+  display: grid;
+  gap: 1rem;
+  border-top: 1px solid #d1d5db;
+  padding-top: 1.5rem;
+
+  h2,
+  h3,
+  p {
+    margin: 0;
+  }
+
+  header p,
+  .compute__decisions > p {
+    margin-top: 0.25rem;
+    color: var(--color-text-muted);
+  }
+}
+
+.compute__summary-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.75rem;
+
+  div {
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 0.8rem;
+    background: #fff;
+  }
+
+  span,
+  strong {
+    display: block;
+  }
+
+  span {
+    color: var(--color-text-muted);
+    font-size: 0.78rem;
+  }
+
+  strong {
+    margin-top: 0.25rem;
+    font-size: 1.25rem;
+  }
+}
+
+.compute__table-wrap { overflow-x: auto; }
+
+.compute__table {
+  width: 100%;
+  min-width: 720px;
+  border-collapse: collapse;
+
+  th,
+  td {
+    border-bottom: 1px solid #e5e7eb;
+    padding: 0.7rem;
+    text-align: left;
+  }
+
+  th { color: #4b5563; font-size: 0.75rem; text-transform: uppercase; }
+}
+
+.compute__decisions {
+  display: grid;
+  gap: 0.5rem;
+
+  article {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    border-bottom: 1px solid #e5e7eb;
+    padding: 0.65rem 0;
+  }
+
+  article span { color: var(--color-text-muted); font-size: 0.8rem; }
+  article > div:first-child span { display: block; margin-top: 0.15rem; }
+}
+
+.compute__flags { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+.compute__flags span { border-radius: 6px; padding: 0.2rem 0.4rem; background: #e5e7eb; }
+.compute__flags .compute__flag--warning { background: #fef3c7; color: #92400e; }
+
 .compute__badge {
   display: inline-block;
   min-width: 4.8rem;
@@ -158,4 +270,7 @@
   .compute__metrics {
     grid-template-columns: 1fr;
   }
+
+  .compute__summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .compute__decisions article, .compute__history div { display: grid; }
 }

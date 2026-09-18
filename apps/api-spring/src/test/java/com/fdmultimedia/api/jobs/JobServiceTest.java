@@ -58,6 +58,7 @@ class JobServiceTest {
             new WorkerStatusService(workerProperties, Clock.fixed(NOW, ZoneOffset.UTC));
     private final WorkerEligibilityService eligibilityService = new WorkerEligibilityService();
     private final JobExecutionMetricService executionMetrics = mock(JobExecutionMetricService.class);
+    private final SchedulingDecisionRepository schedulingDecisions = mock(SchedulingDecisionRepository.class);
     private final JobExecutionMetricRepository executionMetricRepository = mock(JobExecutionMetricRepository.class);
     private final WorkerSchedulingProperties schedulingProperties = new WorkerSchedulingProperties();
     private final WorkerSchedulingService schedulingService = new WorkerSchedulingService(
@@ -76,6 +77,7 @@ class JobServiceTest {
             eligibilityService,
             schedulingService,
             executionMetrics,
+            schedulingDecisions,
             jobProperties,
             schedulingProperties,
             Clock.fixed(NOW, ZoneOffset.UTC));
@@ -184,6 +186,12 @@ class JobServiceTest {
         assertThat(job.getAttemptCount()).isEqualTo(1);
         assertThat(job.getLeaseExpiresAt()).isEqualTo(NOW.plusSeconds(20));
         verify(jobs).findQueuedCandidatesForUpdate(workspace.getId(), List.of("SYSTEM_TEST"), List.of("DETERMINISTIC_V1"), 25);
+        ArgumentCaptor<SchedulingDecision> decisionCaptor = ArgumentCaptor.forClass(SchedulingDecision.class);
+        verify(schedulingDecisions).save(decisionCaptor.capture());
+        assertThat(decisionCaptor.getValue().getJob()).isSameAs(job);
+        assertThat(decisionCaptor.getValue().getWorker()).isSameAs(worker);
+        assertThat(decisionCaptor.getValue().getAttempt()).isEqualTo(1);
+        assertThat(decisionCaptor.getValue().getPolicy()).isEqualTo("TELEMETRY_AWARE_V1");
     }
 
     @Test

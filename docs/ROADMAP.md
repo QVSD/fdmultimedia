@@ -1,6 +1,6 @@
 # Roadmap
 
-The repository is currently at Phase 9B. Completed phases are marked below;
+The repository is currently at Phase 9C. Completed phases are marked below;
 later phases are planned high-level direction and intentionally do not go into
 implementation detail before they are started.
 
@@ -47,9 +47,12 @@ implementation detail before they are started.
 15. **Telemetry-aware scheduler / load balancing foundation** — use fresh
    capacity telemetry, bounded execution history, memory/CPU signals, and
    starvation protection to choose among locked compatible queued jobs without
-   replacing the PostgreSQL atomic claim model. *(current phase)*
-16. **FFmpeg processing** — richer automated video processing pipelines.
-17. **Social account integrations** — connecting and publishing to external
+   replacing the PostgreSQL atomic claim model. *(complete)*
+16. **Scheduling observability and performance feedback** — persist successful
+   claim explanations atomically, expose bounded workspace aggregates, and show
+   queue/performance history without changing scheduler behavior. *(current phase)*
+17. **FFmpeg processing** — richer automated video processing pipelines.
+18. **Social account integrations** — connecting and publishing to external
    platforms.
-18. **AI content** — AI-assisted content creation.
-19. **Analytics / revenue** — performance analytics and revenue tracking.
+19. **AI content** — AI-assisted content creation.
+20. **Analytics / revenue** — performance analytics and revenue tracking.

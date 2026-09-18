@@ -3,21 +3,45 @@ import { of, throwError } from 'rxjs';
 
 import { WorkerSummary } from '../../core/workers/worker.models';
 import { WorkersService } from '../../core/workers/workers.service';
+import { SchedulingService } from '../../core/scheduling/scheduling.service';
 import { Compute } from './compute';
 
 describe('Compute', () => {
   let component: Compute;
   let fixture: ComponentFixture<Compute>;
   let workersService: Pick<WorkersService, 'list'>;
+  let schedulingService: Pick<SchedulingService, 'overview' | 'workers' | 'decisions'>;
 
   beforeEach(async () => {
     workersService = {
       list: vi.fn().mockReturnValue(of([worker()])),
     };
+    schedulingService = {
+      overview: vi.fn().mockReturnValue(of({
+        window: '24h',
+        queue: { queued: 2, assigned: 0, running: 1, succeeded: 4, failed: 1, oldestQueuedAgeMs: 3200 },
+        execution: [{ jobType: 'SYSTEM_TEST', attempts: 5, successes: 4, failures: 1, averageQueueWaitMs: 420, averageExecutionMs: 3200, averageTotalLatencyMs: 3700 }],
+        scheduling: { claims: 5, fallbackClaims: 1, starvationOverrideClaims: 0 },
+      })),
+      workers: vi.fn().mockReturnValue(of([{
+        workerId: worker().id, workerName: 'Node A', jobType: 'SYSTEM_TEST', attempts: 5, successes: 4,
+        failures: 1, averageQueueWaitMs: 420, averageExecutionMs: 3200, averageTotalLatencyMs: 3700,
+        mostRecentExecutionAt: '2026-09-09T12:00:00Z',
+      }])),
+      decisions: vi.fn().mockReturnValue(of([{
+        timestamp: '2026-09-09T12:00:00Z', jobId: 'job-1', jobType: 'SYSTEM_TEST', workerId: worker().id,
+        workerName: 'Node A', policy: 'TELEMETRY_AWARE_V1', suitabilityScore: 120, telemetryFresh: false,
+        fallbackUsed: true, starvationOverride: false, reasonCodes: ['TELEMETRY_STALE_FIFO'], activeJobs: 0,
+        maxActiveJobs: 1, attempt: 1,
+      }])),
+    };
 
     await TestBed.configureTestingModule({
       imports: [Compute],
-      providers: [{ provide: WorkersService, useValue: workersService }],
+      providers: [
+        { provide: WorkersService, useValue: workersService },
+        { provide: SchedulingService, useValue: schedulingService },
+      ],
     }).compileComponents();
 
     fixture = TestBed.createComponent(Compute);
@@ -44,6 +68,9 @@ describe('Compute', () => {
     expect(text).toContain('TELEMETRY_AWARE_V1');
     expect(text).toContain('CREATE_CLIP');
     expect(text).toContain('Highlights: TRANSCRIPT_SEMANTIC_V1');
+    expect(text).toContain('Scheduling & performance');
+    expect(text).toContain('3.2 s');
+    expect(text).toContain('Fallback');
   });
 
   it('renders stale or unavailable telemetry without showing old values as current', async () => {

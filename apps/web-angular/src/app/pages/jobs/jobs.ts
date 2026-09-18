@@ -1,4 +1,4 @@
-import { DatePipe, JsonPipe } from '@angular/common';
+import { JsonPipe } from '@angular/common';
 import { Component, OnDestroy, OnInit, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { EMPTY, Subscription, catchError, finalize, interval, startWith, switchMap } from 'rxjs';
@@ -10,7 +10,7 @@ type LoadState = 'loading' | 'ready' | 'error';
 
 @Component({
   selector: 'app-jobs',
-  imports: [DatePipe, FormsModule, JsonPipe],
+  imports: [FormsModule, JsonPipe],
   templateUrl: './jobs.html',
   styleUrl: './jobs.scss',
 })
@@ -77,5 +77,13 @@ export class Jobs implements OnInit, OnDestroy {
 
   protected payloadMessage(job: JobSummary): string {
     return String(job.payload['message'] ?? '');
+  }
+
+  protected durationBetween(start: string | null, end: string | null): string {
+    if (!start || !end) return '-';
+    const milliseconds = Math.max(0, new Date(end).getTime() - new Date(start).getTime());
+    if (milliseconds < 1000) return `${milliseconds} ms`;
+    if (milliseconds < 60_000) return `${(milliseconds / 1000).toFixed(1)} s`;
+    return `${Math.floor(milliseconds / 60_000)}m ${Math.round((milliseconds % 60_000) / 1000)}s`;
   }
 }

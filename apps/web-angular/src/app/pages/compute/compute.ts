@@ -1,7 +1,9 @@
 import { DatePipe } from '@angular/common';
 import { Component, OnDestroy, OnInit, computed, signal } from '@angular/core';
-import { Subscription, interval, startWith, switchMap } from 'rxjs';
+import { EMPTY, Subscription, catchError, forkJoin, interval, startWith, switchMap } from 'rxjs';
 
+import { SchedulingDecisionSummary, SchedulingOverview, WorkerPerformanceSummary } from '../../core/scheduling/scheduling.models';
+import { SchedulingService } from '../../core/scheduling/scheduling.service';
 import { WorkerSummary } from '../../core/workers/worker.models';
 import { WorkersService } from '../../core/workers/workers.service';
 
@@ -16,21 +18,42 @@ type LoadState = 'loading' | 'ready' | 'error';
 export class Compute implements OnInit, OnDestroy {
   protected readonly workers = signal<WorkerSummary[]>([]);
   protected readonly loadState = signal<LoadState>('loading');
+  protected readonly overview = signal<SchedulingOverview | null>(null);
+  protected readonly workerPerformance = signal<WorkerPerformanceSummary[]>([]);
+  protected readonly decisions = signal<SchedulingDecisionSummary[]>([]);
   protected readonly onlineCount = computed(() => this.workers().filter((worker) => worker.status === 'ONLINE').length);
 
   private subscription?: Subscription;
 
-  constructor(private readonly workersService: WorkersService) {}
+  constructor(
+    private readonly workersService: WorkersService,
+    private readonly schedulingService: SchedulingService,
+  ) {}
 
   ngOnInit(): void {
     this.subscription = interval(10_000)
       .pipe(
         startWith(0),
-        switchMap(() => this.workersService.list()),
+        switchMap(() =>
+          forkJoin({
+            workers: this.workersService.list(),
+            overview: this.schedulingService.overview(),
+            performance: this.schedulingService.workers(),
+            decisions: this.schedulingService.decisions(),
+          }).pipe(
+            catchError(() => {
+              this.loadState.set('error');
+              return EMPTY;
+            }),
+          ),
+        ),
       )
       .subscribe({
-        next: (workers) => {
+        next: ({ workers, overview, performance, decisions }) => {
           this.workers.set(workers);
+          this.overview.set(overview);
+          this.workerPerformance.set(performance);
+          this.decisions.set(decisions);
           this.loadState.set('ready');
         },
         error: () => this.loadState.set('error'),
@@ -92,5 +115,17 @@ export class Compute implements OnInit, OnDestroy {
     const jobTypes = worker.supportedJobTypes ?? [];
     const analyzers = worker.supportedHighlightAnalyzers ?? [];
     return [...jobTypes, ...analyzers.map((analyzer) => `Highlights: ${analyzer}`)];
+  }
+
+  protected performanceFor(workerId: string): WorkerPerformanceSummary[] {
+    return this.workerPerformance().filter((metric) => metric.workerId === workerId);
+  }
+
+  protected formatDuration(value: number | null | undefined): string {
+    if (value === null || value === undefined) return '-';
+    if (value < 1000) return `${Math.round(value)} ms`;
+    if (value < 60_000) return `${(value / 1000).toFixed(1)} s`;
+    const minutes = Math.floor(value / 60_000);
+    return `${minutes}m ${Math.round((value % 60_000) / 1000)}s`;
   }
 }

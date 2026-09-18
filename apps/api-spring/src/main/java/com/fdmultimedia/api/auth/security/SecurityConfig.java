@@ -42,6 +42,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/assets/**").hasRole("USER")
                         .requestMatchers("/api/jobs/**").hasRole("USER")
                         .requestMatchers("/api/workers/**").hasRole("USER")
+                        .requestMatchers("/api/scheduling/**").hasRole("USER")
                         .anyRequest().authenticated())
                 .exceptionHandling(errors -> errors
                         .authenticationEntryPoint((request, response, exception) ->

@@ -1,6 +1,6 @@
 # Architecture
 
-## Phase 9B scope
+## Phase 9C scope
 
 Phase 9A added worker telemetry and scheduler-oriented execution history on
 top of the existing distributed job pipeline. Phase 9B begins using those
@@ -16,6 +16,19 @@ Phase 9B uses capability, fresh capacity, memory/CPU telemetry when available,
 and bounded recent execution history. It does not implement predictive
 placement, autoscaling, GPU scheduling, queue priority redesign, or RabbitMQ
 dispatch.
+
+Phase 9C observes this unchanged scheduler. Every successful claim persists a
+compact `scheduling_decisions` row in the assignment transaction with the
+policy, actual scalar score, controlled reason codes, telemetry/fallback and
+starvation flags, attempt, and bounded capacity snapshot. Empty polls are only
+debug events. Read-only observability queries never use pessimistic locks.
+
+Execution aggregates remain per attempt and use Phase 9A definitions:
+`queueWaitMs = assignedAt - queuedAt`, `executionMs = finishedAt - startedAt`,
+and `totalLatencyMs = finishedAt - queuedAt`. APIs accept only `1h`, `24h`,
+`7d`, or `30d` windows and always scope rows through the authenticated workspace.
+Decision cleanup runs once daily and retains 30 days by default; execution
+metrics are not deleted by Phase 9C.
 
 ## High-level architecture
 
