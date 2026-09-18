@@ -97,11 +97,12 @@ npm run build      # production build
 
 ## Adding a new backend module
 
-Domain logic isn't implemented yet, but the package layout under
+`accounts` and `publishing` are implemented as of Phase 10A; `robots`,
+`analytics`, and `revenue` remain placeholders. The package layout under
 `com.fdmultimedia.api` (`auth`, `users`, `workspaces`, `accounts`, `robots`,
 `assets`, `jobs`, `workers`, `publishing`, `analytics`, `revenue`, `shared`)
-is where it should land. See [ARCHITECTURE.md](ARCHITECTURE.md) for what
-each package is for.
+is where new domain logic should land. See [ARCHITECTURE.md](ARCHITECTURE.md)
+for what each package is for.
 
 ## Database migrations
 

@@ -78,6 +78,9 @@
                       {{ verticalBusy()[asset.id] ? 'Creating...' : 'Make 9:16' }}
                     </button>
                   }
+                  @if (canPublish(asset)) {
+                    <button type="button" (click)="toggleAsset(asset)">Publish</button>
+                  }
                   <button class="button-secondary" type="button" (click)="toggleAsset(asset)" [attr.aria-expanded]="isExpanded(asset)">
                     {{ isExpanded(asset) ? 'Hide Details' : 'Details' }}
                   </button>
@@ -95,6 +98,9 @@
               }
               @if (verticalErrors()[asset.id]) {
                 <p class="content__error">{{ verticalErrors()[asset.id] }}</p>
+              }
+              @if (publishErrors()[asset.id]) {
+                <p class="content__error">{{ publishErrors()[asset.id] }}</p>
               }
 
               @if (isExpanded(asset)) {
@@ -230,6 +236,93 @@
                         {{ verticalBusy()[asset.id] ? 'Creating...' : 'Make 9:16' }}
                       </button>
                       <p class="content__muted">Creates a 1080x1920 center-cropped derivative.</p>
+                    }
+                  </section>
+
+                  <section class="detail-panel">
+                    <h3>Publish</h3>
+                    @if (canPublish(asset)) {
+                      @if (testSocialAccounts().length === 0) {
+                        <p class="content__muted">
+                          No social accounts yet. Add a TEST account on the Settings page to try publishing.
+                        </p>
+                      } @else {
+                        <form class="content__publish-form" (ngSubmit)="publish(asset)">
+                          <label>
+                            <span>Account</span>
+                            <select
+                              name="account-{{ asset.id }}"
+                              [ngModel]="publishAccountFor(asset)"
+                              (ngModelChange)="setPublishAccount(asset, $event)"
+                            >
+                              @for (account of testSocialAccounts(); track account.id) {
+                                <option [value]="account.id">{{ account.displayName }} ({{ account.platform }})</option>
+                              }
+                            </select>
+                          </label>
+                          <label>
+                            <span>Caption</span>
+                            <input
+                              name="caption-{{ asset.id }}"
+                              type="text"
+                              maxlength="2200"
+                              placeholder="Optional caption"
+                              [ngModel]="publishCaptionFor(asset)"
+                              (ngModelChange)="setPublishCaption(asset, $event)"
+                            />
+                          </label>
+                          <button type="submit" [disabled]="publishBusy()[asset.id]">
+                            {{ publishBusy()[asset.id] ? 'Publishing...' : 'Publish to TEST' }}
+                          </button>
+                        </form>
+                        <p class="content__muted">
+                          TEST publishing is not real &mdash; it never contacts Instagram, TikTok, or any external platform.
+                        </p>
+                      }
+                    } @else {
+                      <p class="content__muted">Publishing is available for inspected video.</p>
+                    }
+
+                    @if (publicationsFor(asset).length > 0) {
+                      <div class="publication-list">
+                        @for (publication of publicationsFor(asset); track publication.id) {
+                          <div class="publication-card">
+                            <div class="publication-card__header">
+                              <span [class]="'content__badge content__badge--' + publication.status.toLowerCase()">
+                                {{ publicationStatusLabel(publication.status) }}
+                              </span>
+                              <span class="content__badge">{{ publication.platform }} (non-real)</span>
+                              <span class="content__muted">{{ publication.socialAccountDisplayName }}</span>
+                              <span class="content__muted">{{ publication.createdAt | date:'medium' }}</span>
+                            </div>
+                            @if (publication.caption) {
+                              <p class="content__muted">&ldquo;{{ publication.caption }}&rdquo;</p>
+                            }
+                            @if (publication.status === 'PUBLISHED') {
+                              <p class="content__muted">Provider id: {{ publication.providerPublicationId }}</p>
+                            }
+                            @if (publication.failureMessage) {
+                              <p class="content__error">{{ publication.failureCode }}: {{ publication.failureMessage }}</p>
+                            }
+                            @if (publication.attempts.length > 0) {
+                              <details class="publication-card__attempts">
+                                <summary>{{ publication.attempts.length }} attempt(s)</summary>
+                                @for (attempt of publication.attempts; track attempt.id) {
+                                  <p class="content__muted">
+                                    #{{ attempt.jobAttempt }} &middot; {{ attempt.outcome }}
+                                    @if (attempt.workerName) {
+                                      &middot; {{ attempt.workerName }}
+                                    }
+                                    @if (attempt.errorMessage) {
+                                      &middot; {{ attempt.errorCode }}: {{ attempt.errorMessage }}
+                                    }
+                                  </p>
+                                }
+                              </details>
+                            }
+                          </div>
+                        }
+                      </div>
                     }
                   </section>
                 </div>

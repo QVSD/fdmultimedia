@@ -1,6 +1,6 @@
 # Roadmap
 
-The repository is currently at Phase 9C. Completed phases are marked below;
+The repository is currently at Phase 10A. Completed phases are marked below;
 later phases are planned high-level direction and intentionally do not go into
 implementation detail before they are started.
 
@@ -50,9 +50,20 @@ implementation detail before they are started.
    replacing the PostgreSQL atomic claim model. *(complete)*
 16. **Scheduling observability and performance feedback** — persist successful
    claim explanations atomically, expose bounded workspace aggregates, and show
-   queue/performance history without changing scheduler behavior. *(current phase)*
-17. **FFmpeg processing** — richer automated video processing pipelines.
-18. **Social account integrations** — connecting and publishing to external
-   platforms.
-19. **AI content** — AI-assisted content creation.
-20. **Analytics / revenue** — performance analytics and revenue tracking.
+   queue/performance history without changing scheduler behavior. *(complete)*
+17. **Social accounts & publishing foundation (Phase 10A)** — workspace-scoped
+   `SocialAccount` (metadata only, no credential columns), a `Publication`
+   state machine (PENDING → PUBLISHING → PUBLISHED/FAILED/CANCELLED) with
+   durable per-attempt `PublishingAttempt` history, and a new `PUBLISH_MEDIA`
+   job type that flows through the existing distributed Job/worker/scheduling
+   infrastructure unchanged. A deterministic, explicitly non-real `TEST`
+   publishing provider proves the end-to-end pipeline (presigned asset access,
+   idempotent retries, stale-worker-safe completion) without any real
+   Instagram/TikTok integration. *(complete)*
+18. **FFmpeg processing** — richer automated video processing pipelines.
+19. **Real social platform integrations (Phase 10B+)** — official Instagram
+   and TikTok publishing providers behind the `PublishingProvider` interface
+   introduced in Phase 10A, plus a secret-managed credential store for
+   `SocialAccount`.
+20. **AI content** — AI-assisted content creation.
+21. **Analytics / revenue** — performance analytics and revenue tracking.

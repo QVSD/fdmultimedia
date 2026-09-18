@@ -58,7 +58,15 @@ public final class WorkerAgent {
         TranscribeMediaExecutor transcribeMediaExecutor = transcriptionAvailable
                 ? new TranscribeMediaExecutor(config.ffmpegPath(), transcriptionProvider)
                 : null;
-        List<String> supportedJobTypes = supportedJobTypes(ffprobeAvailable, ffmpegAvailable, transcriptionAvailable);
+        PublishingProvider publishingProvider = new TestPublishingProvider();
+        boolean publishingAvailable = publishingProvider.isAvailable();
+        if (publishingAvailable) {
+            System.err.println("Publishing provider available: " + publishingProvider.platform() + " (non-real, deterministic)");
+        } else {
+            System.err.println("Publishing provider unavailable; PUBLISH_MEDIA capability disabled");
+        }
+        PublishMediaExecutor publishMediaExecutor = publishingAvailable ? new PublishMediaExecutor(publishingProvider) : null;
+        List<String> supportedJobTypes = supportedJobTypes(ffprobeAvailable, ffmpegAvailable, transcriptionAvailable, publishingAvailable);
         List<String> supportedHighlightAnalyzers = supportedHighlightAnalyzers(semanticHighlightAvailable);
         AtomicInteger activeJobs = new AtomicInteger(0);
         WorkerTelemetryCollector telemetryCollector = new WorkerTelemetryCollector();
@@ -87,7 +95,7 @@ public final class WorkerAgent {
                 activeJobs,
                 supportedJobTypes,
                 supportedHighlightAnalyzers));
-        executor.submit(() -> jobLoop(client, machineIdentifier, config, systemTestExecutor, importMediaExecutor, inspectMediaExecutor, clipExecutor, analyzeHighlightsExecutor, transcribeMediaExecutor, supportedJobTypes, supportedHighlightAnalyzers, activeJobs));
+        executor.submit(() -> jobLoop(client, machineIdentifier, config, systemTestExecutor, importMediaExecutor, inspectMediaExecutor, clipExecutor, analyzeHighlightsExecutor, transcribeMediaExecutor, publishMediaExecutor, supportedJobTypes, supportedHighlightAnalyzers, activeJobs));
         shutdown.await();
     }
 
@@ -126,6 +134,7 @@ public final class WorkerAgent {
             FfmpegClipExecutor clipExecutor,
             AnalyzeHighlightsExecutor analyzeHighlightsExecutor,
             TranscribeMediaExecutor transcribeMediaExecutor,
+            PublishMediaExecutor publishMediaExecutor,
             List<String> supportedJobTypes,
             List<String> supportedHighlightAnalyzers,
             AtomicInteger activeJobs) {
@@ -142,7 +151,7 @@ public final class WorkerAgent {
                 }
                 activeJobs.incrementAndGet();
                 try {
-                    executeClaimedJob(client, machineIdentifier, config.workerName(), systemTestExecutor, importMediaExecutor, inspectMediaExecutor, clipExecutor, analyzeHighlightsExecutor, transcribeMediaExecutor, job);
+                    executeClaimedJob(client, machineIdentifier, config.workerName(), systemTestExecutor, importMediaExecutor, inspectMediaExecutor, clipExecutor, analyzeHighlightsExecutor, transcribeMediaExecutor, publishMediaExecutor, job);
                 } finally {
                     activeJobs.decrementAndGet();
                 }
@@ -163,6 +172,7 @@ public final class WorkerAgent {
             FfmpegClipExecutor clipExecutor,
             AnalyzeHighlightsExecutor analyzeHighlightsExecutor,
             TranscribeMediaExecutor transcribeMediaExecutor,
+            PublishMediaExecutor publishMediaExecutor,
             ClaimedJob job) throws InterruptedException {
         try {
             client.started(job.jobId(), machineIdentifier);
@@ -178,6 +188,8 @@ public final class WorkerAgent {
                 executeAnalyzeHighlightsJob(client, machineIdentifier, analyzeHighlightsExecutor, job);
             } else if ("TRANSCRIBE_MEDIA".equals(job.type()) && transcribeMediaExecutor != null) {
                 executeTranscribeMediaJob(client, machineIdentifier, transcribeMediaExecutor, job);
+            } else if ("PUBLISH_MEDIA".equals(job.type()) && publishMediaExecutor != null) {
+                executePublishMediaJob(client, machineIdentifier, publishMediaExecutor, job);
             } else if ("SYSTEM_TEST".equals(job.type())) {
                 Map<String, Object> result = systemTestExecutor.execute(job, workerName);
                 client.complete(job.jobId(), machineIdentifier, result);
@@ -322,6 +334,27 @@ public final class WorkerAgent {
         }
     }
 
+    private static void executePublishMediaJob(
+            WorkerAgentClient client,
+            String machineIdentifier,
+            PublishMediaExecutor publishMediaExecutor,
+            ClaimedJob job) throws InterruptedException {
+        AtomicBoolean running = new AtomicBoolean(true);
+        Thread renewer = new Thread(() -> leaseRenewLoop(client, machineIdentifier, job, running), "fdm-job-lease-renewer");
+        renewer.setDaemon(true);
+        renewer.start();
+        try {
+            publishMediaExecutor.execute(client, job, machineIdentifier);
+        } catch (ImportFailureException ex) {
+            reportPublishingFailure(client, machineIdentifier, job, ex.code(), ex.getMessage(), ex.terminal());
+        } catch (Exception ex) {
+            reportPublishingFailure(client, machineIdentifier, job, "PUBLISH_MEDIA_FAILED", ex.getMessage(), false);
+        } finally {
+            running.set(false);
+            renewer.interrupt();
+        }
+    }
+
     private static void leaseRenewLoop(
             WorkerAgentClient client,
             String machineIdentifier,
@@ -460,6 +493,35 @@ public final class WorkerAgent {
         }
     }
 
+    private static void reportPublishingFailure(
+            WorkerAgentClient client,
+            String machineIdentifier,
+            ClaimedJob job,
+            String code,
+            String message,
+            boolean terminal) {
+        Object publicationId = job.payload().get("publicationId");
+        Object assetId = job.payload().get("assetId");
+        Object socialAccountId = job.payload().get("socialAccountId");
+        try {
+            if (publicationId == null || assetId == null || socialAccountId == null) {
+                client.fail(job.jobId(), machineIdentifier, code, message, terminal);
+            } else {
+                client.failPublication(
+                        job.jobId(),
+                        machineIdentifier,
+                        java.util.UUID.fromString(String.valueOf(publicationId)),
+                        java.util.UUID.fromString(String.valueOf(assetId)),
+                        java.util.UUID.fromString(String.valueOf(socialAccountId)),
+                        code,
+                        message,
+                        terminal);
+            }
+        } catch (Exception reportFailure) {
+            System.err.println("Worker failed to report publishing failure: " + reportFailure.getMessage());
+        }
+    }
+
     private static void reportTranscriptionFailure(
             WorkerAgentClient client,
             String machineIdentifier,
@@ -482,7 +544,8 @@ public final class WorkerAgent {
         }
     }
 
-    private static List<String> supportedJobTypes(boolean ffprobeAvailable, boolean ffmpegAvailable, boolean transcriptionAvailable) {
+    private static List<String> supportedJobTypes(
+            boolean ffprobeAvailable, boolean ffmpegAvailable, boolean transcriptionAvailable, boolean publishingAvailable) {
         List<String> types = new ArrayList<>();
         types.add("SYSTEM_TEST");
         types.add("IMPORT_MEDIA");
@@ -496,6 +559,9 @@ public final class WorkerAgent {
         }
         if (transcriptionAvailable) {
             types.add("TRANSCRIBE_MEDIA");
+        }
+        if (publishingAvailable) {
+            types.add("PUBLISH_MEDIA");
         }
         return List.copyOf(types);
     }

@@ -3,6 +3,10 @@ import { of, throwError } from 'rxjs';
 
 import { AssetsService } from '../../core/assets/assets.service';
 import { HighlightAnalysisSummary, MediaAssetSummary, MediaAssetStatus, MediaTranscriptSummary } from '../../core/assets/asset.models';
+import { PublishingService } from '../../core/publishing/publishing.service';
+import { PublicationSummary } from '../../core/publishing/publishing.models';
+import { SocialAccountsService } from '../../core/social-accounts/social-accounts.service';
+import { SocialAccountSummary } from '../../core/social-accounts/social-account.models';
 import { Content } from './content';
 
 describe('Content', () => {
@@ -20,6 +24,8 @@ describe('Content', () => {
     | 'createTranscript'
     | 'listTranscripts'
   >;
+  let publishingService: Pick<PublishingService, 'createPublication' | 'listForAsset'>;
+  let socialAccountsService: Pick<SocialAccountsService, 'list' | 'create'>;
 
   beforeEach(async () => {
     assetsService = {
@@ -39,10 +45,22 @@ describe('Content', () => {
       createTranscript: vi.fn().mockReturnValue(of(transcript('PENDING'))),
       listTranscripts: vi.fn().mockReturnValue(of([transcript('SUCCEEDED')])),
     };
+    socialAccountsService = {
+      list: vi.fn().mockReturnValue(of([testAccount()])),
+      create: vi.fn().mockReturnValue(of(testAccount())),
+    };
+    publishingService = {
+      createPublication: vi.fn().mockReturnValue(of(publication('PENDING'))),
+      listForAsset: vi.fn().mockReturnValue(of([])),
+    };
 
     await TestBed.configureTestingModule({
       imports: [Content],
-      providers: [{ provide: AssetsService, useValue: assetsService }],
+      providers: [
+        { provide: AssetsService, useValue: assetsService },
+        { provide: PublishingService, useValue: publishingService },
+        { provide: SocialAccountsService, useValue: socialAccountsService },
+      ],
     }).compileComponents();
 
     fixture = TestBed.createComponent(Content);
@@ -239,6 +257,58 @@ describe('Content', () => {
     expect(component['transcript'](ready)?.status).toBe('PENDING');
   });
 
+  it('shows a Publish action only for inspected video assets and labels TEST as non-real', () => {
+    fixture.detectChanges();
+    const ready = component['assets']().find((item) => item.status === 'READY')!;
+    const pending = component['assets']().find((item) => item.status === 'PENDING')!;
+
+    expect(component['canPublish'](ready)).toBe(true);
+    expect(component['canPublish'](pending)).toBe(false);
+
+    component['toggleAsset'](ready);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('not real');
+  });
+
+  it('publishes to the selected TEST social account and shows the returned publication', () => {
+    fixture.detectChanges();
+    const ready = component['assets']().find((item) => item.status === 'READY')!;
+
+    component['toggleAsset'](ready);
+    component['setPublishAccount'](ready, 'account-1');
+    component['setPublishCaption'](ready, 'Hello from the TEST provider');
+    component['publish'](ready);
+
+    expect(publishingService.createPublication).toHaveBeenCalledWith(ready.id, 'account-1', 'Hello from the TEST provider');
+    expect(component['publicationsFor'](ready)[0].status).toBe('PENDING');
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('Queued');
+  });
+
+  it('requires a social account before publishing', () => {
+    vi.mocked(socialAccountsService.list).mockReturnValue(of([]));
+    fixture = TestBed.createComponent(Content);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+    const ready = component['assets']().find((item) => item.status === 'READY')!;
+
+    component['publish'](ready);
+
+    expect(publishingService.createPublication).not.toHaveBeenCalled();
+    expect(component['publishErrors']()[ready.id]).toBe('Add a TEST social account first.');
+  });
+
+  it('surfaces publication failures reported by the backend', () => {
+    fixture.detectChanges();
+    const ready = component['assets']().find((item) => item.status === 'READY')!;
+    vi.mocked(publishingService.listForAsset).mockReturnValue(of([publication('FAILED')]));
+
+    component['refreshPublications'](component['assets']());
+    fixture.detectChanges();
+
+    expect(component['publicationsFor'](ready)[0].status).toBe('FAILED');
+  });
+
   it('creates a clip from a highlight candidate', () => {
     fixture.detectChanges();
     const ready = component['assets']().find((item) => item.status === 'READY')!;
@@ -342,6 +412,40 @@ describe('Content', () => {
             },
           ]
         : [],
+    };
+  }
+
+  function testAccount(): SocialAccountSummary {
+    return {
+      id: 'account-1',
+      platform: 'TEST',
+      displayName: 'My TEST Account',
+      externalAccountId: null,
+      status: 'ACTIVE',
+      createdAt: '2026-09-10T08:00:00Z',
+      updatedAt: '2026-09-10T08:00:00Z',
+    };
+  }
+
+  function publication(status: PublicationSummary['status']): PublicationSummary {
+    return {
+      id: 'publication-1',
+      assetId: 'READY-asset',
+      assetFilename: 'video.mp4',
+      socialAccountId: 'account-1',
+      socialAccountDisplayName: 'My TEST Account',
+      platform: 'TEST',
+      status,
+      jobId: 'publish-job-1',
+      caption: 'Hello from the TEST provider',
+      providerRequestId: status === 'PUBLISHED' ? 'test-req-publication-1' : null,
+      providerPublicationId: status === 'PUBLISHED' ? 'test-pub-publication-1' : null,
+      createdAt: '2026-09-10T08:03:00Z',
+      updatedAt: '2026-09-10T08:03:10Z',
+      publishedAt: status === 'PUBLISHED' ? '2026-09-10T08:03:10Z' : null,
+      failureCode: status === 'FAILED' ? 'PUBLISH_MEDIA_FAILED' : null,
+      failureMessage: status === 'FAILED' ? 'Publishing failed' : null,
+      attempts: [],
     };
   }
 

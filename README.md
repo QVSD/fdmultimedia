@@ -5,13 +5,20 @@ social-media content workflows, video processing workers running across
 multiple laptops/cloud machines, scheduling, AI-assisted content creation,
 publishing, analytics, and revenue tracking.
 
-## Phase 9C scope
+## Phase 10A scope
 
-This repository is currently at **Phase 9C: scheduling observability and performance feedback**.
+This repository is currently at **Phase 10A: social accounts & publishing foundation**.
 Phase 9A introduced current Worker telemetry and per-attempt execution metrics;
-Phase 9B introduced deterministic `TELEMETRY_AWARE_V1` selection; Phase 9C now
-persists only successful claim decisions and exposes bounded workspace-scoped
-queue, execution, Worker/job-type, fallback, and starvation statistics.
+Phase 9B introduced deterministic `TELEMETRY_AWARE_V1` selection; Phase 9C
+persisted successful claim decisions and exposed bounded workspace-scoped
+queue, execution, Worker/job-type, fallback, and starvation statistics. Phase
+10A now adds the secure domain model and distributed publishing pipeline
+foundation for eventually publishing media to Instagram/TikTok — a
+workspace-scoped `SocialAccount` (metadata only, no credential columns), a
+`Publication` state machine with durable per-attempt history, and a new
+`PUBLISH_MEDIA` job type proven end-to-end by a deterministic, **explicitly
+non-real** `TEST` publishing provider. No real social platform integration
+exists yet.
 
 Claim decisions are written in the same transaction as assignment. Empty polls
 and capacity rejections are not persisted, preventing poll-noise growth. Decision
@@ -63,10 +70,22 @@ That means:
   fresh active-job capacity, CPU/memory telemetry when available, and
   starvation protection to choose among locked compatible queued jobs while
   preserving PostgreSQL `FOR UPDATE SKIP LOCKED` claim safety.
+- Workspace-scoped `SocialAccount`s (`GET/POST /api/social-accounts`), with
+  only the deterministic, non-real `TEST` platform enabled today.
+  `INSTAGRAM`/`TIKTOK` are reserved enum values with no working provider.
+- `Publication`s (`POST /api/assets/{assetId}/publications`,
+  `GET /api/publications`) with an explicit PENDING → PUBLISHING →
+  PUBLISHED/FAILED/CANCELLED state machine and durable per-attempt
+  `PublishingAttempt` history, backed by a new `PUBLISH_MEDIA` job type that
+  reuses the existing distributed Job infrastructure unchanged. A Settings
+  page manages TEST accounts; the Content page can publish eligible
+  READY + INSPECTED video assets and shows publication state, clearly labeled
+  as non-real.
 
-No thumbnails, publishing, AI, social integrations, analytics, or billing are implemented yet — see
-[docs/ROADMAP.md](docs/ROADMAP.md) for what comes next and
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how the pieces fit together.
+No thumbnails, real social platform integrations, AI, analytics, or billing
+are implemented yet — see [docs/ROADMAP.md](docs/ROADMAP.md) for what comes
+next and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how the pieces fit
+together.
 
 ## Prerequisites
 

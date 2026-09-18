@@ -30,6 +30,19 @@ and `totalLatencyMs = finishedAt - queuedAt`. APIs accept only `1h`, `24h`,
 Decision cleanup runs once daily and retains 30 days by default; execution
 metrics are not deleted by Phase 9C.
 
+## Phase 10A scope
+
+Phase 10A adds the secure domain model and distributed publishing pipeline
+foundation for eventually publishing generated media to Instagram/TikTok —
+deliberately **not** real social posting yet. It introduces `SocialAccount`,
+`Publication`/`PublishingAttempt`, and a new `PUBLISH_MEDIA` Job type that
+flows through the existing Job/worker/scheduling infrastructure unchanged,
+proven end-to-end by a deterministic, explicitly non-real `TEST` provider. See
+[Social accounts and publishing (Phase 10A)](#social-accounts-and-publishing-phase-10a)
+below for the full design. Out of scope for this phase: real Instagram/TikTok
+APIs, browser automation, unofficial platform APIs, scheduled/recurring
+posting, AI-generated captions, and multi-platform fan-out.
+
 ## High-level architecture
 
 ```
@@ -65,8 +78,9 @@ Local Laptop       Cloud Worker
   anything that can run the worker process). They register, heartbeat, poll
   for jobs, execute `SYSTEM_TEST` and `IMPORT_MEDIA`, optionally execute
   `INSPECT_MEDIA` when FFprobe is available, FFmpeg derivatives when FFmpeg is
-  available, deterministic highlight analysis, and media transcription when a
-  configured local transcription provider is available.
+  available, deterministic highlight analysis, media transcription when a
+  configured local transcription provider is available, and `PUBLISH_MEDIA`
+  through the deterministic, non-real `TEST` publishing provider.
 
 ## Request flow
 
@@ -145,9 +159,11 @@ com.fdmultimedia.api
 └── shared        — cross-cutting concerns (web, config, health)
 ```
 
-Packages outside `auth`, `users`, `workspaces`, `jobs`, `workers`, and
-`shared` are still placeholders today. The intent is that as each capability
-is built, its code lands in the matching package with a clear boundary.
+As of Phase 10A, `accounts` and `publishing` are implemented (see
+[Social accounts and publishing (Phase 10A)](#social-accounts-and-publishing-phase-10a)
+below). `robots`, `analytics`, and `revenue` remain placeholders; the intent is
+that as each capability is built, its code lands in the matching package with
+a clear boundary.
 
 ## Job lifecycle and worker protocol
 
@@ -490,6 +506,75 @@ Near-boundary suggestions can be snapped to transcript boundaries within a
 small tolerance; ungrounded suggestions are rejected. Candidate ranking remains
 server-side and candidate-to-clip still uses the existing `CREATE_CLIP`
 pipeline only after explicit user choice.
+
+## Social accounts and publishing (Phase 10A)
+
+Phase 10A adds the controlled foundation for publishing generated media to
+external platforms, without any real Instagram/TikTok integration. Four
+concepts stay deliberately separate rather than collapsing into `Job`:
+
+- **`SocialAccount`** (`accounts` package) — a workspace-scoped external
+  publishing destination. `SocialPlatform` has `TEST`, `INSTAGRAM`, and
+  `TIKTOK` values, but only `TEST` can currently be created or published to;
+  the other two are reserved enum values for a future real provider. The
+  entity holds only metadata (platform, display name, status) and
+  deliberately has **no credential columns**. When a real provider is added in
+  Phase 10B+, its access tokens/secrets must live in a separate,
+  secret-managed store keyed by the `SocialAccount` id — never on this
+  entity, never in a Job payload, and never serialized back to the browser.
+  This is a structural boundary (no column exists to misuse), not just a
+  convention.
+- **`Publication`** (`publishing` package) — a user's durable intent to
+  publish one `MediaAsset` to one `SocialAccount`, with an explicit state
+  machine: `PENDING -> PUBLISHING -> PUBLISHED` / `FAILED` / `CANCELLED`.
+  Publications survive independently of any single Job attempt.
+- **`PublishingAttempt`** — per-attempt history for a Publication, one row per
+  real worker-reported outcome (`SUCCEEDED`, `RETRYABLE_FAILED`, `FAILED`).
+  Rows are never overwritten on retry, so a publication that fails once and
+  then succeeds keeps both attempts visible.
+- **`PUBLISH_MEDIA` Job** — the existing distributed Job/worker/scheduling
+  infrastructure, completely unchanged. Creating a Publication atomically
+  creates one `PUBLISH_MEDIA` Job in the same transaction; a retryable
+  worker failure requeues that *same* Job row (per the existing `Job.fail`
+  semantics), and the *same* Publication is reused across all attempts —
+  retries never create Publication2/Publication3. `WorkerSchedulingService`
+  and `JobExecutionMetricService` classify `PUBLISH_MEDIA` like other
+  asset-linked workloads, so scheduling observability and execution metrics
+  work automatically with no scheduler changes.
+
+The eligible asset must be `READY`, `INSPECTED`, and have video
+(`hasVideo == true`) — the same gate as the social vertical preset. The
+eligible account must be `ACTIVE` and `TEST`. `POST /api/assets/{assetId}/publications`
+creates the Publication + Job atomically; `GET /api/publications` (optionally
+filtered by `assetId`) and `GET /api/publications/{id}` return the durable
+state and attempt history.
+
+On the worker side, `PublishingProvider` (`platform()`, `isAvailable()`,
+`publish(mediaFile, authorization)`) is the same kind of provider boundary as
+`TranscriptionProvider`. The only implementation, `TestPublishingProvider`, is
+deterministic and never contacts any real platform: it validates the
+downloaded media is non-empty and (when provided) checksum-matches, then
+returns `test-pub-<publicationId>` as the provider publication id. Because
+this id is derived only from the Publication id (not a random value or
+attempt number), retries of the same Publication are naturally idempotent —
+the TEST provider returns the same id every time. The worker only ever
+receives a short-lived presigned GET URL for the source asset (via
+`ObjectStorageService.presignedGet`) and the Publication id as an idempotency
+key; it never receives permanent storage or provider credentials.
+
+The backend stays authoritative over worker-reported results: a completion
+request's asset/account/publication ids are cross-checked against the
+Publication before anything is persisted, provider ids are length/non-blank
+validated, and a nonsensical `publishedAt` timestamp is replaced with the
+server's own clock. Stale-worker protection reuses the existing row-locked
+`requireJobForWorkerWorkspace` ownership check — a worker whose lease already
+expired and was reclaimed cannot mark a Publication `PUBLISHED`. Lease-expiry
+recovery mirrors every other domain module: `JobService.recoverExpiredLeases`
+requeues the Job and calls a `reconcileRecoveredPublication` hook that moves
+the Publication back to `PENDING` (attempts remain) or `FAILED` (attempts
+exhausted), implemented directly against `PublicationRepository` — `JobService`
+never depends on `PublishingService`, only on its repository, to avoid a
+circular bean dependency.
 
 ## An important architectural rule: Robots are not workers
 

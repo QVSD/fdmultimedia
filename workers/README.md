@@ -10,7 +10,12 @@ fixed 1080x1920 social vertical derivatives through `CREATE_SOCIAL_VERTICAL`.
 It also advertises `ANALYZE_HIGHLIGHTS`, which uses a deterministic local
 analyzer and does not require FFmpeg, FFprobe, or any AI provider.
 When FFmpeg and a configured local Whisper-compatible CLI are available, it also
-advertises `TRANSCRIBE_MEDIA`.
+advertises `TRANSCRIBE_MEDIA`. It always advertises `PUBLISH_MEDIA`, backed by a
+deterministic, explicitly non-real `TEST` publishing provider: it downloads the
+source asset through a short-lived presigned URL, verifies it is non-empty and
+(when provided) checksum-matches, and returns a deterministic
+`test-pub-<publicationId>` provider id. It never contacts Instagram, TikTok, or
+any other real platform.
 
 The agent persists a random installation UUID locally and uses that as the
 machine identifier. It does not use MAC addresses or other hardware IDs.
@@ -59,8 +64,8 @@ The agent loop is:
 2. heartbeat in a dedicated loop
 3. poll `POST /api/worker-agent/jobs/claim`
 4. start and execute a claimed `SYSTEM_TEST`, `IMPORT_MEDIA`, `INSPECT_MEDIA`,
-   `CREATE_CLIP`, `CREATE_SOCIAL_VERTICAL`, `ANALYZE_HIGHLIGHTS`, or
-   `TRANSCRIBE_MEDIA`
+   `CREATE_CLIP`, `CREATE_SOCIAL_VERTICAL`, `ANALYZE_HIGHLIGHTS`,
+   `TRANSCRIBE_MEDIA`, or `PUBLISH_MEDIA`
 5. report completion or failure
 
 When no jobs exist, polling backs off using `FDM_WORKER_JOB_POLL_SECONDS`.
@@ -210,6 +215,29 @@ storage keys, worker credentials, MinIO credentials, or raw browser-provided
 commands/prompts. The API filters job claims by supported analyzer type and
 validates that returned semantic candidates are grounded in transcript segment
 timing before persistence.
+
+`PUBLISH_MEDIA` is always advertised; it requires no external tool and no
+configuration, backed by the deterministic `TestPublishingProvider`. The
+worker:
+
+1. asks the API for publication authorization (asset, account, platform,
+   caption, and a short-lived presigned GET URL for the source asset)
+2. downloads the source asset through that presigned URL with bounded
+   streaming and a configured maximum size
+3. hands the downloaded file to the configured `PublishingProvider`
+4. reports the provider's result (`providerRequestId`, `providerPublicationId`,
+   `publishedAt`) or a classified failure
+5. deletes the temporary file
+
+`TestPublishingProvider` never contacts Instagram, TikTok, or any other real
+platform. It validates the downloaded media is non-empty and, when an expected
+checksum is supplied, that it matches, then returns
+`test-pub-<publicationId>` as the provider publication id. Because that id is
+derived only from the Publication id, retries of the same Publication are
+naturally idempotent: the same provider id is returned every time, matching
+the backend's idempotency contract. A real Instagram/TikTok
+`PublishingProvider` (Phase 10B+) would live behind the same interface without
+changing the Job/authorization/completion protocol.
 
 ## Telemetry and scheduling inputs
 

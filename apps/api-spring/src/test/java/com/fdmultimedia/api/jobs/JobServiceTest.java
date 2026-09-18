@@ -14,6 +14,7 @@ import com.fdmultimedia.api.assets.MediaAsset;
 import com.fdmultimedia.api.assets.MediaAssetRepository;
 import com.fdmultimedia.api.assets.MediaAssetStatus;
 import com.fdmultimedia.api.highlights.HighlightAnalysisRepository;
+import com.fdmultimedia.api.publishing.PublicationRepository;
 import com.fdmultimedia.api.transcripts.MediaTranscriptRepository;
 import com.fdmultimedia.api.users.AppUser;
 import com.fdmultimedia.api.workers.Worker;
@@ -50,6 +51,7 @@ class JobServiceTest {
     private final MediaAssetRepository assets = mock(MediaAssetRepository.class);
     private final HighlightAnalysisRepository highlightAnalyses = mock(HighlightAnalysisRepository.class);
     private final MediaTranscriptRepository transcripts = mock(MediaTranscriptRepository.class);
+    private final PublicationRepository publications = mock(PublicationRepository.class);
     private final WorkerRepository workers = mock(WorkerRepository.class);
     private final WorkerCredentialRepository credentials = mock(WorkerCredentialRepository.class);
     private final JobProperties jobProperties = new JobProperties();
@@ -71,6 +73,7 @@ class JobServiceTest {
             assets,
             highlightAnalyses,
             transcripts,
+            publications,
             workers,
             credentials,
             workerStatusService,
@@ -430,6 +433,39 @@ class JobServiceTest {
     }
 
     @Test
+    void expiredPublishMediaLeaseRequeuesPublicationForRetryWhenAttemptsRemain() {
+        Job expired = new Job(workspace, JobType.PUBLISH_MEDIA, publishPayload(), 3, NOW);
+        com.fdmultimedia.api.publishing.Publication publication = publicationFor(expired);
+        expired.claim(worker, NOW.minusSeconds(60), NOW.minusSeconds(30));
+        when(jobs.findExpiredLeasesForUpdate(workspace.getId(), NOW)).thenReturn(List.of(expired));
+        when(jobs.findQueuedCandidatesForUpdate(workspace.getId(), List.of("SYSTEM_TEST"), List.of("DETERMINISTIC_V1"), 25))
+                .thenReturn(List.of());
+        when(publications.findByJobId(expired.getId())).thenReturn(Optional.of(publication));
+
+        service.claim(workerPrincipal, new WorkerJobClaimRequest("machine-1", null));
+
+        assertThat(expired.getStatus()).isEqualTo(JobStatus.QUEUED);
+        assertThat(publication.getStatus()).isEqualTo(com.fdmultimedia.api.publishing.PublicationStatus.PENDING);
+    }
+
+    @Test
+    void expiredPublishMediaLeaseMarksPublicationFailedWhenAttemptsAreExhausted() {
+        Job expired = new Job(workspace, JobType.PUBLISH_MEDIA, publishPayload(), 1, NOW);
+        com.fdmultimedia.api.publishing.Publication publication = publicationFor(expired);
+        expired.claim(worker, NOW.minusSeconds(60), NOW.minusSeconds(30));
+        when(jobs.findExpiredLeasesForUpdate(workspace.getId(), NOW)).thenReturn(List.of(expired));
+        when(jobs.findQueuedCandidatesForUpdate(workspace.getId(), List.of("SYSTEM_TEST"), List.of("DETERMINISTIC_V1"), 25))
+                .thenReturn(List.of());
+        when(publications.findByJobId(expired.getId())).thenReturn(Optional.of(publication));
+
+        service.claim(workerPrincipal, new WorkerJobClaimRequest("machine-1", null));
+
+        assertThat(expired.getStatus()).isEqualTo(JobStatus.FAILED);
+        assertThat(publication.getStatus()).isEqualTo(com.fdmultimedia.api.publishing.PublicationStatus.FAILED);
+        assertThat(publication.getFailureCode()).isEqualTo("LEASE_EXPIRED");
+    }
+
+    @Test
     void staleWorkerCannotRenewAfterExpiredLeaseIsReclaimed() {
         Worker workerB = workerB();
         Job job = reclaimedByWorkerB(workerB);
@@ -532,6 +568,24 @@ class JobServiceTest {
 
     private Job job() {
         return new Job(workspace, JobType.SYSTEM_TEST, Map.of("message", "hello worker", "durationMs", 1L), 3, NOW);
+    }
+
+    private Map<String, Object> publishPayload() {
+        return Map.of(
+                "publicationId", UUID.randomUUID().toString(),
+                "assetId", UUID.randomUUID().toString(),
+                "socialAccountId", UUID.randomUUID().toString());
+    }
+
+    private com.fdmultimedia.api.publishing.Publication publicationFor(Job job) {
+        MediaAsset asset = new MediaAsset(workspace, owner, "https://example.com/video.mp4", NOW);
+        com.fdmultimedia.api.accounts.SocialAccount account = new com.fdmultimedia.api.accounts.SocialAccount(
+                workspace, com.fdmultimedia.api.accounts.SocialPlatform.TEST, "My TEST Account", owner, NOW);
+        com.fdmultimedia.api.publishing.Publication publication =
+                new com.fdmultimedia.api.publishing.Publication(workspace, asset, account, null, owner, NOW);
+        publication.attachJob(job, NOW);
+        publication.markPublishing(NOW);
+        return publication;
     }
 
     private JobCreateRequest createRequest(long durationMs) {

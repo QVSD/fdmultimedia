@@ -1,6 +1,9 @@
 package com.fdmultimedia.api.assets;
 
 import com.fdmultimedia.api.auth.security.AuthenticatedUser;
+import com.fdmultimedia.api.publishing.CreatePublicationRequest;
+import com.fdmultimedia.api.publishing.PublicationSummary;
+import com.fdmultimedia.api.publishing.PublishingService;
 import jakarta.validation.Valid;
 import java.util.List;
 import java.util.UUID;
@@ -17,9 +20,11 @@ import org.springframework.web.bind.annotation.RestController;
 public class MediaAssetController {
 
     private final MediaAssetService mediaAssetService;
+    private final PublishingService publishingService;
 
-    public MediaAssetController(MediaAssetService mediaAssetService) {
+    public MediaAssetController(MediaAssetService mediaAssetService, PublishingService publishingService) {
         this.mediaAssetService = mediaAssetService;
+        this.publishingService = publishingService;
     }
 
     @PostMapping("/import")
@@ -61,5 +66,13 @@ public class MediaAssetController {
             @AuthenticationPrincipal AuthenticatedUser principal,
             @PathVariable UUID assetId) {
         return mediaAssetService.createSocialVertical(principal, assetId);
+    }
+
+    @PostMapping("/{assetId}/publications")
+    public PublicationSummary createPublication(
+            @AuthenticationPrincipal AuthenticatedUser principal,
+            @PathVariable UUID assetId,
+            @Valid @RequestBody CreatePublicationRequest request) {
+        return publishingService.createPublication(principal, assetId, request);
     }
 }

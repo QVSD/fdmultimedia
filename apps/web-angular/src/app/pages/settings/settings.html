@@ -1,4 +1,67 @@
-<section>
-  <h1>Settings</h1>
-  <p>Workspace and account settings will be managed here.</p>
+<section class="settings">
+  <header>
+    <h1>Settings</h1>
+    <p class="settings__lead">Workspace and account settings are managed here.</p>
+  </header>
+
+  <section class="settings__panel">
+    <h2>Social Accounts</h2>
+    <p class="settings__muted">
+      Only the <strong>TEST</strong> platform is available right now. It never posts to a real platform &mdash; it exists
+      so the publishing pipeline can be exercised end-to-end before Instagram/TikTok support is added.
+    </p>
+
+    <form class="settings__form" (ngSubmit)="createAccount()">
+      <label>
+        <span>Display name</span>
+        <input
+          name="displayName"
+          type="text"
+          placeholder="My test account"
+          [ngModel]="displayName()"
+          (ngModelChange)="displayName.set($event)"
+          required
+        />
+      </label>
+      <label>
+        <span>Platform</span>
+        <input type="text" value="TEST (non-real)" disabled />
+      </label>
+      <button type="submit" [disabled]="creating()">
+        {{ creating() ? 'Creating...' : 'Add TEST Account' }}
+      </button>
+    </form>
+    @if (createError()) {
+      <p class="settings__error">{{ createError() }}</p>
+    }
+
+    @switch (loadState()) {
+      @case ('loading') {
+        <p class="settings__muted">Loading social accounts...</p>
+      }
+      @case ('error') {
+        <p class="settings__error">Social accounts could not be loaded.</p>
+      }
+      @case ('ready') {
+        @if (accounts().length === 0) {
+          <p class="settings__muted">No social accounts yet. Add a TEST account to try the publishing flow.</p>
+        } @else {
+          <div class="settings__accounts">
+            @for (account of accounts(); track account.id) {
+              <article class="settings__account">
+                <div>
+                  <strong>{{ account.displayName }}</strong>
+                  <span class="settings__badge">{{ account.platform }}</span>
+                </div>
+                <span [class]="'settings__status settings__status--' + account.status.toLowerCase()">
+                  {{ statusLabel(account.status) }}
+                </span>
+                <span class="settings__muted">Added {{ account.createdAt | date:'medium' }}</span>
+              </article>
+            }
+          </div>
+        }
+      }
+    }
+  </section>
 </section>

@@ -158,7 +158,7 @@ public class WorkerSchedulingService {
     private WorkloadClass workloadClass(JobType type) {
         return switch (type) {
             case SYSTEM_TEST, ANALYZE_HIGHLIGHTS -> WorkloadClass.LIGHT;
-            case IMPORT_MEDIA, INSPECT_MEDIA, CREATE_CLIP, CREATE_SOCIAL_VERTICAL, TRANSCRIBE_MEDIA -> WorkloadClass.HEAVY;
+            case IMPORT_MEDIA, INSPECT_MEDIA, CREATE_CLIP, CREATE_SOCIAL_VERTICAL, TRANSCRIBE_MEDIA, PUBLISH_MEDIA -> WorkloadClass.HEAVY;
         };
     }
 

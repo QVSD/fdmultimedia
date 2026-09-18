@@ -7,6 +7,8 @@ import com.fdmultimedia.api.assets.MediaAssetRepository;
 import com.fdmultimedia.api.assets.MediaAssetStatus;
 import com.fdmultimedia.api.highlights.HighlightAnalysisRepository;
 import com.fdmultimedia.api.highlights.HighlightAnalysisStatus;
+import com.fdmultimedia.api.publishing.PublicationRepository;
+import com.fdmultimedia.api.publishing.PublicationStatus;
 import com.fdmultimedia.api.transcripts.MediaTranscriptRepository;
 import com.fdmultimedia.api.transcripts.TranscriptStatus;
 import com.fdmultimedia.api.workers.Worker;
@@ -38,6 +40,7 @@ public class JobService {
     private final MediaAssetRepository assets;
     private final HighlightAnalysisRepository highlightAnalyses;
     private final MediaTranscriptRepository transcripts;
+    private final PublicationRepository publications;
     private final WorkerRepository workers;
     private final WorkerCredentialRepository credentials;
     private final WorkerStatusService workerStatusService;
@@ -55,6 +58,7 @@ public class JobService {
             MediaAssetRepository assets,
             HighlightAnalysisRepository highlightAnalyses,
             MediaTranscriptRepository transcripts,
+            PublicationRepository publications,
             WorkerRepository workers,
             WorkerCredentialRepository credentials,
             WorkerStatusService workerStatusService,
@@ -70,6 +74,7 @@ public class JobService {
         this.assets = assets;
         this.highlightAnalyses = highlightAnalyses;
         this.transcripts = transcripts;
+        this.publications = publications;
         this.workers = workers;
         this.credentials = credentials;
         this.workerStatusService = workerStatusService;
@@ -256,6 +261,7 @@ public class JobService {
                     reconcileRecoveredProcessingAsset(job, now);
                     reconcileRecoveredHighlightAnalysis(job, now);
                     reconcileRecoveredTranscription(job, now);
+                    reconcileRecoveredPublication(job, now);
                 });
     }
 
@@ -338,6 +344,22 @@ public class JobService {
         });
     }
 
+    private void reconcileRecoveredPublication(Job job, Instant now) {
+        if (job.getType() != JobType.PUBLISH_MEDIA) {
+            return;
+        }
+        publications.findByJobId(job.getId()).ifPresent(publication -> {
+            if (publication.getStatus() == PublicationStatus.PUBLISHED || publication.getStatus() == PublicationStatus.FAILED) {
+                return;
+            }
+            if (job.getStatus() == JobStatus.FAILED) {
+                publication.markFailed(job.getErrorCode(), job.getErrorMessage(), now);
+            } else if (job.getStatus() == JobStatus.QUEUED) {
+                publication.markPendingForRetry(now);
+            }
+        });
+    }
+
     public Worker requireOnlineWorker(WorkerPrincipal principal, String machineIdentifier) {
         WorkerCredential credential = credentials.findById(principal.credentialId())
                 .filter(WorkerCredential::isEnabled)
@@ -385,6 +407,9 @@ public class JobService {
         }
         if (type == JobType.TRANSCRIBE_MEDIA) {
             return validateTranscriptionPayload(payload);
+        }
+        if (type == JobType.PUBLISH_MEDIA) {
+            return validatePublishMediaPayload(payload);
         }
         if (type != JobType.SYSTEM_TEST) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unsupported job type");
@@ -480,6 +505,17 @@ public class JobService {
         normalized.put("assetId", assetId);
         normalized.put("provider", provider);
         normalized.put("model", model);
+        return normalized;
+    }
+
+    private Map<String, Object> validatePublishMediaPayload(Map<String, Object> payload) {
+        String publicationId = uuidString(payload.get("publicationId"), "publicationId");
+        String assetId = uuidString(payload.get("assetId"), "assetId");
+        String socialAccountId = uuidString(payload.get("socialAccountId"), "socialAccountId");
+        Map<String, Object> normalized = new LinkedHashMap<>();
+        normalized.put("publicationId", publicationId);
+        normalized.put("assetId", assetId);
+        normalized.put("socialAccountId", socialAccountId);
         return normalized;
     }
 

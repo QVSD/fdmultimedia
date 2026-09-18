@@ -116,4 +116,105 @@ class WorkerAgentClientTest {
         assertTrue(body.get().contains("\"supportedJobTypes\":[\"SYSTEM_TEST\",\"CREATE_CLIP\"]"));
         assertTrue(body.get().contains("\"supportedHighlightAnalyzers\":[\"DETERMINISTIC_V1\",\"TRANSCRIPT_SEMANTIC_V1\"]"));
     }
+
+    @Test
+    void authorizePublicationParsesResponse() throws Exception {
+        UUID publicationId = UUID.fromString("00000000-0000-4000-8000-000000000010");
+        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/api/worker-agent/publications/00000000-0000-4000-8000-000000000001/authorization", exchange -> {
+            byte[] response = ("{\"publicationId\":\"" + publicationId + "\","
+                    + "\"assetId\":\"00000000-0000-4000-8000-000000000020\","
+                    + "\"socialAccountId\":\"00000000-0000-4000-8000-000000000030\","
+                    + "\"platform\":\"TEST\","
+                    + "\"caption\":\"Hello\","
+                    + "\"downloadUrl\":\"http://example.test/media\","
+                    + "\"expectedChecksumSha256\":null,"
+                    + "\"maxDownloadSizeBytes\":1000,"
+                    + "\"connectTimeoutSeconds\":5,"
+                    + "\"readTimeoutSeconds\":5,"
+                    + "\"idempotencyKey\":\"" + publicationId + "\"}").getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.start();
+        WorkerAgentClient client = new WorkerAgentClient(
+                java.net.URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/api/"),
+                "WorkerToken credential.secret");
+
+        PublicationAuthorization authorization = client.authorizePublication(
+                UUID.fromString("00000000-0000-4000-8000-000000000001"), "machine-1");
+
+        assertTrue(authorization.publicationId().equals(publicationId));
+        assertTrue("TEST".equals(authorization.platform()));
+        assertTrue(authorization.downloadUrl().equals("http://example.test/media"));
+    }
+
+    @Test
+    void completePublicationReportsProviderResult() throws Exception {
+        AtomicReference<String> body = new AtomicReference<>();
+        UUID publicationId = UUID.fromString("00000000-0000-4000-8000-000000000010");
+        UUID assetId = UUID.fromString("00000000-0000-4000-8000-000000000020");
+        UUID socialAccountId = UUID.fromString("00000000-0000-4000-8000-000000000030");
+        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/api/worker-agent/publications/00000000-0000-4000-8000-000000000001/complete", exchange -> {
+            body.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+            byte[] response = "{}".getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.start();
+        WorkerAgentClient client = new WorkerAgentClient(
+                java.net.URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/api/"),
+                "WorkerToken credential.secret");
+        PublicationAuthorization authorization = new PublicationAuthorization(
+                publicationId, assetId, socialAccountId, "TEST", "Hello",
+                "http://example.test/media", null, 1_000, 5, 5, publicationId.toString());
+
+        client.completePublication(
+                UUID.fromString("00000000-0000-4000-8000-000000000001"),
+                "machine-1",
+                authorization,
+                new PublishResult("test-req-" + publicationId, "test-pub-" + publicationId, java.time.Instant.parse("2026-09-18T10:00:00Z")));
+
+        assertTrue(body.get().contains("\"machineIdentifier\":\"machine-1\""));
+        assertTrue(body.get().contains("\"publicationId\":\"" + publicationId + "\""));
+        assertTrue(body.get().contains("\"providerPublicationId\":\"test-pub-" + publicationId + "\""));
+        assertTrue(body.get().contains("\"publishedAt\":\"2026-09-18T10:00:00Z\""));
+    }
+
+    @Test
+    void failPublicationReportsErrorDetails() throws Exception {
+        AtomicReference<String> body = new AtomicReference<>();
+        UUID publicationId = UUID.fromString("00000000-0000-4000-8000-000000000010");
+        UUID assetId = UUID.fromString("00000000-0000-4000-8000-000000000020");
+        UUID socialAccountId = UUID.fromString("00000000-0000-4000-8000-000000000030");
+        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/api/worker-agent/publications/00000000-0000-4000-8000-000000000001/fail", exchange -> {
+            body.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+            byte[] response = "{}".getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.start();
+        WorkerAgentClient client = new WorkerAgentClient(
+                java.net.URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/api/"),
+                "WorkerToken credential.secret");
+
+        client.failPublication(
+                UUID.fromString("00000000-0000-4000-8000-000000000001"),
+                "machine-1",
+                publicationId,
+                assetId,
+                socialAccountId,
+                "PUBLISH_MEDIA_FAILED",
+                "boom",
+                true);
+
+        assertTrue(body.get().contains("\"errorCode\":\"PUBLISH_MEDIA_FAILED\""));
+        assertTrue(body.get().contains("\"terminal\":true"));
+        assertTrue(body.get().contains("\"publicationId\":\"" + publicationId + "\""));
+    }
 }

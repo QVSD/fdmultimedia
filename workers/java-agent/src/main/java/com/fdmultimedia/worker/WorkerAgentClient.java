@@ -306,6 +306,47 @@ final class WorkerAgentClient {
         send("/worker-agent/transcripts/" + jobId + "/fail", body, new TypeReference<Map<String, Object>>() {});
     }
 
+    PublicationAuthorization authorizePublication(UUID jobId, String machineIdentifier)
+            throws IOException, InterruptedException {
+        return send(
+                "/worker-agent/publications/" + jobId + "/authorization",
+                Map.of("machineIdentifier", machineIdentifier),
+                new TypeReference<PublicationAuthorization>() {});
+    }
+
+    void completePublication(UUID jobId, String machineIdentifier, PublicationAuthorization authorization, PublishResult result)
+            throws IOException, InterruptedException {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("machineIdentifier", machineIdentifier);
+        body.put("publicationId", authorization.publicationId());
+        body.put("assetId", authorization.assetId());
+        body.put("socialAccountId", authorization.socialAccountId());
+        body.put("providerRequestId", result.providerRequestId());
+        body.put("providerPublicationId", result.providerPublicationId());
+        body.put("publishedAt", result.publishedAt() == null ? null : result.publishedAt().toString());
+        send("/worker-agent/publications/" + jobId + "/complete", body, new TypeReference<Map<String, Object>>() {});
+    }
+
+    void failPublication(
+            UUID jobId,
+            String machineIdentifier,
+            UUID publicationId,
+            UUID assetId,
+            UUID socialAccountId,
+            String errorCode,
+            String errorMessage,
+            boolean terminal) throws IOException, InterruptedException {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("machineIdentifier", machineIdentifier);
+        body.put("publicationId", publicationId);
+        body.put("assetId", assetId);
+        body.put("socialAccountId", socialAccountId);
+        body.put("errorCode", errorCode);
+        body.put("errorMessage", errorMessage);
+        body.put("terminal", terminal);
+        send("/worker-agent/publications/" + jobId + "/fail", body, new TypeReference<Map<String, Object>>() {});
+    }
+
     void upload(URI uploadUrl, Path path, String contentType) throws IOException, InterruptedException {
         HttpRequest request = HttpRequest.newBuilder(uploadUrl)
                 .timeout(Duration.ofMinutes(30))

@@ -5,6 +5,10 @@ import { EMPTY, Subscription, catchError, finalize, interval, startWith, switchM
 
 import { AssetsService } from '../../core/assets/assets.service';
 import { HighlightAnalysisSummary, HighlightCandidateSummary, MediaAssetSummary, MediaTranscriptSummary } from '../../core/assets/asset.models';
+import { PublishingService } from '../../core/publishing/publishing.service';
+import { PublicationSummary } from '../../core/publishing/publishing.models';
+import { SocialAccountsService } from '../../core/social-accounts/social-accounts.service';
+import { SocialAccountSummary } from '../../core/social-accounts/social-account.models';
 
 type LoadState = 'loading' | 'ready' | 'error';
 
@@ -35,12 +39,27 @@ export class Content implements OnInit, OnDestroy {
   protected readonly transcriptBusy = signal<Record<string, boolean>>({});
   protected readonly transcriptErrors = signal<Record<string, string | null>>({});
   protected readonly expandedAssets = signal<Record<string, boolean>>({});
+  protected readonly socialAccounts = signal<SocialAccountSummary[]>([]);
+  protected readonly publications = signal<Record<string, PublicationSummary[]>>({});
+  protected readonly publishAccountId = signal<Record<string, string>>({});
+  protected readonly publishCaptions = signal<Record<string, string>>({});
+  protected readonly publishBusy = signal<Record<string, boolean>>({});
+  protected readonly publishErrors = signal<Record<string, string | null>>({});
 
   private subscription?: Subscription;
 
-  constructor(private readonly assetsService: AssetsService) {}
+  constructor(
+    private readonly assetsService: AssetsService,
+    private readonly publishingService: PublishingService,
+    private readonly socialAccountsService: SocialAccountsService,
+  ) {}
 
   ngOnInit(): void {
+    this.socialAccountsService
+      .list()
+      .pipe(catchError(() => EMPTY))
+      .subscribe((accounts) => this.socialAccounts.set(accounts));
+
     this.subscription = interval(5000)
       .pipe(
         startWith(0),
@@ -58,6 +77,7 @@ export class Content implements OnInit, OnDestroy {
         this.loadState.set('ready');
         this.refreshHighlightAnalyses(assets);
         this.refreshTranscripts(assets);
+        this.refreshPublications(assets);
       });
   }
 
@@ -401,6 +421,96 @@ export class Content implements OnInit, OnDestroy {
         },
         error: () => this.transcriptErrors.update((errors) => ({ ...errors, [asset.id]: 'Transcription could not be started.' })),
       });
+  }
+
+  protected canPublish(asset: MediaAssetSummary): boolean {
+    return asset.status === 'READY' && asset.inspectionStatus === 'INSPECTED' && asset.hasVideo === true;
+  }
+
+  protected testSocialAccounts(): SocialAccountSummary[] {
+    return this.socialAccounts().filter((account) => account.status === 'ACTIVE');
+  }
+
+  protected publicationsFor(asset: MediaAssetSummary): PublicationSummary[] {
+    return this.publications()[asset.id] ?? [];
+  }
+
+  protected publishAccountFor(asset: MediaAssetSummary): string {
+    return this.publishAccountId()[asset.id] ?? this.testSocialAccounts()[0]?.id ?? '';
+  }
+
+  protected setPublishAccount(asset: MediaAssetSummary, value: string): void {
+    this.publishAccountId.update((ids) => ({ ...ids, [asset.id]: value }));
+  }
+
+  protected publishCaptionFor(asset: MediaAssetSummary): string {
+    return this.publishCaptions()[asset.id] ?? '';
+  }
+
+  protected setPublishCaption(asset: MediaAssetSummary, value: string): void {
+    this.publishCaptions.update((captions) => ({ ...captions, [asset.id]: value }));
+  }
+
+  protected publicationStatusLabel(status: PublicationSummary['status']): string {
+    switch (status) {
+      case 'PENDING':
+        return 'Queued';
+      case 'PUBLISHING':
+        return 'Publishing';
+      case 'PUBLISHED':
+        return 'Published';
+      case 'FAILED':
+        return 'Failed';
+      case 'CANCELLED':
+        return 'Cancelled';
+    }
+  }
+
+  protected publish(asset: MediaAssetSummary): void {
+    this.publishErrors.update((errors) => ({ ...errors, [asset.id]: null }));
+    const socialAccountId = this.publishAccountFor(asset);
+    if (!this.canPublish(asset)) {
+      this.publishErrors.update((errors) => ({ ...errors, [asset.id]: 'Asset must be inspected video.' }));
+      return;
+    }
+    if (!socialAccountId) {
+      this.publishErrors.update((errors) => ({ ...errors, [asset.id]: 'Add a TEST social account first.' }));
+      return;
+    }
+    const caption = this.publishCaptionFor(asset).trim();
+    this.publishBusy.update((busy) => ({ ...busy, [asset.id]: true }));
+    this.publishingService
+      .createPublication(asset.id, socialAccountId, caption || null)
+      .pipe(finalize(() => this.publishBusy.update((busy) => ({ ...busy, [asset.id]: false }))))
+      .subscribe({
+        next: (publication) => {
+          this.publications.update((items) => ({
+            ...items,
+            [asset.id]: [publication, ...(items[asset.id] ?? [])],
+          }));
+          this.publishCaptions.update((captions) => ({ ...captions, [asset.id]: '' }));
+        },
+        error: () => this.publishErrors.update((errors) => ({ ...errors, [asset.id]: 'Publication could not be started.' })),
+      });
+  }
+
+  private refreshPublications(assets: MediaAssetSummary[]): void {
+    for (const asset of assets) {
+      if (!this.canPublish(asset)) {
+        continue;
+      }
+      const current = this.publications()[asset.id] ?? [];
+      const hasInFlight = current.some((publication) => publication.status === 'PENDING' || publication.status === 'PUBLISHING');
+      if (current.length > 0 && !hasInFlight) {
+        continue;
+      }
+      this.publishingService
+        .listForAsset(asset.id)
+        .pipe(catchError(() => EMPTY))
+        .subscribe((publications) => {
+          this.publications.update((items) => ({ ...items, [asset.id]: publications }));
+        });
+    }
   }
 
   private refreshHighlightAnalyses(assets: MediaAssetSummary[]): void {

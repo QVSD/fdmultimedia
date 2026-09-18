@@ -65,6 +65,7 @@ public class JobExecutionMetricService {
                     null,
                     null,
                     stringPayload(payload, "analyzerType"));
+            case PUBLISH_MEDIA -> assetHints(uuidPayload(payload, "assetId"), null, null, null);
         };
     }
 
