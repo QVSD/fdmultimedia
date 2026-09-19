@@ -13,6 +13,8 @@ import { PublishSchedulesService } from '../../core/publish-schedules/publish-sc
 import { PublishScheduleSummary } from '../../core/publish-schedules/publish-schedule.models';
 import { ContentSourcesService } from '../../core/content-sources/content-sources.service';
 import { ContentSourceAssetSummary, ContentSourceSummary } from '../../core/content-sources/content-source.models';
+import { ContentSuggestionsService } from '../../core/content-suggestions/content-suggestions.service';
+import { ContentSuggestionSummary } from '../../core/content-suggestions/content-suggestion.models';
 import { Content } from './content';
 
 describe('Content', () => {
@@ -38,6 +40,7 @@ describe('Content', () => {
   >;
   let publishSchedulesService: Pick<PublishSchedulesService, 'list' | 'create' | 'cancel' | 'reschedule'>;
   let contentSourcesService: Pick<ContentSourcesService, 'list' | 'create' | 'pause' | 'resume' | 'listAssets' | 'addAsset' | 'removeAsset'>;
+  let contentSuggestionsService: Pick<ContentSuggestionsService, 'listForDraft' | 'create' | 'apply' | 'discard'>;
 
   beforeEach(async () => {
     assetsService = {
@@ -88,6 +91,12 @@ describe('Content', () => {
       addAsset: vi.fn().mockReturnValue(of(contentSourceAsset())),
       removeAsset: vi.fn().mockReturnValue(of(undefined)),
     };
+    contentSuggestionsService = {
+      listForDraft: vi.fn().mockReturnValue(of([])),
+      create: vi.fn().mockReturnValue(of(suggestion('PENDING'))),
+      apply: vi.fn().mockReturnValue(of(suggestion('APPLIED'))),
+      discard: vi.fn().mockReturnValue(of(suggestion('DISCARDED'))),
+    };
 
     await TestBed.configureTestingModule({
       imports: [Content],
@@ -98,6 +107,7 @@ describe('Content', () => {
         { provide: ContentDraftsService, useValue: contentDraftsService },
         { provide: PublishSchedulesService, useValue: publishSchedulesService },
         { provide: ContentSourcesService, useValue: contentSourcesService },
+        { provide: ContentSuggestionsService, useValue: contentSuggestionsService },
       ],
     }).compileComponents();
 
@@ -726,6 +736,199 @@ describe('Content', () => {
     expect(component['addToSourceDone']()[readyOriginal.id]).toBe(true);
   });
 
+  it('shows the AI Content section only for a READY draft', () => {
+    vi.mocked(contentDraftsService.list).mockReturnValue(of([draft('READY', 'READY'), draft('DRAFT', 'CLIP_PENDING')]));
+    fixture = TestBed.createComponent(Content);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+    component['switchView']('drafts');
+    const ready = component['drafts']().find((d) => d.status === 'READY')!;
+    const notReady = component['drafts']().find((d) => d.status === 'DRAFT')!;
+
+    expect(component['canGenerateSuggestion'](ready)).toBe(true);
+    expect(component['canGenerateSuggestion'](notReady)).toBe(false);
+  });
+
+  it('loads suggestion history when a draft is expanded', () => {
+    vi.mocked(contentDraftsService.list).mockReturnValue(of([draft('READY', 'READY')]));
+    vi.mocked(contentSuggestionsService.listForDraft).mockReturnValue(of([suggestion('READY')]));
+    fixture = TestBed.createComponent(Content);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+    component['switchView']('drafts');
+    const readyDraft = component['drafts']()[0];
+
+    component['toggleDraft'](readyDraft);
+
+    expect(contentSuggestionsService.listForDraft).toHaveBeenCalledWith(readyDraft.id);
+    expect(component['suggestionsFor'](readyDraft)).toHaveLength(1);
+  });
+
+  it('generates a suggestion with the selected language and tone, then reflects the READY result', () => {
+    vi.mocked(contentDraftsService.list).mockReturnValue(of([draft('READY', 'READY')]));
+    vi.mocked(contentSuggestionsService.listForDraft).mockReturnValue(of([suggestion('READY')]));
+    vi.mocked(contentSuggestionsService.create).mockReturnValue(of(suggestion('PENDING')));
+    fixture = TestBed.createComponent(Content);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+    component['switchView']('drafts');
+    const readyDraft = component['drafts']()[0];
+    component['setAiLanguage'](readyDraft, 'ROMANIAN');
+    component['setAiTone'](readyDraft, 'ENERGETIC');
+
+    component['generateSuggestion'](readyDraft);
+
+    expect(contentSuggestionsService.create).toHaveBeenCalledWith(readyDraft.id, { language: 'ROMANIAN', tone: 'ENERGETIC' });
+    expect(component['suggestionsFor'](readyDraft)[0].status).toBe('READY');
+  });
+
+  it('surfaces a Generate failure without crashing', () => {
+    vi.mocked(contentDraftsService.list).mockReturnValue(of([draft('READY', 'READY')]));
+    vi.mocked(contentSuggestionsService.create).mockReturnValue(throwError(() => new Error('boom')));
+    fixture = TestBed.createComponent(Content);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+    component['switchView']('drafts');
+    const readyDraft = component['drafts']()[0];
+
+    component['generateSuggestion'](readyDraft);
+
+    expect(component['aiGenerateErrors']()[readyDraft.id]).toBe('Suggestion could not be generated.');
+  });
+
+  it('renders hook, caption, hashtags, and short title for a READY suggestion without null-safe leaks', () => {
+    vi.mocked(contentDraftsService.list).mockReturnValue(of([draft('READY', 'READY')]));
+    vi.mocked(contentSuggestionsService.listForDraft).mockReturnValue(of([suggestion('READY')]));
+    fixture = TestBed.createComponent(Content);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+    component['switchView']('drafts');
+    const readyDraft = component['drafts']()[0];
+    component['toggleDraft'](readyDraft);
+    fixture.detectChanges();
+
+    const text = fixture.nativeElement.textContent as string;
+    expect(text).toContain('Big news!');
+    expect(text).toContain('This is the generated caption.');
+    expect(text).toContain('#ai');
+    expect(text).toContain('#tech');
+    expect(text).toContain('Quick clip');
+    expect(text).not.toContain('undefined');
+    expect(text).not.toContain('NaN');
+    expect(text).not.toContain('Invalid Date');
+  });
+
+  it('renders a FAILED suggestion with its bounded failure reason', () => {
+    vi.mocked(contentDraftsService.list).mockReturnValue(of([draft('READY', 'READY')]));
+    vi.mocked(contentSuggestionsService.listForDraft).mockReturnValue(of([suggestion('FAILED')]));
+    fixture = TestBed.createComponent(Content);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+    component['switchView']('drafts');
+    const readyDraft = component['drafts']()[0];
+    component['toggleDraft'](readyDraft);
+    fixture.detectChanges();
+
+    const text = fixture.nativeElement.textContent as string;
+    expect(text).toContain('AI_OUTPUT_REJECTED');
+    expect(text).toContain('hook is required');
+    expect(text).not.toContain('undefined');
+  });
+
+  it('applies a READY suggestion and refreshes the draft', () => {
+    vi.mocked(contentDraftsService.list).mockReturnValue(of([draft('READY', 'READY')]));
+    vi.mocked(contentSuggestionsService.listForDraft).mockReturnValue(of([suggestion('READY')]));
+    fixture = TestBed.createComponent(Content);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+    component['switchView']('drafts');
+    const readyDraft = component['drafts']()[0];
+    component['toggleDraft'](readyDraft);
+    const ready = component['suggestionsFor'](readyDraft)[0];
+
+    component['applySuggestion'](readyDraft, ready);
+
+    expect(contentSuggestionsService.apply).toHaveBeenCalledWith(ready.id);
+    expect(component['suggestionsFor'](readyDraft)[0].status).toBe('APPLIED');
+  });
+
+  it('rejects Apply for a stale suggestion proactively', () => {
+    const stale: ContentSuggestionSummary = { ...suggestion('READY'), stale: true };
+
+    expect(component['canApplySuggestion'](stale)).toBe(false);
+  });
+
+  it('surfaces a stale conflict message when Apply fails on an already-stale suggestion', () => {
+    vi.mocked(contentDraftsService.list).mockReturnValue(of([draft('READY', 'READY')]));
+    vi.mocked(contentSuggestionsService.apply).mockReturnValue(throwError(() => new Error('conflict')));
+    fixture = TestBed.createComponent(Content);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+    component['switchView']('drafts');
+    const readyDraft = component['drafts']()[0];
+    const stale: ContentSuggestionSummary = { ...suggestion('READY'), stale: true };
+
+    component['applySuggestion'](readyDraft, stale);
+
+    expect(component['aiApplyErrors']()[stale.id]).toContain('Draft changed since this suggestion was generated');
+  });
+
+  it('discards a READY suggestion without deleting its history', () => {
+    vi.mocked(contentDraftsService.list).mockReturnValue(of([draft('READY', 'READY')]));
+    vi.mocked(contentSuggestionsService.listForDraft).mockReturnValue(of([suggestion('READY')]));
+    fixture = TestBed.createComponent(Content);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+    component['switchView']('drafts');
+    const readyDraft = component['drafts']()[0];
+    component['toggleDraft'](readyDraft);
+    const ready = component['suggestionsFor'](readyDraft)[0];
+
+    component['discardSuggestion'](readyDraft, ready);
+
+    expect(contentSuggestionsService.discard).toHaveBeenCalledWith(ready.id);
+    expect(component['suggestionsFor'](readyDraft)).toHaveLength(1);
+    expect(component['suggestionsFor'](readyDraft)[0].status).toBe('DISCARDED');
+  });
+
+  it('regenerating creates a new suggestion without mutating the previous one', () => {
+    const original = suggestion('READY');
+    vi.mocked(contentDraftsService.list).mockReturnValue(of([draft('READY', 'READY')]));
+    vi.mocked(contentSuggestionsService.listForDraft).mockReturnValue(of([original]));
+    const secondSuggestion: ContentSuggestionSummary = { ...suggestion('READY'), id: 'suggestion-2', hook: 'Second hook' };
+    vi.mocked(contentSuggestionsService.create).mockReturnValue(of(secondSuggestion));
+    fixture = TestBed.createComponent(Content);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+    component['switchView']('drafts');
+    const readyDraft = component['drafts']()[0];
+    component['toggleDraft'](readyDraft);
+
+    component['generateSuggestion'](readyDraft);
+
+    const history = component['suggestionsFor'](readyDraft);
+    expect(history).toHaveLength(2);
+    expect(history.some((s) => s.id === original.id)).toBe(true);
+    expect(history.some((s) => s.id === 'suggestion-2')).toBe(true);
+  });
+
+  it('renders null token/latency metadata without NaN or undefined leaking through', () => {
+    vi.mocked(contentDraftsService.list).mockReturnValue(of([draft('READY', 'READY')]));
+    vi.mocked(contentSuggestionsService.listForDraft).mockReturnValue(of([suggestion('PENDING')]));
+    fixture = TestBed.createComponent(Content);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+    component['switchView']('drafts');
+    const readyDraft = component['drafts']()[0];
+    component['toggleDraft'](readyDraft);
+    fixture.detectChanges();
+
+    const text = fixture.nativeElement.textContent as string;
+    expect(text).not.toContain('undefined');
+    expect(text).not.toContain('NaN');
+    expect(text).not.toContain('Invalid Date');
+  });
+
   function asset(status: MediaAssetStatus): MediaAssetSummary {
     return {
       id: `${status}-asset`,
@@ -927,6 +1130,38 @@ describe('Content', () => {
       durationMs: 12_000,
       hasVideo: true,
       addedAt: '2026-09-18T07:05:00Z',
+    };
+  }
+
+  function suggestion(status: ContentSuggestionSummary['status']): ContentSuggestionSummary {
+    return {
+      id: 'suggestion-1',
+      contentDraftId: 'draft-1',
+      robotRunId: null,
+      type: 'SOCIAL_COPY',
+      status,
+      provider: 'DETERMINISTIC_TEST',
+      model: 'deterministic-v1',
+      promptVersion: 'SOCIAL_COPY_V1',
+      language: 'AUTO',
+      tone: 'NEUTRAL',
+      hook: status === 'READY' || status === 'APPLIED' ? 'Big news!' : null,
+      caption: status === 'READY' || status === 'APPLIED' ? 'This is the generated caption.' : null,
+      hashtags: status === 'READY' || status === 'APPLIED' ? ['ai', 'tech'] : [],
+      shortTitle: status === 'READY' || status === 'APPLIED' ? 'Quick clip' : null,
+      transcriptUsed: false,
+      transcriptId: null,
+      promptTokens: null,
+      completionTokens: null,
+      totalTokens: null,
+      latencyMs: null,
+      failureCode: status === 'FAILED' ? 'AI_OUTPUT_REJECTED' : null,
+      failureMessage: status === 'FAILED' ? 'hook is required' : null,
+      stale: false,
+      createdAt: '2026-09-19T08:00:00Z',
+      completedAt: status === 'READY' || status === 'APPLIED' || status === 'FAILED' ? '2026-09-19T08:00:05Z' : null,
+      appliedAt: status === 'APPLIED' ? '2026-09-19T08:01:00Z' : null,
+      appliedByUserId: status === 'APPLIED' ? 'user-1' : null,
     };
   }
 

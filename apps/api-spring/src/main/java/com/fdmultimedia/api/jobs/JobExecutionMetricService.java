@@ -66,6 +66,9 @@ public class JobExecutionMetricService {
                     null,
                     stringPayload(payload, "analyzerType"));
             case PUBLISH_MEDIA -> assetHints(uuidPayload(payload, "assetId"), null, null, null);
+            // No media-asset-shaped hints apply — the payload only carries a
+            // ContentDraft reference for observability, not size/duration.
+            case GENERATE_SOCIAL_COPY -> new WorkloadHints(null, null, null, null, null, null, null);
         };
     }
 

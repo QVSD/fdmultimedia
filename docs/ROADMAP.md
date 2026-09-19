@@ -1,6 +1,6 @@
 # Roadmap
 
-The repository is currently at Phase 11D. Completed phases are marked below;
+The repository is currently at Phase 12A. Completed phases are marked below;
 later phases are planned high-level direction and intentionally do not go into
 implementation detail before they are started.
 
@@ -173,9 +173,49 @@ implementation detail before they are started.
    Sources tab and an "Add to Source" action on original assets; the Robots
    page's create form gained a source-type switch with a human-readable
    selection-policy label. *(complete)*
-23. **FFmpeg processing** — richer automated video processing pipelines.
-24. **Additional platform integrations** — TikTok, YouTube, or other real
+23. **AI content enrichment foundation (Phase 12A)** — a workspace-scoped
+   `ContentSuggestion` lets a human generate AI-drafted hook/caption/hashtags
+   for a READY `ContentDraft`, but AI output is always a suggestion, never an
+   authoritative mutation: it cannot silently change a Draft, publish, create
+   a `PublishSchedule`, or bypass Robot approval — Robots do not auto-generate
+   suggestions in this phase. A narrow, provider-neutral
+   `ContentEnrichmentProvider` abstraction (Worker-side) mirrors the
+   `HighlightAnalyzer` map pattern from Phase 7B2, with a `DETERMINISTIC_TEST`
+   provider for tests/local fallback and a real `OllamaContentEnrichmentProvider`
+   for local LLM generation — no domain service depends on a vendor SDK
+   directly. Unlike the highlight analyzer, prompt construction is centralized
+   on the backend (`SocialCopyPromptBuilder`, versioned as `SOCIAL_COPY_V1`)
+   for testability and reproducibility; the frozen prompt travels to the
+   Worker in the generation authorization response, which also gives
+   suggestion output natural snapshot semantics — nothing later can change
+   what was actually asked. A bounded `ContentEnrichmentContextBuilder`
+   gathers only draft/source/highlight metadata and transcript segments
+   overlapping the selected clip (with padding), never whole DB entities or
+   unbounded transcript text, and the prompt explicitly treats that context as
+   untrusted data, not instructions. Generation runs as a `GENERATE_SOCIAL_COPY`
+   Job through the existing distributed Job/Worker infrastructure (claim,
+   lease, retry, scheduling, metrics) — no second AI job system — so the
+   backend never needs the provider secret; only the Worker's environment
+   does. Structured provider output is validated into a controlled schema
+   (bounded hook/caption/hashtag/short-title lengths, normalized hashtags)
+   before being persisted as READY; invalid output is rejected as a distinct
+   terminal `AI_OUTPUT_REJECTED` failure, separate from transient provider
+   failures which use the normal bounded Job retry path. A deterministic
+   SHA-256 input fingerprint over the generation inputs detects staleness at
+   Apply time — if a human has edited the Draft since generation, Apply is
+   rejected with `SUGGESTION_STALE` rather than silently overwriting the
+   human edit. Regenerating always creates a new, independent
+   `ContentSuggestion` row; Apply is an explicit, transactional, idempotent
+   human action that composes hook/caption/hashtags into `Draft.caption`.
+   The Content page gained an AI Content section per Draft with durable,
+   polled suggestion history (not a spinner holding one request open),
+   language/tone controls, and Apply/Discard/Regenerate actions. *(complete)*
+24. **FFmpeg processing** — richer automated video processing pipelines.
+25. **Additional platform integrations** — TikTok, YouTube, or other real
    platforms behind the same provider-boundary pattern Instagram
    established in Phase 10B.
-25. **AI content** — AI-assisted content creation.
-26. **Analytics / revenue** — performance analytics and revenue tracking.
+26. **AI content personalization** — a Brand Voice/Persona engine and any
+   Robot-driven autonomous AI generation, building on the provider
+   abstraction and suggestion model established in Phase 12A but explicitly
+   out of scope for it.
+27. **Analytics / revenue** — performance analytics and revenue tracking.

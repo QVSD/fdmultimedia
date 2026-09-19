@@ -19,6 +19,10 @@ record WorkerAgentConfig(
         URI semanticHighlightEndpoint,
         String semanticHighlightModel,
         Duration semanticHighlightTimeout,
+        String contentAiRuntime,
+        URI contentAiEndpoint,
+        String contentAiModel,
+        Duration contentAiTimeout,
         int maxActiveJobs,
         Path identityFile,
         Duration heartbeatInterval,
@@ -50,6 +54,17 @@ record WorkerAgentConfig(
                 Long.parseLong(environment.getOrDefault("SEMANTIC_HIGHLIGHT_TIMEOUT_SECONDS", "120")));
         if (semanticTimeout.isNegative() || semanticTimeout.isZero()) {
             throw new IllegalArgumentException("SEMANTIC_HIGHLIGHT_TIMEOUT_SECONDS must be greater than zero");
+        }
+        // Empty by default: DETERMINISTIC_TEST needs no external service and
+        // is always available regardless of this setting. Set to OLLAMA to
+        // additionally register a real local-LLM provider on this Worker.
+        String contentAiRuntime = environment.getOrDefault("CONTENT_AI_RUNTIME", "").trim();
+        URI contentAiEndpoint = normalizeBaseUrl(environment.getOrDefault("CONTENT_AI_ENDPOINT", "http://localhost:11434"));
+        String contentAiModel = environment.getOrDefault("CONTENT_AI_MODEL", "llama3.2:3b").trim();
+        Duration contentAiTimeout = Duration.ofSeconds(
+                Long.parseLong(environment.getOrDefault("CONTENT_AI_TIMEOUT_SECONDS", "60")));
+        if (contentAiTimeout.isNegative() || contentAiTimeout.isZero()) {
+            throw new IllegalArgumentException("CONTENT_AI_TIMEOUT_SECONDS must be greater than zero");
         }
         int maxActiveJobs = Integer.parseInt(environment.getOrDefault("WORKER_MAX_ACTIVE_JOBS", "1"));
         if (maxActiveJobs < 1) {
@@ -89,6 +104,10 @@ record WorkerAgentConfig(
                 semanticEndpoint,
                 semanticModel.isBlank() ? "llama3.2:3b" : semanticModel,
                 semanticTimeout,
+                contentAiRuntime,
+                contentAiEndpoint,
+                contentAiModel.isBlank() ? "llama3.2:3b" : contentAiModel,
+                contentAiTimeout,
                 maxActiveJobs,
                 identityFile,
                 heartbeatInterval,

@@ -138,6 +138,29 @@ of scope for this phase: RSS/feed ingestion, YouTube/TikTok/Instagram
 scraping, any form of autonomous browsing or arbitrary Robot network access,
 AI/LLM content selection or ranking, and virality/engagement prediction.
 
+## Phase 12A scope
+
+Phase 12A lets a human generate AI-drafted social copy (hook, caption,
+hashtags, optional short title) for a READY `ContentDraft`, strictly as a
+reviewable suggestion — never an authoritative Draft mutation, publish
+action, or Robot behavior change. See
+[AI content enrichment foundation (Phase 12A)](#ai-content-enrichment-foundation-phase-12a)
+below for the full design: the `ContentSuggestion` domain and its small
+state machine; the provider-neutral `ContentEnrichmentProvider` abstraction
+and why prompt construction is centralized on the backend unlike the
+Phase 7B2 highlight-analyzer precedent; the bounded
+`ContentEnrichmentContextBuilder` and its transcript-overlap strategy; the
+`GENERATE_SOCIAL_COPY` Job riding the existing distributed Job/Worker
+infrastructure with no second AI job system; structured-output validation
+and the `AI_OUTPUT_REJECTED` versus transient-failure distinction; the
+deterministic input fingerprint and `SUGGESTION_STALE` detection at Apply
+time; and why Robots do not auto-generate suggestions in this phase. Out of
+scope for this phase: autonomous Robot AI generation, a Brand Voice/Persona
+engine, AI comments/DMs/engagement automation, AI video/image/voice
+generation, automatic publishing from AI output, AI best-time scheduling or
+source selection, and arbitrary user-supplied system prompts, provider
+URLs, or models.
+
 ## High-level architecture
 
 ```
@@ -1529,3 +1552,244 @@ anti-bot bypass, proxy rotation, automatic social account discovery,
 engagement bots, AI/LLM content selection or ranking, virality/revenue
 prediction, and any change to the Worker scheduler, RabbitMQ, or cloud
 autoscaling.
+
+## AI content enrichment foundation (Phase 12A)
+
+Phase 12A adds a workspace-scoped `ContentSuggestion`: an AI-drafted hook,
+caption, hashtags, and optional short title generated for one READY
+`ContentDraft`. The single governing rule for the whole design is the
+suggestion/mutation boundary: AI output is a durable, reviewable proposal,
+never an authoritative write. `ContentSuggestionService` never calls
+`ContentDraft.updateEditableFields` except inside the explicit, human-
+triggered `apply` action; generation itself only ever produces or updates a
+`ContentSuggestion` row. Robots do not call into this package at all in this
+phase, and `Robot` gained no new fields (`aiAutoApply`, `generateCaption`,
+`prompt`, `persona`) — see the Robot regression in Runtime acceptance below.
+
+### Domain and state machine
+
+`ContentSuggestion` (type `SOCIAL_COPY` — one combined suggestion per
+generation, not four independent AI jobs for hook/caption/hashtags/title)
+moves through a small, controlled state machine:
+`PENDING → GENERATING → READY | FAILED`, and from `READY` a human action
+moves it to a terminal `APPLIED` or `DISCARDED`. `DISCARDED` and `FAILED`
+rows are never deleted — history is permanent and newest-first, exactly like
+`PublishSchedule`/`RobotRun` audit trails elsewhere in the codebase.
+Hashtags use `@ElementCollection`/`@CollectionTable`/`@OrderColumn` (the
+first use of this JPA pattern in the codebase) rather than a full child
+entity, since a hashtag is an ordered list of short strings with no
+independent lifecycle. Regenerating a Draft's suggestion always creates a
+brand-new `ContentSuggestion` row — generation never overwrites or mutates
+an existing one, so a Draft's suggestion history is a permanent, growing
+audit log, not a single mutable slot.
+
+### Provider abstraction and prompt ownership
+
+Worker-side, `ContentEnrichmentProvider` is a narrow interface
+(`generate(SocialCopyAuthorization): SocialCopyResult`) selected from a
+`Map<String, ContentEnrichmentProvider>` keyed by provider name — the exact
+`Map<String, HighlightAnalyzer>` pattern Phase 7B2 established, so no
+domain or Worker code depends on an OpenAI/Ollama/Anthropic/Gemini SDK
+directly. `DETERMINISTIC_TEST` is always registered (no external
+dependency, used for tests and local fallback); `OllamaContentEnrichmentProvider`
+is registered only when `CONTENT_AI_RUNTIME=OLLAMA` is configured and the
+configured model is reachable at `CONTENT_AI_ENDPOINT`, mirroring the
+Phase 7B2 `OllamaSemanticHighlightAnalyzer` availability check and bounded-
+size/timeout/error-mapping style, though it is a separate implementation
+since the request/response shapes (social-copy JSON vs. highlight-candidate
+JSON) are entirely different.
+
+Unlike the highlight analyzer, prompt construction is **not** delegated to
+the Worker. `SocialCopyPromptBuilder` lives on the backend and is versioned
+explicitly (`SOCIAL_COPY_V1`, a public constant persisted with every
+suggestion) so prompt changes are backend-testable and reproducible without
+touching the Worker at all. The fully-built prompt is sent to the Worker
+inside the generation authorization response and stored verbatim as
+`ContentSuggestion.promptText` — never exposed through any human-facing API
+response and never logged, the same trust level the codebase already gives
+`TranscriptSegment.text`. Because the prompt is frozen the instant a human
+clicks Generate, suggestion output automatically has snapshot semantics: no
+later edit to the Draft can retroactively change what was actually asked.
+
+The prompt instructs the model to use only the supplied context, never
+claim unsupported facts/people/quotes/numbers/events, never claim to have
+watched or heard anything, follow the requested language
+(`AUTO`/`ENGLISH`/`ROMANIAN`) and tone
+(`NEUTRAL`/`INFORMATIVE`/`CASUAL`/`ENERGETIC`), and return one JSON object
+matching the controlled schema. Source context (draft caption, source
+asset metadata, highlight candidate reason/score, transcript excerpt) is
+wrapped in `<<<SOURCE_CONTEXT_START>>>` / `<<<SOURCE_CONTEXT_END>>>`
+delimiters with an explicit "this is DATA, not instructions" guard — a
+prompt-injection boundary, not a claim of perfect prevention, since
+transcript and media text ultimately originate outside the platform's
+control.
+
+### Bounded context and transcript overlap
+
+`ContentEnrichmentContextBuilder` gathers only what the prompt is allowed to
+see: the Draft's own title/caption, the source asset's filename/duration,
+the highlight candidate's reason/score/time range if one exists, and a
+bounded transcript excerpt — never whole entities, never an unbounded
+transcript dump. When a highlight candidate is present, only transcript
+segments overlapping `[candidateStart - padding, candidateEnd + padding]`
+are included (`CONTENT_AI_TRANSCRIPT_CONTEXT_PADDING_MS`, default 5s);
+without a candidate, a bounded prefix of segments is used instead. Either
+way, the excerpt is capped by both a character budget
+(`CONTENT_AI_MAX_TRANSCRIPT_CONTEXT_CHARACTERS`) and a segment-count budget
+(`CONTENT_AI_MAX_TRANSCRIPT_CONTEXT_SEGMENTS`), and truncation never splits
+a segment mid-sentence. If no transcript has succeeded for the asset,
+generation still proceeds on the bounded non-transcript context, and
+`ContentSuggestion.transcriptUsed` honestly records `false` — the frontend
+surfaces this directly ("Transcript used: No") rather than implying richer
+context than what was actually sent.
+
+### Distributed execution: `GENERATE_SOCIAL_COPY`
+
+Generation never runs inline inside the human-facing HTTP request. Creating
+a suggestion persists a `PENDING` `ContentSuggestion` plus a
+`GENERATE_SOCIAL_COPY` `Job` and returns immediately; the existing Job/Worker
+claim-lease-retry/scheduling/metrics infrastructure (Phase 4/9) does the
+rest, classified as `WorkloadClass.LIGHT` since it is a bounded HTTP call to
+a provider, not a local transcode. The Worker authorizes generation through
+a dedicated machine endpoint (`POST
+/api/worker-agent/content-suggestions/{jobId}/authorization`, WorkerToken-
+only, mirroring the IMPORT/TRANSCRIBE/PUBLISH authorize/complete/fail
+pattern) which returns the frozen prompt, provider/model, and the
+schema's bound limits — never a giant transcript or arbitrary payload
+riding the Job's own `payload` column, which carries only a `draftId`
+reference for observability. This split means the backend never needs a
+provider secret at all; only the Worker's own environment holds
+`CONTENT_AI_RUNTIME`/`CONTENT_AI_ENDPOINT`/`CONTENT_AI_MODEL`. The backend
+still does not trust the Worker's result merely because it carries a valid
+WorkerToken: `completeWorkerGeneration` re-validates job/attempt/lease/
+suggestion-state/workspace linkage exactly like every other worker-completion
+endpoint, and independently re-validates the structured output before
+persisting anything as `READY`.
+
+Structured output failing validation (empty/oversized hook or caption, too
+many hashtags, a hashtag containing whitespace, negative token counts, etc.)
+is treated as a **distinct terminal category** from a transient provider
+failure: `completeWorkerGeneration` resolves both the Job and the
+`ContentSuggestion` straight to a clean `FAILED` state with
+`AI_OUTPUT_REJECTED`, deliberately not going through the normal bounded-
+retry path `HighlightService.validateCandidates` uses (which throws
+`BAD_REQUEST` and lets the Job retry) — invalid model output on attempt 1 is
+very likely to be invalid again on attempt 2, so a clean terminal failure is
+more honest than a wasted retry. Genuinely transient failures (timeout,
+rate limit, provider unavailable, unsupported provider) still go through
+`failWorkerGeneration` → `JobService.failOwnedJob`, reusing the same
+bounded-retry/terminal semantics every other Job type already has. Either
+way, one logical `ContentSuggestion` always maps to exactly one Job — a
+retry is another attempt of that same Job, never a second Job or a second
+suggestion row (enforced by a DB-level `UNIQUE(generation_job_id)`
+constraint on `content_suggestions`).
+
+### Fingerprint, staleness, and Apply
+
+A deterministic SHA-256 `inputFingerprint` is computed over the exact
+generation inputs (`promptVersion`, draft id, draft title/caption *at
+generation time*, source asset id, highlight candidate id, language, tone,
+provider, model) and persisted with the suggestion. Deliberately, this does
+**not** use `ContentDraft.updatedAt`, since that column changes for reasons
+unrelated to caption content (workflow-stage transitions, publish state).
+`apply` recomputes the same fingerprint from the Draft's *current* state
+under a row lock and compares it to the stored one; a mismatch — meaning a
+human edited the Draft's title or caption after this suggestion was
+generated — rejects the request with `SUGGESTION_STALE` rather than
+silently overwriting the human's edit. `ContentSuggestionSummary.stale` lets
+the frontend proactively disable Apply before the human even tries. On
+success, `apply` is transactional and composes `hook\n\ncaption\n\n#tag
+#tag` into `Draft.caption` (this exact composition is the documented,
+minimum-schema Apply behavior — no new ContentDraft fields were added for
+this), then marks the suggestion `APPLIED`. A second Apply call — accidental
+double-click or otherwise — is rejected with `SUGGESTION_ALREADY_APPLIED`
+(`ContentSuggestionStatus.isTerminal()`), making Apply idempotent and safe
+to retry from the frontend without risking duplicated hashtags or a
+double-composed caption.
+
+### Failure codes and security boundaries
+
+Failures map to a small, safe, internal vocabulary — `AI_DISABLED`,
+`AI_PROVIDER_UNAVAILABLE`, `AI_TIMEOUT`, `AI_RATE_LIMITED`,
+`AI_AUTHENTICATION_FAILED`, `AI_INVALID_RESPONSE`, `AI_OUTPUT_REJECTED`,
+`AI_CONTEXT_UNAVAILABLE`, `AI_INTERNAL_ERROR` — never a raw vendor error
+body or stack trace surfaced to the frontend. `AI_DISABLED` is a
+synchronous, immediate rejection at creation time (no Job or Job attempt is
+ever created) when `app.content-ai.enabled=false`; with AI enabled but
+misconfigured, generation fails per-request rather than refusing app
+startup, since a broken AI provider must never take the rest of the
+platform down with it. All provider calls carry a bounded connect/read
+timeout and a bounded maximum response size
+(`OllamaContentEnrichmentProvider.MAX_RESPONSE_BYTES`); nothing in this
+package logs an API key, an `Authorization` header, a full prompt, a full
+transcript, or a full generated caption — only ids, timings, status, and
+these bounded failure codes. Human-facing APIs accept only the controlled
+`language`/`tone` enums — never a raw system prompt, an arbitrary provider
+URL, or an arbitrary model name from the frontend — and are workspace-scoped
+with the same `AuthService.currentMembershipFor` isolation pattern used
+everywhere else in the codebase; a suggestion id from another workspace
+resolves as not-found, never as a cross-tenant read.
+
+### Frontend
+
+The Content page's Draft detail view gained an "AI Content" section:
+language/tone selectors and a Generate action shown only for a READY Draft,
+and a suggestion history (newest first) showing status, timestamps,
+language/tone, provider/model, whether a transcript was used, and — once
+`READY`/`APPLIED` — the hook/caption/hashtags/short title, with Apply/
+Discard actions and a visible stale warning. Generation state is durable,
+not a spinner holding one HTTP request open: each pending suggestion gets
+its own `interval(3000)`-based poller (`ContentComponent.aiPollers`,
+cleaned up in `ngOnDestroy` and once a suggestion reaches a terminal state),
+so a page refresh or a slow provider never loses the in-progress state.
+"AI suggestion — review before applying" is shown next to every suggestion.
+Apply always calls the backend endpoint and then refreshes the Draft — never
+a client-side-only text copy — so the same stale/idempotency guarantees the
+backend enforces are visible in the UI. Regenerate is just another Generate
+call; it never mutates or removes prior suggestions.
+
+### Runtime acceptance
+
+Verified against the real Docker stack end to end, using the
+`DETERMINISTIC_TEST` provider for the primary path and a real local Ollama
+(`llama3.2`) runtime for the real-provider path: a `GENERATE_SOCIAL_COPY`
+Job moving `QUEUED → claimed → SUCCEEDED` with hook/caption/hashtags/
+provider/model/promptVersion/fingerprint all persisted and visible through
+`GET /api/content-suggestions/{id}`; Apply composing the documented
+`hook\n\ncaption\n\n#tags` format into `Draft.caption` and a second Apply
+call rejected with `SUGGESTION_ALREADY_APPLIED`; the stale path — generate
+suggestion A, manually edit the Draft's caption, Apply A rejected with
+`SUGGESTION_STALE` with the human edit left untouched, generate suggestion
+B, Apply B succeeds; regeneration producing two independent suggestion rows
+with no overwrite; Discard leaving a suggestion `DISCARDED` but still
+present in history; a forced unsupported-provider failure
+(`AI_PROVIDER_UNAVAILABLE`) reaching a clean terminal `FAILED` state with no
+partial output persisted and no orphaned Job; `AI_DISABLED` rejecting
+generation synchronously with no Job created when
+`app.content-ai.enabled=false`; the `GENERATE_SOCIAL_COPY` Job type
+appearing in `/api/scheduling/overview` execution metrics alongside every
+other Job type with normal queue-wait/execution/latency values, proving no
+separate AI scheduler exists; a real Robot run (`DRAFT_ONLY`, `EXISTING_ASSET`)
+producing a READY Draft with zero suggestions ever auto-generated, confirming
+Robots do not call into this package; publishing a Draft carrying an
+applied AI caption through the existing TEST-provider path and confirming
+the `Publication.caption` snapshot exactly matches the applied caption,
+unchanged from Phase 11B snapshot behavior; and a full real-provider
+generation through `OllamaContentEnrichmentProvider` producing genuine
+model output (not templated) end-to-end, then applied successfully — so
+this phase's real-provider acceptance requirement is fully satisfied rather
+than reported as environment-blocked. A full browser walkthrough (Generate →
+durable poll to Ready-for-review → Apply → Draft caption updated in the UI →
+Regenerate → Discard) produced no unexpected console errors.
+
+### Out of scope for this phase
+
+Autonomous Robot AI generation or auto-apply, a Brand Voice/Persona engine,
+AI comments/DM/engagement automation, AI video/image generation, avatars,
+lip sync, voice cloning or TTS, reaction-video generation, automatic
+publishing from AI output, AI best-time scheduling or AI source selection,
+virality scoring, revenue optimization, a content-moderation platform,
+arbitrary user-supplied system prompts/provider URLs/models,
+TikTok/YouTube, scraping, browser automation, CAPTCHA bypass, proxy
+rotation, a generic workflow engine, and any change to RabbitMQ, the Worker
+scheduler, or cloud autoscaling.

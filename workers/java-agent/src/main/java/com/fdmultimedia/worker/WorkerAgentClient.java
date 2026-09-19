@@ -362,6 +362,41 @@ final class WorkerAgentClient {
                 new TypeReference<InstagramDriveStatus>() {});
     }
 
+    SocialCopyAuthorization authorizeSocialCopyGeneration(UUID jobId, String machineIdentifier)
+            throws IOException, InterruptedException {
+        return send(
+                "/worker-agent/content-suggestions/" + jobId + "/authorization",
+                Map.of("machineIdentifier", machineIdentifier),
+                new TypeReference<SocialCopyAuthorization>() {});
+    }
+
+    void completeSocialCopyGeneration(UUID jobId, String machineIdentifier, SocialCopyAuthorization authorization, SocialCopyResult result)
+            throws IOException, InterruptedException {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("machineIdentifier", machineIdentifier);
+        body.put("suggestionId", authorization.suggestionId());
+        body.put("hook", result.hook());
+        body.put("caption", result.caption());
+        body.put("hashtags", result.hashtags());
+        body.put("shortTitle", result.shortTitle());
+        body.put("promptTokens", result.promptTokens());
+        body.put("completionTokens", result.completionTokens());
+        body.put("totalTokens", result.totalTokens());
+        body.put("latencyMs", result.latencyMs());
+        send("/worker-agent/content-suggestions/" + jobId + "/complete", body, new TypeReference<Map<String, Object>>() {});
+    }
+
+    void failSocialCopyGeneration(UUID jobId, String machineIdentifier, UUID suggestionId, String errorCode, String errorMessage, boolean terminal)
+            throws IOException, InterruptedException {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("machineIdentifier", machineIdentifier);
+        body.put("suggestionId", suggestionId);
+        body.put("errorCode", errorCode);
+        body.put("errorMessage", errorMessage);
+        body.put("terminal", terminal);
+        send("/worker-agent/content-suggestions/" + jobId + "/fail", body, new TypeReference<Map<String, Object>>() {});
+    }
+
     void upload(URI uploadUrl, Path path, String contentType) throws IOException, InterruptedException {
         HttpRequest request = HttpRequest.newBuilder(uploadUrl)
                 .timeout(Duration.ofMinutes(30))

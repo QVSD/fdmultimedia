@@ -157,7 +157,10 @@ public class WorkerSchedulingService {
 
     private WorkloadClass workloadClass(JobType type) {
         return switch (type) {
-            case SYSTEM_TEST, ANALYZE_HIGHLIGHTS -> WorkloadClass.LIGHT;
+            // A content-AI call is a bounded outbound HTTP request, not a
+            // local CPU/memory-intensive transcode like FFmpeg or Whisper —
+            // classified LIGHT for the same reason ANALYZE_HIGHLIGHTS is.
+            case SYSTEM_TEST, ANALYZE_HIGHLIGHTS, GENERATE_SOCIAL_COPY -> WorkloadClass.LIGHT;
             case IMPORT_MEDIA, INSPECT_MEDIA, CREATE_CLIP, CREATE_SOCIAL_VERTICAL, TRANSCRIBE_MEDIA, PUBLISH_MEDIA -> WorkloadClass.HEAVY;
         };
     }

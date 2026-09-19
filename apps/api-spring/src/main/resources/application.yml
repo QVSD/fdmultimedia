@@ -104,6 +104,19 @@ app:
     dispatch-batch-size: ${ROBOT_DISPATCH_BATCH_SIZE:10}
     reconciliation-batch-size: ${ROBOT_RECONCILIATION_BATCH_SIZE:50}
     poll-interval-ms: ${ROBOT_SCHEDULER_POLL_MS:15000}
+  content-ai:
+    enabled: ${CONTENT_AI_ENABLED:true}
+    provider: ${CONTENT_AI_PROVIDER:DETERMINISTIC_TEST}
+    model: ${CONTENT_AI_MODEL:deterministic-v1}
+    max-hook-length: ${CONTENT_AI_MAX_HOOK_LENGTH:200}
+    max-caption-length: ${CONTENT_AI_MAX_CAPTION_LENGTH:2200}
+    max-hashtags: ${CONTENT_AI_MAX_HASHTAGS:30}
+    max-hashtag-length: ${CONTENT_AI_MAX_HASHTAG_LENGTH:50}
+    max-short-title-length: ${CONTENT_AI_MAX_SHORT_TITLE_LENGTH:100}
+    max-transcript-context-characters: ${CONTENT_AI_MAX_TRANSCRIPT_CONTEXT_CHARACTERS:4000}
+    max-transcript-context-segments: ${CONTENT_AI_MAX_TRANSCRIPT_CONTEXT_SEGMENTS:80}
+    transcript-context-padding-ms: ${CONTENT_AI_TRANSCRIPT_CONTEXT_PADDING_MS:5000}
+    max-prompt-characters: ${CONTENT_AI_MAX_PROMPT_CHARACTERS:20000}
   storage:
     endpoint: ${STORAGE_ENDPOINT:http://localhost:9000}
     public-endpoint: ${STORAGE_PUBLIC_ENDPOINT:${STORAGE_ENDPOINT:http://localhost:9000}}

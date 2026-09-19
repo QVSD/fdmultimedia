@@ -15,6 +15,8 @@ import { PublishSchedulesService } from '../../core/publish-schedules/publish-sc
 import { PublishScheduleStatus, PublishScheduleSummary } from '../../core/publish-schedules/publish-schedule.models';
 import { ContentSourcesService } from '../../core/content-sources/content-sources.service';
 import { ContentSourceAssetSummary, ContentSourceSummary } from '../../core/content-sources/content-source.models';
+import { ContentSuggestionsService } from '../../core/content-suggestions/content-suggestions.service';
+import { ContentSuggestionSummary, SuggestionLanguage, SuggestionTone } from '../../core/content-suggestions/content-suggestion.models';
 
 type LoadState = 'loading' | 'ready' | 'error';
 
@@ -71,6 +73,16 @@ export class Content implements OnInit, OnDestroy {
   protected readonly addToSourceBusy = signal<Record<string, boolean>>({});
   protected readonly addToSourceErrors = signal<Record<string, string | null>>({});
   protected readonly addToSourceDone = signal<Record<string, boolean>>({});
+
+  protected readonly aiSuggestions = signal<Record<string, ContentSuggestionSummary[]>>({});
+  protected readonly aiLanguage = signal<Record<string, SuggestionLanguage>>({});
+  protected readonly aiTone = signal<Record<string, SuggestionTone>>({});
+  protected readonly aiGenerateBusy = signal<Record<string, boolean>>({});
+  protected readonly aiGenerateErrors = signal<Record<string, string | null>>({});
+  protected readonly aiApplyBusy = signal<Record<string, boolean>>({});
+  protected readonly aiApplyErrors = signal<Record<string, string | null>>({});
+  protected readonly aiDiscardBusy = signal<Record<string, boolean>>({});
+  private readonly aiPollers = new Map<string, Subscription>();
   protected readonly drafts = signal<ContentDraftSummary[]>([]);
   protected readonly draftsLoadState = signal<LoadState>('loading');
   protected readonly expandedDrafts = signal<Record<string, boolean>>({});
@@ -114,6 +126,7 @@ export class Content implements OnInit, OnDestroy {
     private readonly contentDraftsService: ContentDraftsService,
     private readonly publishSchedulesService: PublishSchedulesService,
     private readonly contentSourcesService: ContentSourcesService,
+    private readonly contentSuggestionsService: ContentSuggestionsService,
   ) {}
 
   ngOnInit(): void {
@@ -199,6 +212,7 @@ export class Content implements OnInit, OnDestroy {
     this.draftsSubscription?.unsubscribe();
     this.schedulesSubscription?.unsubscribe();
     this.contentSourcesSubscription?.unsubscribe();
+    this.aiPollers.forEach((poller) => poller.unsubscribe());
   }
 
   protected importMedia(): void {
@@ -884,7 +898,11 @@ export class Content implements OnInit, OnDestroy {
   }
 
   protected toggleDraft(draft: ContentDraftSummary): void {
-    this.expandedDrafts.update((items) => ({ ...items, [draft.id]: !(items[draft.id] ?? false) }));
+    const expanded = !(this.expandedDrafts()[draft.id] ?? false);
+    this.expandedDrafts.update((items) => ({ ...items, [draft.id]: expanded }));
+    if (expanded && !this.aiSuggestions()[draft.id]) {
+      this.loadSuggestions(draft.id);
+    }
   }
 
   protected draftTitle(draft: ContentDraftSummary): string {
@@ -1157,6 +1175,146 @@ export class Content implements OnInit, OnDestroy {
 
   private replaceSchedule(schedule: PublishScheduleSummary): void {
     this.schedules.set(this.schedules().map((existing) => (existing.id === schedule.id ? schedule : existing)));
+  }
+
+  // ---- AI content enrichment ----
+
+  protected canGenerateSuggestion(draft: ContentDraftSummary): boolean {
+    return draft.status === 'READY';
+  }
+
+  protected suggestionsFor(draft: ContentDraftSummary): ContentSuggestionSummary[] {
+    return this.aiSuggestions()[draft.id] ?? [];
+  }
+
+  private loadSuggestions(draftId: string): void {
+    this.contentSuggestionsService
+      .listForDraft(draftId)
+      .pipe(catchError(() => EMPTY))
+      .subscribe((list) => {
+        this.aiSuggestions.update((items) => ({ ...items, [draftId]: list }));
+        list.filter((s) => s.status === 'PENDING' || s.status === 'GENERATING').forEach((s) => this.pollSuggestion(draftId, s.id));
+      });
+  }
+
+  protected aiLanguageFor(draft: ContentDraftSummary): SuggestionLanguage {
+    return this.aiLanguage()[draft.id] ?? 'AUTO';
+  }
+
+  protected setAiLanguage(draft: ContentDraftSummary, value: SuggestionLanguage): void {
+    this.aiLanguage.update((items) => ({ ...items, [draft.id]: value }));
+  }
+
+  protected aiToneFor(draft: ContentDraftSummary): SuggestionTone {
+    return this.aiTone()[draft.id] ?? 'NEUTRAL';
+  }
+
+  protected setAiTone(draft: ContentDraftSummary, value: SuggestionTone): void {
+    this.aiTone.update((items) => ({ ...items, [draft.id]: value }));
+  }
+
+  protected generateSuggestion(draft: ContentDraftSummary): void {
+    this.aiGenerateErrors.update((errors) => ({ ...errors, [draft.id]: null }));
+    this.aiGenerateBusy.update((busy) => ({ ...busy, [draft.id]: true }));
+    this.contentSuggestionsService
+      .create(draft.id, { language: this.aiLanguageFor(draft), tone: this.aiToneFor(draft) })
+      .pipe(finalize(() => this.aiGenerateBusy.update((busy) => ({ ...busy, [draft.id]: false }))))
+      .subscribe({
+        next: (suggestion) => {
+          this.aiSuggestions.update((items) => ({ ...items, [draft.id]: [suggestion, ...(items[draft.id] ?? [])] }));
+          if (suggestion.status === 'PENDING' || suggestion.status === 'GENERATING') {
+            this.pollSuggestion(draft.id, suggestion.id);
+          }
+        },
+        error: () => this.aiGenerateErrors.update((errors) => ({ ...errors, [draft.id]: 'Suggestion could not be generated.' })),
+      });
+  }
+
+  /** Durable-state polling, not a held-open request: the LLM call runs in a distributed Job, so this just re-reads suggestion state until it leaves PENDING/GENERATING. */
+  private pollSuggestion(draftId: string, suggestionId: string): void {
+    if (this.aiPollers.has(suggestionId)) {
+      return;
+    }
+    const poller = interval(3000)
+      .pipe(
+        startWith(0),
+        switchMap(() => this.contentSuggestionsService.listForDraft(draftId).pipe(catchError(() => EMPTY))),
+      )
+      .subscribe((list) => {
+        this.aiSuggestions.update((items) => ({ ...items, [draftId]: list }));
+        const current = list.find((s) => s.id === suggestionId);
+        if (!current || (current.status !== 'PENDING' && current.status !== 'GENERATING')) {
+          this.aiPollers.get(suggestionId)?.unsubscribe();
+          this.aiPollers.delete(suggestionId);
+        }
+      });
+    this.aiPollers.set(suggestionId, poller);
+  }
+
+  protected applySuggestion(draft: ContentDraftSummary, suggestion: ContentSuggestionSummary): void {
+    this.aiApplyErrors.update((errors) => ({ ...errors, [suggestion.id]: null }));
+    this.aiApplyBusy.update((busy) => ({ ...busy, [suggestion.id]: true }));
+    this.contentSuggestionsService
+      .apply(suggestion.id)
+      .pipe(finalize(() => this.aiApplyBusy.update((busy) => ({ ...busy, [suggestion.id]: false }))))
+      .subscribe({
+        next: (updated) => {
+          this.replaceSuggestion(draft.id, updated);
+          this.refreshDraft(draft.id);
+        },
+        error: () => this.aiApplyErrors.update((errors) => ({
+          ...errors,
+          [suggestion.id]: suggestion.stale
+            ? 'Draft changed since this suggestion was generated. Regenerate to apply fresh copy.'
+            : 'Suggestion could not be applied.',
+        })),
+      });
+  }
+
+  protected discardSuggestion(draft: ContentDraftSummary, suggestion: ContentSuggestionSummary): void {
+    this.aiDiscardBusy.update((busy) => ({ ...busy, [suggestion.id]: true }));
+    this.contentSuggestionsService
+      .discard(suggestion.id)
+      .pipe(finalize(() => this.aiDiscardBusy.update((busy) => ({ ...busy, [suggestion.id]: false }))))
+      .subscribe({
+        next: (updated) => this.replaceSuggestion(draft.id, updated),
+        error: () => undefined,
+      });
+  }
+
+  private replaceSuggestion(draftId: string, suggestion: ContentSuggestionSummary): void {
+    this.aiSuggestions.update((items) => ({
+      ...items,
+      [draftId]: (items[draftId] ?? []).map((existing) => (existing.id === suggestion.id ? suggestion : existing)),
+    }));
+  }
+
+  private refreshDraft(draftId: string): void {
+    this.contentDraftsService
+      .list()
+      .pipe(catchError(() => EMPTY))
+      .subscribe((list) => this.drafts.set(list));
+  }
+
+  protected suggestionStatusLabel(status: ContentSuggestionSummary['status']): string {
+    switch (status) {
+      case 'PENDING':
+        return 'Queued';
+      case 'GENERATING':
+        return 'Generating';
+      case 'READY':
+        return 'Ready for review';
+      case 'FAILED':
+        return 'Failed';
+      case 'APPLIED':
+        return 'Applied';
+      case 'DISCARDED':
+        return 'Discarded';
+    }
+  }
+
+  protected canApplySuggestion(suggestion: ContentSuggestionSummary): boolean {
+    return suggestion.status === 'READY' && !suggestion.stale;
   }
 
   private refreshTranscripts(assets: MediaAssetSummary[]): void {

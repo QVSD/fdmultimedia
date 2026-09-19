@@ -113,12 +113,17 @@ anywhere. `contentsources` (controlled, workspace-scoped pools of existing
 `MediaAsset`s a Robot may select from) was added in Phase 11D — it
 deliberately has no dependency on `robots`, so it stays a reusable,
 Robot-agnostic building block; `robots` depends on it, never the reverse.
-`analytics` and `revenue` remain placeholders. The package layout under
-`com.fdmultimedia.api` (`auth`, `users`, `workspaces`, `accounts`, `robots`,
-`contentsources`, `assets`, `jobs`, `workers`, `publishing`, `contentdrafts`,
-`publishschedules`, `analytics`, `revenue`, `shared`) is where new domain
-logic should land. See [ARCHITECTURE.md](ARCHITECTURE.md) for what each
-package is for.
+`contentsuggestions` (AI-drafted hook/caption/hashtag suggestions for a
+`ContentDraft`, always reviewed and applied by a human) was added in
+Phase 12A — it depends on `contentdrafts` and `jobs`, and deliberately has
+no dependency on `robots` and no reverse dependency from `robots` either;
+Robots do not generate suggestions in this phase. `analytics` and `revenue`
+remain placeholders. The package layout under `com.fdmultimedia.api`
+(`auth`, `users`, `workspaces`, `accounts`, `robots`, `contentsources`,
+`assets`, `jobs`, `workers`, `publishing`, `contentdrafts`,
+`publishschedules`, `contentsuggestions`, `analytics`, `revenue`, `shared`)
+is where new domain logic should land. See [ARCHITECTURE.md](ARCHITECTURE.md)
+for what each package is for.
 
 ## Testing Instagram publishing locally
 
@@ -208,6 +213,42 @@ reconciling anything (a global kill switch, verifiable with a plain
 per-robot `POST /api/robots/{id}/pause` stops just that Robot from starting
 new runs without touching Jobs/Drafts/Schedules its past runs already
 created.
+
+## Testing AI content enrichment locally
+
+`CONTENT_AI_ENABLED=true` with `CONTENT_AI_PROVIDER=DETERMINISTIC_TEST` (both
+defaults) need no configuration at all: generate a suggestion for any READY
+`ContentDraft` with `POST /api/content-drafts/{draftId}/suggestions`,
+`{"language": "ENGLISH", "tone": "CASUAL"}`, and a `GENERATE_SOCIAL_COPY`
+Job produces a deterministic hook/caption/hashtags within one Worker poll
+cycle — no external credentials needed, and this is what the automated test
+suite uses end to end. `GET /api/content-drafts/{draftId}/suggestions` lists
+history newest-first; `POST /api/content-suggestions/{id}/apply` composes
+the suggestion into `Draft.caption`, and `POST
+/api/content-suggestions/{id}/discard` keeps it historical instead.
+
+To exercise a real local LLM instead of the deterministic provider, run
+[Ollama](https://ollama.com) with a pulled model (e.g. `ollama pull
+llama3.2`), then set on the **Worker**: `CONTENT_AI_RUNTIME=OLLAMA`,
+`CONTENT_AI_ENDPOINT=http://localhost:11434` (or wherever Ollama is
+reachable from the Worker process), and `CONTENT_AI_MODEL` to match a model
+`ollama list` actually shows — the Worker only registers the `OLLAMA`
+provider if that exact model is reachable at startup, otherwise it silently
+falls back to logging `DETERMINISTIC_TEST only`. Set on the **backend**:
+`CONTENT_AI_PROVIDER=OLLAMA` and the same `CONTENT_AI_MODEL`, then restart
+the API. Generation now takes real wall-clock time (tens of seconds on a
+CPU-only local model) and produces genuine model output; `latencyMs` on the
+resulting suggestion reflects this. The backend never needs the Ollama
+endpoint or any provider secret — only the Worker's own environment does.
+
+To exercise the disabled path, set `CONTENT_AI_ENABLED=false` and restart
+the API: the app starts normally, and generation is rejected synchronously
+with 409 `AI_DISABLED` (no Job is ever created). To exercise a provider
+failure without touching real infrastructure, request generation while the
+backend's configured provider (e.g. `OLLAMA`) is not registered on the
+Worker (e.g. the Worker never set `CONTENT_AI_RUNTIME`) — the Job fails
+immediately with the safe, terminal `AI_PROVIDER_UNAVAILABLE` code and the
+suggestion moves straight to `FAILED` with no partial output.
 
 ## Database migrations
 

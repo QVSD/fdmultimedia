@@ -225,6 +225,46 @@ commands/prompts. The API filters job claims by supported analyzer type and
 validates that returned semantic candidates are grounded in transcript segment
 timing before persistence.
 
+`GENERATE_SOCIAL_COPY` (Phase 12A) is always advertised, backed by a
+`Map<String, ContentEnrichmentProvider>` selected by the provider name the
+backend's authorization response carries — the same selection pattern as
+`ANALYZE_HIGHLIGHTS` above. `DETERMINISTIC_TEST` is always registered and
+needs no configuration. A real local Ollama provider is registered only when
+configured and reachable at startup:
+
+```text
+CONTENT_AI_RUNTIME=OLLAMA
+CONTENT_AI_ENDPOINT=http://localhost:11434
+CONTENT_AI_MODEL=llama3.2:latest
+CONTENT_AI_TIMEOUT_SECONDS=60
+```
+
+Unlike `ANALYZE_HIGHLIGHTS`, the worker does not build its own prompt here —
+the backend centrally builds and versions the prompt (`SocialCopyPromptBuilder`,
+`SOCIAL_COPY_V1`) and sends the frozen prompt text inside the job
+authorization response. The worker:
+
+1. asks the API for social-copy generation authorization (frozen prompt,
+   provider/model, and bounded output-length limits)
+2. looks up the requested provider in its own registered-provider map,
+   failing fast with a terminal `AI_PROVIDER_UNAVAILABLE` if the backend's
+   configured provider isn't one this worker supports
+3. calls the provider's `generate(...)`, which for Ollama posts to
+   `/api/generate` with `format: "json"` and a bounded response size
+4. reports the structured hook/caption/hashtags/short title (and any
+   token/latency metadata the provider returns) back to the API for
+   validation and persistence, or a classified failure
+
+The worker never builds the prompt itself, never receives the provider API
+key over the wire from the backend (Ollama needs none; a future hosted
+provider's key would live only in the worker's own environment), and never
+logs the prompt, the transcript, or the generated caption — only ids,
+timings, and safe failure codes. The API independently re-validates
+structured output (bounded lengths, hashtag normalization) before
+persisting anything as `READY`; invalid output is rejected as a distinct
+`AI_OUTPUT_REJECTED` terminal failure, separate from a transient provider
+failure that retries through the normal Job lease/retry path.
+
 `PUBLISH_MEDIA` for the `TEST` platform is always advertised; it requires no
 external tool and no configuration, backed by the deterministic
 `TestPublishingProvider`. `PublishMediaExecutor` branches on

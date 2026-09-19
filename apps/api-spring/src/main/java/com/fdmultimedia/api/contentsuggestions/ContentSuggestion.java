@@ -1,0 +1,285 @@
+package com.fdmultimedia.api.contentsuggestions;
+
+import com.fdmultimedia.api.contentdrafts.ContentDraft;
+import com.fdmultimedia.api.jobs.Job;
+import com.fdmultimedia.api.users.AppUser;
+import com.fdmultimedia.api.workspaces.Workspace;
+import jakarta.persistence.CollectionTable;
+import jakarta.persistence.Column;
+import jakarta.persistence.ElementCollection;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.OrderColumn;
+import jakarta.persistence.PrePersist;
+import jakarta.persistence.Table;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.UUID;
+
+/**
+ * A durable, reviewable AI-generated suggestion for one {@link ContentDraft}
+ * — never an authoritative mutation of it. Generation output is frozen the
+ * instant a Worker's completion is validated; regenerating never overwrites
+ * an existing row, it creates a new one. See package-info for the full
+ * boundary this entity sits behind.
+ */
+@Entity
+@Table(name = "content_suggestions")
+public class ContentSuggestion {
+
+    @Id
+    private UUID id;
+
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "workspace_id", nullable = false)
+    private Workspace workspace;
+
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "content_draft_id", nullable = false)
+    private ContentDraft contentDraft;
+
+    /** Plain UUID, no relationship — provenance only, mirrors {@code ContentDraft.robotRunId}. */
+    @Column(name = "robot_run_id")
+    private UUID robotRunId;
+
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "generation_job_id", nullable = false)
+    private Job generationJob;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private ContentSuggestionType type;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private ContentSuggestionStatus status;
+
+    @Column(nullable = false)
+    private String provider;
+
+    @Column(nullable = false)
+    private String model;
+
+    @Column(name = "prompt_version", nullable = false)
+    private String promptVersion;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private SuggestionLanguage language;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private SuggestionTone tone;
+
+    /** The exact prompt sent to the provider, frozen at generation time. Never exposed via any API DTO or log line. */
+    @Column(name = "prompt_text", nullable = false)
+    private String promptText;
+
+    @Column
+    private String hook;
+
+    @Column
+    private String caption;
+
+    @Column(name = "short_title")
+    private String shortTitle;
+
+    @ElementCollection
+    @CollectionTable(name = "content_suggestion_hashtags", joinColumns = @JoinColumn(name = "content_suggestion_id"))
+    @OrderColumn(name = "position")
+    @Column(name = "tag", nullable = false)
+    private List<String> hashtags = new ArrayList<>();
+
+    @Column(name = "input_fingerprint", nullable = false)
+    private String inputFingerprint;
+
+    @Column(name = "transcript_used", nullable = false)
+    private boolean transcriptUsed;
+
+    @Column(name = "transcript_id")
+    private UUID transcriptId;
+
+    @Column(name = "prompt_tokens")
+    private Integer promptTokens;
+
+    @Column(name = "completion_tokens")
+    private Integer completionTokens;
+
+    @Column(name = "total_tokens")
+    private Integer totalTokens;
+
+    @Column(name = "latency_ms")
+    private Long latencyMs;
+
+    @Column(name = "failure_code")
+    private String failureCode;
+
+    @Column(name = "failure_message")
+    private String failureMessage;
+
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "created_by_user_id", nullable = false)
+    private AppUser createdByUser;
+
+    @Column(name = "created_at", nullable = false)
+    private Instant createdAt;
+
+    @Column(name = "completed_at")
+    private Instant completedAt;
+
+    @Column(name = "applied_at")
+    private Instant appliedAt;
+
+    @Column(name = "applied_by_user_id")
+    private UUID appliedByUserId;
+
+    protected ContentSuggestion() {
+    }
+
+    public ContentSuggestion(
+            Workspace workspace,
+            ContentDraft contentDraft,
+            Job generationJob,
+            String provider,
+            String model,
+            String promptVersion,
+            SuggestionLanguage language,
+            SuggestionTone tone,
+            String promptText,
+            String inputFingerprint,
+            boolean transcriptUsed,
+            UUID transcriptId,
+            AppUser createdByUser,
+            Instant now) {
+        this.id = UUID.randomUUID();
+        this.workspace = workspace;
+        this.contentDraft = contentDraft;
+        this.robotRunId = contentDraft.getRobotRunId();
+        this.generationJob = generationJob;
+        this.type = ContentSuggestionType.SOCIAL_COPY;
+        this.status = ContentSuggestionStatus.PENDING;
+        this.provider = provider;
+        this.model = model;
+        this.promptVersion = promptVersion;
+        this.language = language;
+        this.tone = tone;
+        this.promptText = promptText;
+        this.inputFingerprint = inputFingerprint;
+        this.transcriptUsed = transcriptUsed;
+        this.transcriptId = transcriptId;
+        this.createdByUser = createdByUser;
+        this.createdAt = now;
+    }
+
+    @PrePersist
+    void prePersist() {
+        if (id == null) {
+            id = UUID.randomUUID();
+        }
+        if (createdAt == null) {
+            createdAt = Instant.now();
+        }
+    }
+
+    public boolean isTerminal() {
+        return ContentSuggestionStatus.terminalStatuses().contains(status);
+    }
+
+    public void markGenerating(Instant now) {
+        if (status != ContentSuggestionStatus.PENDING && status != ContentSuggestionStatus.GENERATING) {
+            throw new IllegalStateException("Suggestion is not pending");
+        }
+        this.status = ContentSuggestionStatus.GENERATING;
+    }
+
+    public void markReady(
+            String hook,
+            String caption,
+            List<String> hashtags,
+            String shortTitle,
+            Integer promptTokens,
+            Integer completionTokens,
+            Integer totalTokens,
+            Long latencyMs,
+            Instant now) {
+        this.status = ContentSuggestionStatus.READY;
+        this.hook = hook;
+        this.caption = caption;
+        this.hashtags = new ArrayList<>(hashtags);
+        this.shortTitle = shortTitle;
+        this.promptTokens = promptTokens;
+        this.completionTokens = completionTokens;
+        this.totalTokens = totalTokens;
+        this.latencyMs = latencyMs;
+        this.completedAt = now;
+    }
+
+    public void markFailed(String failureCode, String failureMessage, Instant now) {
+        this.status = ContentSuggestionStatus.FAILED;
+        this.failureCode = normalize(failureCode);
+        this.failureMessage = normalize(failureMessage);
+        this.completedAt = now;
+    }
+
+    public void markPendingForRetry(Instant now) {
+        this.status = ContentSuggestionStatus.PENDING;
+    }
+
+    public void markApplied(UUID appliedByUserId, Instant now) {
+        if (status != ContentSuggestionStatus.READY) {
+            throw new IllegalStateException("Only a READY suggestion can be applied");
+        }
+        this.status = ContentSuggestionStatus.APPLIED;
+        this.appliedByUserId = appliedByUserId;
+        this.appliedAt = now;
+    }
+
+    public void discard() {
+        if (status != ContentSuggestionStatus.READY) {
+            throw new IllegalStateException("Only a READY suggestion can be discarded");
+        }
+        this.status = ContentSuggestionStatus.DISCARDED;
+    }
+
+    private String normalize(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    public UUID getId() { return id; }
+    public Workspace getWorkspace() { return workspace; }
+    public ContentDraft getContentDraft() { return contentDraft; }
+    public UUID getRobotRunId() { return robotRunId; }
+    public Job getGenerationJob() { return generationJob; }
+    public ContentSuggestionType getType() { return type; }
+    public ContentSuggestionStatus getStatus() { return status; }
+    public String getProvider() { return provider; }
+    public String getModel() { return model; }
+    public String getPromptVersion() { return promptVersion; }
+    public SuggestionLanguage getLanguage() { return language; }
+    public SuggestionTone getTone() { return tone; }
+    public String getPromptText() { return promptText; }
+    public String getHook() { return hook; }
+    public String getCaption() { return caption; }
+    public String getShortTitle() { return shortTitle; }
+    public List<String> getHashtags() { return List.copyOf(hashtags); }
+    public String getInputFingerprint() { return inputFingerprint; }
+    public boolean isTranscriptUsed() { return transcriptUsed; }
+    public UUID getTranscriptId() { return transcriptId; }
+    public Integer getPromptTokens() { return promptTokens; }
+    public Integer getCompletionTokens() { return completionTokens; }
+    public Integer getTotalTokens() { return totalTokens; }
+    public Long getLatencyMs() { return latencyMs; }
+    public String getFailureCode() { return failureCode; }
+    public String getFailureMessage() { return failureMessage; }
+    public AppUser getCreatedByUser() { return createdByUser; }
+    public Instant getCreatedAt() { return createdAt; }
+    public Instant getCompletedAt() { return completedAt; }
+    public Instant getAppliedAt() { return appliedAt; }
+    public UUID getAppliedByUserId() { return appliedByUserId; }
+}

@@ -5,9 +5,9 @@ social-media content workflows, video processing workers running across
 multiple laptops/cloud machines, scheduling, AI-assisted content creation,
 publishing, analytics, and revenue tracking.
 
-## Phase 11D scope
+## Phase 12A scope
 
-This repository is currently at **Phase 11D: dynamic content sources & selection policies**.
+This repository is currently at **Phase 12A: AI content enrichment foundation**.
 Phase 9A introduced current Worker telemetry and per-attempt execution metrics;
 Phase 9B introduced deterministic `TELEMETRY_AWARE_V1` selection; Phase 9C
 persisted successful claim decisions and exposed bounded workspace-scoped
@@ -59,7 +59,20 @@ eligibility, ordering, and per-Robot exclusion of every asset that Robot has
 already selected before (even from a run that later failed), with a
 database-level unique index as defense in depth so the same Robot can never
 select the same asset twice while a different Robot sharing the source
-freely may.
+freely may. Phase 12A adds `ContentSuggestion`: a human can generate an
+AI-drafted hook/caption/hashtags for a READY `ContentDraft`, always as a
+reviewable suggestion — AI output can never silently mutate a Draft,
+publish, create a `PublishSchedule`, or bypass Robot approval, and Robots do
+not auto-generate suggestions in this phase. Generation runs as a
+`GENERATE_SOCIAL_COPY` Job through the same distributed Job/Worker
+infrastructure every other job type uses, behind a narrow
+`ContentEnrichmentProvider` abstraction with a `DETERMINISTIC_TEST` provider
+for tests/local fallback and a real local Ollama provider for actual LLM
+generation — no domain code depends on a vendor SDK directly. A deterministic
+input fingerprint detects when a human has edited the Draft since
+generation, rejecting a stale Apply instead of silently overwriting the
+edit; regenerating always creates a new, independent suggestion, never
+overwriting history.
 
 Claim decisions are written in the same transaction as assignment. Empty polls
 and capacity rejections are not persisted, preventing poll-noise growth. Decision

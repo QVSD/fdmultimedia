@@ -412,6 +412,9 @@ public class JobService {
         if (type == JobType.PUBLISH_MEDIA) {
             return validatePublishMediaPayload(payload);
         }
+        if (type == JobType.GENERATE_SOCIAL_COPY) {
+            return validateGenerateSocialCopyPayload(payload);
+        }
         if (type != JobType.SYSTEM_TEST) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unsupported job type");
         }
@@ -523,6 +526,16 @@ public class JobService {
         normalized.put("socialAccountId", socialAccountId);
         normalized.put("provider", provider);
         return normalized;
+    }
+
+    /**
+     * {@code draftId} is observability-only — the authoritative link from
+     * this Job back to its ContentSuggestion is a reverse lookup by Job id
+     * (mirroring ANALYZE_HIGHLIGHTS/TRANSCRIBE_MEDIA), never this payload.
+     */
+    private Map<String, Object> validateGenerateSocialCopyPayload(Map<String, Object> payload) {
+        String draftId = uuidString(payload.get("draftId"), "draftId");
+        return Map.of("draftId", draftId);
     }
 
     private String uuidString(Object value, String field) {

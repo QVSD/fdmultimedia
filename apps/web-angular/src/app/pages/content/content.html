@@ -338,6 +338,95 @@
                     </section>
 
                     <section class="detail-panel">
+                      <h3>AI Content</h3>
+                      @if (canGenerateSuggestion(draft)) {
+                        <form class="content__publish-form" (ngSubmit)="generateSuggestion(draft)">
+                          <label>
+                            <span>Language</span>
+                            <select [ngModel]="aiLanguageFor(draft)" (ngModelChange)="setAiLanguage(draft, $event)" name="ai-language-{{ draft.id }}">
+                              <option value="AUTO">Auto</option>
+                              <option value="ENGLISH">English</option>
+                              <option value="ROMANIAN">Romanian</option>
+                            </select>
+                          </label>
+                          <label>
+                            <span>Tone</span>
+                            <select [ngModel]="aiToneFor(draft)" (ngModelChange)="setAiTone(draft, $event)" name="ai-tone-{{ draft.id }}">
+                              <option value="NEUTRAL">Neutral</option>
+                              <option value="INFORMATIVE">Informative</option>
+                              <option value="CASUAL">Casual</option>
+                              <option value="ENERGETIC">Energetic</option>
+                            </select>
+                          </label>
+                          <button type="submit" [disabled]="aiGenerateBusy()[draft.id]">
+                            {{ aiGenerateBusy()[draft.id] ? 'Starting...' : 'Generate suggestion' }}
+                          </button>
+                        </form>
+                      } @else {
+                        <p class="content__muted">The draft must be Ready before generating an AI suggestion.</p>
+                      }
+                      @if (aiGenerateErrors()[draft.id]) {
+                        <p class="content__error">{{ aiGenerateErrors()[draft.id] }}</p>
+                      }
+
+                      @if (suggestionsFor(draft).length === 0) {
+                        <p class="content__muted">No AI suggestions yet.</p>
+                      } @else {
+                        <div class="publication-list">
+                          @for (suggestion of suggestionsFor(draft); track suggestion.id) {
+                            <div class="publication-card">
+                              <p class="content__muted"><em>AI suggestion &mdash; review before applying.</em></p>
+                              <div class="publication-card__header">
+                                <span [class]="'content__badge content__badge--' + suggestion.status.toLowerCase()">
+                                  {{ suggestionStatusLabel(suggestion.status) }}
+                                </span>
+                                <span class="content__muted">{{ suggestion.createdAt | date:'medium' }}</span>
+                                <span class="content__muted">{{ suggestion.language }} / {{ suggestion.tone }}</span>
+                                <span class="content__muted">{{ suggestion.provider }} ({{ suggestion.model }})</span>
+                                <span class="content__muted">Transcript used: {{ suggestion.transcriptUsed ? 'Yes' : 'No' }}</span>
+                              </div>
+                              @if (suggestion.status === 'READY' || suggestion.status === 'APPLIED') {
+                                @if (suggestion.hook) {
+                                  <p><strong>Hook:</strong> {{ suggestion.hook }}</p>
+                                }
+                                <p><strong>Caption:</strong> {{ suggestion.caption }}</p>
+                                @if (suggestion.hashtags.length > 0) {
+                                  <p class="content__muted">
+                                    @for (tag of suggestion.hashtags; track tag) {
+                                      <span>#{{ tag }} </span>
+                                    }
+                                  </p>
+                                }
+                                @if (suggestion.shortTitle) {
+                                  <p class="content__muted"><strong>Short title:</strong> {{ suggestion.shortTitle }}</p>
+                                }
+                              }
+                              @if (suggestion.stale && suggestion.status === 'READY') {
+                                <p class="content__error">Draft changed since this suggestion was generated. Regenerate to apply fresh copy.</p>
+                              }
+                              @if (suggestion.failureMessage) {
+                                <p class="content__error">{{ suggestion.failureCode }}: {{ suggestion.failureMessage }}</p>
+                              }
+                              @if (suggestion.status === 'READY') {
+                                <div class="asset-card__actions">
+                                  <button type="button" (click)="applySuggestion(draft, suggestion)" [disabled]="aiApplyBusy()[suggestion.id] || !canApplySuggestion(suggestion)">
+                                    {{ aiApplyBusy()[suggestion.id] ? 'Applying...' : 'Apply' }}
+                                  </button>
+                                  <button class="button-secondary" type="button" (click)="discardSuggestion(draft, suggestion)" [disabled]="aiDiscardBusy()[suggestion.id]">
+                                    {{ aiDiscardBusy()[suggestion.id] ? 'Discarding...' : 'Discard' }}
+                                  </button>
+                                </div>
+                              }
+                              @if (aiApplyErrors()[suggestion.id]) {
+                                <p class="content__error">{{ aiApplyErrors()[suggestion.id] }}</p>
+                              }
+                            </div>
+                          }
+                        </div>
+                      }
+                    </section>
+
+                    <section class="detail-panel">
                       <h3>Publish</h3>
                       @if (canPublishDraft(draft)) {
                         @if (publishableSocialAccounts().length === 0) {

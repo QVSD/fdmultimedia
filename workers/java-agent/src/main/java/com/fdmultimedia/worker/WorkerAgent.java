@@ -34,6 +34,16 @@ public final class WorkerAgent {
             System.err.println("Semantic highlight provider unavailable; TRANSCRIPT_SEMANTIC_V1 analyzer disabled");
         }
         AnalyzeHighlightsExecutor analyzeHighlightsExecutor = new AnalyzeHighlightsExecutor(highlightAnalyzers);
+        Map<String, ContentEnrichmentProvider> contentEnrichmentProviders = new LinkedHashMap<>();
+        contentEnrichmentProviders.put("DETERMINISTIC_TEST", new DeterministicSocialCopyProvider());
+        OllamaContentEnrichmentProvider ollamaContentProvider = ollamaContentEnrichmentProvider(config);
+        if (ollamaContentProvider != null) {
+            contentEnrichmentProviders.put("OLLAMA", ollamaContentProvider);
+            System.err.println("Content AI provider available: OLLAMA model " + config.contentAiModel() + " (plus always-on DETERMINISTIC_TEST)");
+        } else {
+            System.err.println("Content AI provider available: DETERMINISTIC_TEST only (OLLAMA not configured or unreachable)");
+        }
+        GenerateSocialCopyExecutor generateSocialCopyExecutor = new GenerateSocialCopyExecutor(contentEnrichmentProviders);
         boolean ffprobeAvailable = FfprobeSupport.isAvailable(config.ffprobePath());
         if (ffprobeAvailable) {
             System.err.println("FFprobe available at " + config.ffprobePath());
@@ -99,7 +109,7 @@ public final class WorkerAgent {
                 activeJobs,
                 supportedJobTypes,
                 supportedHighlightAnalyzers));
-        executor.submit(() -> jobLoop(client, machineIdentifier, config, systemTestExecutor, importMediaExecutor, inspectMediaExecutor, clipExecutor, analyzeHighlightsExecutor, transcribeMediaExecutor, publishMediaExecutor, supportedJobTypes, supportedHighlightAnalyzers, supportedPublishingProviders, activeJobs));
+        executor.submit(() -> jobLoop(client, machineIdentifier, config, systemTestExecutor, importMediaExecutor, inspectMediaExecutor, clipExecutor, analyzeHighlightsExecutor, transcribeMediaExecutor, publishMediaExecutor, generateSocialCopyExecutor, supportedJobTypes, supportedHighlightAnalyzers, supportedPublishingProviders, activeJobs));
         shutdown.await();
     }
 
@@ -139,6 +149,7 @@ public final class WorkerAgent {
             AnalyzeHighlightsExecutor analyzeHighlightsExecutor,
             TranscribeMediaExecutor transcribeMediaExecutor,
             PublishMediaExecutor publishMediaExecutor,
+            GenerateSocialCopyExecutor generateSocialCopyExecutor,
             List<String> supportedJobTypes,
             List<String> supportedHighlightAnalyzers,
             List<String> supportedPublishingProviders,
@@ -156,7 +167,7 @@ public final class WorkerAgent {
                 }
                 activeJobs.incrementAndGet();
                 try {
-                    executeClaimedJob(client, machineIdentifier, config.workerName(), systemTestExecutor, importMediaExecutor, inspectMediaExecutor, clipExecutor, analyzeHighlightsExecutor, transcribeMediaExecutor, publishMediaExecutor, job);
+                    executeClaimedJob(client, machineIdentifier, config.workerName(), systemTestExecutor, importMediaExecutor, inspectMediaExecutor, clipExecutor, analyzeHighlightsExecutor, transcribeMediaExecutor, publishMediaExecutor, generateSocialCopyExecutor, job);
                 } finally {
                     activeJobs.decrementAndGet();
                 }
@@ -178,6 +189,7 @@ public final class WorkerAgent {
             AnalyzeHighlightsExecutor analyzeHighlightsExecutor,
             TranscribeMediaExecutor transcribeMediaExecutor,
             PublishMediaExecutor publishMediaExecutor,
+            GenerateSocialCopyExecutor generateSocialCopyExecutor,
             ClaimedJob job) throws InterruptedException {
         try {
             client.started(job.jobId(), machineIdentifier);
@@ -195,6 +207,8 @@ public final class WorkerAgent {
                 executeTranscribeMediaJob(client, machineIdentifier, transcribeMediaExecutor, job);
             } else if ("PUBLISH_MEDIA".equals(job.type()) && publishMediaExecutor != null) {
                 executePublishMediaJob(client, machineIdentifier, publishMediaExecutor, job);
+            } else if ("GENERATE_SOCIAL_COPY".equals(job.type())) {
+                executeGenerateSocialCopyJob(client, machineIdentifier, generateSocialCopyExecutor, job);
             } else if ("SYSTEM_TEST".equals(job.type())) {
                 Map<String, Object> result = systemTestExecutor.execute(job, workerName);
                 client.complete(job.jobId(), machineIdentifier, result);
@@ -312,6 +326,27 @@ public final class WorkerAgent {
             reportHighlightFailure(client, machineIdentifier, job, ex.code(), ex.getMessage(), ex.terminal());
         } catch (Exception ex) {
             reportHighlightFailure(client, machineIdentifier, job, "ANALYZE_HIGHLIGHTS_FAILED", ex.getMessage(), false);
+        } finally {
+            running.set(false);
+            renewer.interrupt();
+        }
+    }
+
+    private static void executeGenerateSocialCopyJob(
+            WorkerAgentClient client,
+            String machineIdentifier,
+            GenerateSocialCopyExecutor generateSocialCopyExecutor,
+            ClaimedJob job) throws InterruptedException {
+        AtomicBoolean running = new AtomicBoolean(true);
+        Thread renewer = new Thread(() -> leaseRenewLoop(client, machineIdentifier, job, running), "fdm-job-lease-renewer");
+        renewer.setDaemon(true);
+        renewer.start();
+        try {
+            generateSocialCopyExecutor.execute(client, job, machineIdentifier);
+        } catch (ImportFailureException ex) {
+            reportSocialCopyFailure(client, machineIdentifier, job, ex.code(), ex.getMessage(), ex.terminal());
+        } catch (Exception ex) {
+            reportSocialCopyFailure(client, machineIdentifier, job, "GENERATE_SOCIAL_COPY_FAILED", ex.getMessage(), false);
         } finally {
             running.set(false);
             renewer.interrupt();
@@ -498,6 +533,21 @@ public final class WorkerAgent {
         }
     }
 
+    private static void reportSocialCopyFailure(
+            WorkerAgentClient client,
+            String machineIdentifier,
+            ClaimedJob job,
+            String code,
+            String message,
+            boolean terminal) {
+        try {
+            SocialCopyAuthorization authorization = client.authorizeSocialCopyGeneration(job.jobId(), machineIdentifier);
+            client.failSocialCopyGeneration(job.jobId(), machineIdentifier, authorization.suggestionId(), code, message, terminal);
+        } catch (Exception reportFailure) {
+            System.err.println("Worker failed to report content suggestion failure: " + reportFailure.getMessage());
+        }
+    }
+
     private static void reportPublishingFailure(
             WorkerAgentClient client,
             String machineIdentifier,
@@ -555,6 +605,9 @@ public final class WorkerAgent {
         types.add("SYSTEM_TEST");
         types.add("IMPORT_MEDIA");
         types.add("ANALYZE_HIGHLIGHTS");
+        // DETERMINISTIC_TEST content-enrichment needs no external service and
+        // is always available, exactly like DETERMINISTIC_V1 highlight analysis.
+        types.add("GENERATE_SOCIAL_COPY");
         if (ffprobeAvailable) {
             types.add("INSPECT_MEDIA");
         }
@@ -611,6 +664,17 @@ public final class WorkerAgent {
                 config.semanticHighlightModel(),
                 config.semanticHighlightTimeout());
         return analyzer.isAvailable() ? analyzer : null;
+    }
+
+    private static OllamaContentEnrichmentProvider ollamaContentEnrichmentProvider(WorkerAgentConfig config) {
+        if (!"OLLAMA".equalsIgnoreCase(config.contentAiRuntime())) {
+            return null;
+        }
+        OllamaContentEnrichmentProvider provider = new OllamaContentEnrichmentProvider(
+                config.contentAiEndpoint(),
+                config.contentAiModel(),
+                config.contentAiTimeout());
+        return provider.isAvailable() ? provider : null;
     }
 
     private static Duration backoff(Duration heartbeatInterval) {
