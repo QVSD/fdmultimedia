@@ -1,0 +1,195 @@
+<section class="personas">
+  <header>
+    <h1>Personas</h1>
+    <p class="personas__lead">
+      A Persona controls style and voice for AI-generated social copy. Generated facts still come from the
+      Draft's source context &mdash; a Persona can never override what is actually true about your media.
+    </p>
+  </header>
+
+  <button type="button" (click)="toggleCreateForm()">
+    {{ showCreateForm() ? 'Cancel' : 'Create Persona' }}
+  </button>
+
+  @if (showCreateForm()) {
+    <form class="personas__form" (ngSubmit)="createPersona()">
+      <label>
+        <span>Name ({{ createForm().name.length }}/{{ maxLengths.name }})</span>
+        <input type="text" [maxlength]="maxLengths.name" [ngModel]="createForm().name" (ngModelChange)="updateCreateField('name', $event)" name="create-name" required />
+      </label>
+      <label>
+        <span>Description ({{ createForm().description.length }}/{{ maxLengths.description }})</span>
+        <input type="text" [maxlength]="maxLengths.description" [ngModel]="createForm().description" (ngModelChange)="updateCreateField('description', $event)" name="create-description" />
+      </label>
+      <label>
+        <span>Default language</span>
+        <select [ngModel]="createForm().defaultLanguage" (ngModelChange)="updateCreateField('defaultLanguage', $event)" name="create-default-language">
+          <option value="AUTO">Auto</option>
+          <option value="ENGLISH">English</option>
+          <option value="ROMANIAN">Romanian</option>
+        </select>
+      </label>
+      <label>
+        <span>Default tone</span>
+        <select [ngModel]="createForm().defaultTone" (ngModelChange)="updateCreateField('defaultTone', $event)" name="create-default-tone">
+          <option value="NEUTRAL">Neutral</option>
+          <option value="INFORMATIVE">Informative</option>
+          <option value="CASUAL">Casual</option>
+          <option value="ENERGETIC">Energetic</option>
+        </select>
+      </label>
+      <label>
+        <span>Audience ({{ createForm().audience.length }}/{{ maxLengths.audience }})</span>
+        <input type="text" [maxlength]="maxLengths.audience" [ngModel]="createForm().audience" (ngModelChange)="updateCreateField('audience', $event)" name="create-audience" />
+      </label>
+      <label class="personas__field--wide">
+        <span>Voice description ({{ createForm().voiceDescription.length }}/{{ maxLengths.voiceDescription }})</span>
+        <textarea rows="2" [maxlength]="maxLengths.voiceDescription" [ngModel]="createForm().voiceDescription" (ngModelChange)="updateCreateField('voiceDescription', $event)" name="create-voice" required></textarea>
+      </label>
+      <label class="personas__field--wide">
+        <span>Style guidelines ({{ createForm().styleGuidelines.length }}/{{ maxLengths.styleGuidelines }})</span>
+        <textarea rows="2" [maxlength]="maxLengths.styleGuidelines" [ngModel]="createForm().styleGuidelines" (ngModelChange)="updateCreateField('styleGuidelines', $event)" name="create-style"></textarea>
+      </label>
+      <label class="personas__field--wide">
+        <span>Avoid ({{ createForm().avoidGuidelines.length }}/{{ maxLengths.avoidGuidelines }})</span>
+        <textarea rows="2" [maxlength]="maxLengths.avoidGuidelines" [ngModel]="createForm().avoidGuidelines" (ngModelChange)="updateCreateField('avoidGuidelines', $event)" name="create-avoid"></textarea>
+      </label>
+      <label class="personas__field--wide">
+        <span>Hashtag guidance ({{ createForm().hashtagGuidelines.length }}/{{ maxLengths.hashtagGuidelines }})</span>
+        <textarea rows="2" [maxlength]="maxLengths.hashtagGuidelines" [ngModel]="createForm().hashtagGuidelines" (ngModelChange)="updateCreateField('hashtagGuidelines', $event)" name="create-hashtags"></textarea>
+      </label>
+      <label class="personas__field--wide">
+        <span>Example copy ({{ createForm().exampleCopy.length }}/{{ maxLengths.exampleCopy }}) &mdash; style reference only, never copied as fact</span>
+        <textarea rows="2" [maxlength]="maxLengths.exampleCopy" [ngModel]="createForm().exampleCopy" (ngModelChange)="updateCreateField('exampleCopy', $event)" name="create-example"></textarea>
+      </label>
+      <button type="submit" [disabled]="createBusy()">{{ createBusy() ? 'Creating...' : 'Create' }}</button>
+      @if (createError()) {
+        <p class="personas__error">{{ createError() }}</p>
+      }
+    </form>
+  }
+
+  @if (loadState() === 'loading' && personas().length === 0) {
+    <p class="personas__state">Loading personas&hellip;</p>
+  } @else if (loadState() === 'error') {
+    <p class="personas__state personas__state--error">Could not load personas.</p>
+  } @else if (personas().length === 0) {
+    <p class="personas__muted">No personas yet. Create one to give AI-generated copy a consistent voice.</p>
+  } @else {
+    <div class="persona-list">
+      @for (persona of activePersonas(); track persona.id) {
+        <div class="persona-card">
+          @if (isEditing(persona)) {
+            <form class="personas__form" (ngSubmit)="saveEdits(persona)">
+              <label>
+                <span>Name ({{ editForm().name.length }}/{{ maxLengths.name }})</span>
+                <input type="text" [maxlength]="maxLengths.name" [ngModel]="editForm().name" (ngModelChange)="updateEditField('name', $event)" name="edit-name-{{ persona.id }}" required />
+              </label>
+              <label>
+                <span>Description</span>
+                <input type="text" [maxlength]="maxLengths.description" [ngModel]="editForm().description" (ngModelChange)="updateEditField('description', $event)" name="edit-description-{{ persona.id }}" />
+              </label>
+              <label>
+                <span>Default language</span>
+                <select [ngModel]="editForm().defaultLanguage" (ngModelChange)="updateEditField('defaultLanguage', $event)" name="edit-language-{{ persona.id }}">
+                  <option value="AUTO">Auto</option>
+                  <option value="ENGLISH">English</option>
+                  <option value="ROMANIAN">Romanian</option>
+                </select>
+              </label>
+              <label>
+                <span>Default tone</span>
+                <select [ngModel]="editForm().defaultTone" (ngModelChange)="updateEditField('defaultTone', $event)" name="edit-tone-{{ persona.id }}">
+                  <option value="NEUTRAL">Neutral</option>
+                  <option value="INFORMATIVE">Informative</option>
+                  <option value="CASUAL">Casual</option>
+                  <option value="ENERGETIC">Energetic</option>
+                </select>
+              </label>
+              <label>
+                <span>Audience</span>
+                <input type="text" [maxlength]="maxLengths.audience" [ngModel]="editForm().audience" (ngModelChange)="updateEditField('audience', $event)" name="edit-audience-{{ persona.id }}" />
+              </label>
+              <label class="personas__field--wide">
+                <span>Voice description ({{ editForm().voiceDescription.length }}/{{ maxLengths.voiceDescription }})</span>
+                <textarea rows="2" [maxlength]="maxLengths.voiceDescription" [ngModel]="editForm().voiceDescription" (ngModelChange)="updateEditField('voiceDescription', $event)" name="edit-voice-{{ persona.id }}" required></textarea>
+              </label>
+              <label class="personas__field--wide">
+                <span>Style guidelines</span>
+                <textarea rows="2" [maxlength]="maxLengths.styleGuidelines" [ngModel]="editForm().styleGuidelines" (ngModelChange)="updateEditField('styleGuidelines', $event)" name="edit-style-{{ persona.id }}"></textarea>
+              </label>
+              <label class="personas__field--wide">
+                <span>Avoid</span>
+                <textarea rows="2" [maxlength]="maxLengths.avoidGuidelines" [ngModel]="editForm().avoidGuidelines" (ngModelChange)="updateEditField('avoidGuidelines', $event)" name="edit-avoid-{{ persona.id }}"></textarea>
+              </label>
+              <label class="personas__field--wide">
+                <span>Hashtag guidance</span>
+                <textarea rows="2" [maxlength]="maxLengths.hashtagGuidelines" [ngModel]="editForm().hashtagGuidelines" (ngModelChange)="updateEditField('hashtagGuidelines', $event)" name="edit-hashtags-{{ persona.id }}"></textarea>
+              </label>
+              <label class="personas__field--wide">
+                <span>Example copy &mdash; style reference only, never copied as fact</span>
+                <textarea rows="2" [maxlength]="maxLengths.exampleCopy" [ngModel]="editForm().exampleCopy" (ngModelChange)="updateEditField('exampleCopy', $event)" name="edit-example-{{ persona.id }}"></textarea>
+              </label>
+              <div class="persona-card__actions">
+                <button type="submit" [disabled]="editBusy()[persona.id]">{{ editBusy()[persona.id] ? 'Saving...' : 'Save' }}</button>
+                <button class="button-secondary" type="button" (click)="cancelEditing()">Cancel</button>
+              </div>
+              @if (editErrors()[persona.id]) {
+                <p class="personas__error">{{ editErrors()[persona.id] }}</p>
+              }
+            </form>
+          } @else {
+            <div class="persona-card__summary">
+              <div class="persona-card__title">
+                <h2>{{ persona.name }}</h2>
+                @if (persona.description) {
+                  <p>{{ persona.description }}</p>
+                }
+              </div>
+              <div class="persona-card__meta">
+                <span class="personas__badge personas__badge--active">Active</span>
+                <span>{{ languageLabel(persona.defaultLanguage) }} / {{ toneLabel(persona.defaultTone) }}</span>
+                @if (persona.audience) {
+                  <span>Audience: {{ persona.audience }}</span>
+                }
+                <span>Updated {{ persona.updatedAt | date:'medium' }}</span>
+              </div>
+              <div class="persona-card__actions">
+                <button type="button" (click)="startEditing(persona)">Edit</button>
+                <button class="button-secondary" type="button" (click)="archive(persona)" [disabled]="archiveBusy()[persona.id]">
+                  {{ archiveBusy()[persona.id] ? 'Archiving...' : 'Archive' }}
+                </button>
+              </div>
+            </div>
+          }
+        </div>
+      }
+    </div>
+
+    @if (archivedPersonas().length > 0) {
+      <details class="personas__archived">
+        <summary>Archived personas ({{ archivedPersonas().length }})</summary>
+        <div class="persona-list">
+          @for (persona of archivedPersonas(); track persona.id) {
+            <div class="persona-card">
+              <div class="persona-card__summary">
+                <div class="persona-card__title">
+                  <h2>{{ persona.name }}</h2>
+                </div>
+                <div class="persona-card__meta">
+                  <span class="personas__badge personas__badge--archived">Archived</span>
+                  <span>{{ languageLabel(persona.defaultLanguage) }} / {{ toneLabel(persona.defaultTone) }}</span>
+                </div>
+                <div class="persona-card__actions">
+                  <button type="button" (click)="restore(persona)" [disabled]="archiveBusy()[persona.id]">
+                    {{ archiveBusy()[persona.id] ? 'Restoring...' : 'Restore' }}
+                  </button>
+                </div>
+              </div>
+            </div>
+          }
+        </div>
+      </details>
+    }
+  }
+</section>

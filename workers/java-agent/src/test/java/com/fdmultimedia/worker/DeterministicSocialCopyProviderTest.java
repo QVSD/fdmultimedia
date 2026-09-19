@@ -47,6 +47,35 @@ class DeterministicSocialCopyProviderTest {
         assertFalse(result.hook().toLowerCase().contains("gpt"));
     }
 
+    @Test
+    void weavesPersonaNameIntoHookAndCaptionWhenPromptCarriesAPersonaSection() throws Exception {
+        SocialCopyResult result = provider.generate(authorization(
+                "Source file: clip.mp4\n<<<EDITORIAL_PERSONA_START>>>\nPersona name: Tech Romania\nVoice: Direct.\n<<<EDITORIAL_PERSONA_END>>>\n"));
+
+        assertTrue(result.hook().contains("Tech Romania"));
+        assertTrue(result.caption().contains("Tech Romania"));
+    }
+
+    @Test
+    void omitsPersonaFlavorWhenPromptCarriesNoPersonaSection() throws Exception {
+        SocialCopyResult result = provider.generate(authorization("Source file: clip.mp4\n"));
+
+        assertFalse(result.hook().contains("voice)"));
+        assertFalse(result.caption().contains("styled as"));
+    }
+
+    @Test
+    void personaFlavoredOutputRemainsStableForTheSameAuthorization() throws Exception {
+        SocialCopyAuthorization authorization = authorization(
+                "Source file: clip.mp4\n<<<EDITORIAL_PERSONA_START>>>\nPersona name: Tech Romania\nVoice: Direct.\n<<<EDITORIAL_PERSONA_END>>>\n");
+
+        SocialCopyResult first = provider.generate(authorization);
+        SocialCopyResult second = provider.generate(authorization);
+
+        assertEquals(first.hook(), second.hook());
+        assertEquals(first.caption(), second.caption());
+    }
+
     private SocialCopyAuthorization authorization(String prompt) {
         return new SocialCopyAuthorization(
                 UUID.randomUUID(), UUID.randomUUID(), "DETERMINISTIC_TEST", "deterministic-v1", "SOCIAL_COPY_V1",

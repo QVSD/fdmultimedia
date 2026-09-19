@@ -15,6 +15,8 @@ import { ContentSourcesService } from '../../core/content-sources/content-source
 import { ContentSourceAssetSummary, ContentSourceSummary } from '../../core/content-sources/content-source.models';
 import { ContentSuggestionsService } from '../../core/content-suggestions/content-suggestions.service';
 import { ContentSuggestionSummary } from '../../core/content-suggestions/content-suggestion.models';
+import { PersonasService } from '../../core/personas/personas.service';
+import { PersonaSummary } from '../../core/personas/persona.models';
 import { Content } from './content';
 
 describe('Content', () => {
@@ -41,6 +43,7 @@ describe('Content', () => {
   let publishSchedulesService: Pick<PublishSchedulesService, 'list' | 'create' | 'cancel' | 'reschedule'>;
   let contentSourcesService: Pick<ContentSourcesService, 'list' | 'create' | 'pause' | 'resume' | 'listAssets' | 'addAsset' | 'removeAsset'>;
   let contentSuggestionsService: Pick<ContentSuggestionsService, 'listForDraft' | 'create' | 'apply' | 'discard'>;
+  let personasService: Pick<PersonasService, 'list'>;
 
   beforeEach(async () => {
     assetsService = {
@@ -97,6 +100,9 @@ describe('Content', () => {
       apply: vi.fn().mockReturnValue(of(suggestion('APPLIED'))),
       discard: vi.fn().mockReturnValue(of(suggestion('DISCARDED'))),
     };
+    personasService = {
+      list: vi.fn().mockReturnValue(of([])),
+    };
 
     await TestBed.configureTestingModule({
       imports: [Content],
@@ -108,6 +114,7 @@ describe('Content', () => {
         { provide: PublishSchedulesService, useValue: publishSchedulesService },
         { provide: ContentSourcesService, useValue: contentSourcesService },
         { provide: ContentSuggestionsService, useValue: contentSuggestionsService },
+        { provide: PersonasService, useValue: personasService },
       ],
     }).compileComponents();
 
@@ -778,8 +785,109 @@ describe('Content', () => {
 
     component['generateSuggestion'](readyDraft);
 
-    expect(contentSuggestionsService.create).toHaveBeenCalledWith(readyDraft.id, { language: 'ROMANIAN', tone: 'ENERGETIC' });
+    expect(contentSuggestionsService.create).toHaveBeenCalledWith(readyDraft.id, { language: 'ROMANIAN', tone: 'ENERGETIC', personaId: null });
     expect(component['suggestionsFor'](readyDraft)[0].status).toBe('READY');
+  });
+
+  it('generates with No Persona by default and sends personaId null', () => {
+    vi.mocked(contentDraftsService.list).mockReturnValue(of([draft('READY', 'READY')]));
+    vi.mocked(contentSuggestionsService.create).mockReturnValue(of(suggestion('PENDING')));
+    fixture = TestBed.createComponent(Content);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+    component['switchView']('drafts');
+    const readyDraft = component['drafts']()[0];
+
+    component['generateSuggestion'](readyDraft);
+
+    expect(contentSuggestionsService.create).toHaveBeenCalledWith(readyDraft.id, { language: 'AUTO', tone: 'NEUTRAL', personaId: null });
+  });
+
+  it('selecting a Persona pre-fills language/tone from its defaults and includes personaId in the Generate request', () => {
+    vi.mocked(personasService.list).mockReturnValue(of([persona()]));
+    vi.mocked(contentDraftsService.list).mockReturnValue(of([draft('READY', 'READY')]));
+    vi.mocked(contentSuggestionsService.create).mockReturnValue(of(suggestion('PENDING')));
+    fixture = TestBed.createComponent(Content);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+    component['switchView']('drafts');
+    const readyDraft = component['drafts']()[0];
+
+    component['setAiPersonaId'](readyDraft, 'persona-1');
+
+    expect(component['aiLanguageFor'](readyDraft)).toBe('ROMANIAN');
+    expect(component['aiToneFor'](readyDraft)).toBe('INFORMATIVE');
+
+    component['generateSuggestion'](readyDraft);
+
+    expect(contentSuggestionsService.create).toHaveBeenCalledWith(readyDraft.id, { language: 'ROMANIAN', tone: 'INFORMATIVE', personaId: 'persona-1' });
+  });
+
+  it('allows overriding language/tone manually after selecting a Persona without mutating the Persona', () => {
+    vi.mocked(personasService.list).mockReturnValue(of([persona()]));
+    vi.mocked(contentDraftsService.list).mockReturnValue(of([draft('READY', 'READY')]));
+    vi.mocked(contentSuggestionsService.create).mockReturnValue(of(suggestion('PENDING')));
+    fixture = TestBed.createComponent(Content);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+    component['switchView']('drafts');
+    const readyDraft = component['drafts']()[0];
+    component['setAiPersonaId'](readyDraft, 'persona-1');
+
+    component['setAiLanguage'](readyDraft, 'ENGLISH');
+    component['setAiTone'](readyDraft, 'CASUAL');
+    component['generateSuggestion'](readyDraft);
+
+    expect(contentSuggestionsService.create).toHaveBeenCalledWith(readyDraft.id, { language: 'ENGLISH', tone: 'CASUAL', personaId: 'persona-1' });
+    expect(component['personas']()[0].defaultLanguage).toBe('ROMANIAN');
+  });
+
+  it('excludes archived Personas from the selector', () => {
+    vi.mocked(personasService.list).mockReturnValue(of([persona(), persona({ id: 'persona-2', name: 'Archived One', status: 'ARCHIVED' })]));
+    fixture = TestBed.createComponent(Content);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+
+    const active = component['activePersonas']();
+
+    expect(active.map((p) => p.id)).toEqual(['persona-1']);
+  });
+
+  it('renders the snapshot Persona name on a suggestion card even if the live Persona has since been renamed', () => {
+    vi.mocked(personasService.list).mockReturnValue(of([persona({ name: 'Renamed Today' })]));
+    vi.mocked(contentDraftsService.list).mockReturnValue(of([draft('READY', 'READY')]));
+    vi.mocked(contentSuggestionsService.listForDraft).mockReturnValue(
+      of([{ ...suggestion('READY'), personaId: 'persona-1', personaName: 'Original Name At Generation' }]),
+    );
+    fixture = TestBed.createComponent(Content);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+    component['switchView']('drafts');
+    const readyDraft = component['drafts']()[0];
+
+    component['toggleDraft'](readyDraft);
+    fixture.detectChanges();
+
+    // The Persona selector legitimately shows the CURRENT live name (for future generations);
+    // only the suggestion card itself must render the frozen snapshot name from generation time.
+    const card = fixture.nativeElement.querySelector('.publication-card') as HTMLElement;
+    expect(card.textContent).toContain('Original Name At Generation');
+    expect(card.textContent).not.toContain('Renamed Today');
+  });
+
+  it('renders "Persona: None" for a suggestion generated without a Persona', () => {
+    vi.mocked(contentDraftsService.list).mockReturnValue(of([draft('READY', 'READY')]));
+    vi.mocked(contentSuggestionsService.listForDraft).mockReturnValue(of([suggestion('READY')]));
+    fixture = TestBed.createComponent(Content);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+    component['switchView']('drafts');
+    const readyDraft = component['drafts']()[0];
+
+    component['toggleDraft'](readyDraft);
+    fixture.detectChanges();
+
+    expect((fixture.nativeElement.textContent as string)).toContain('Persona: None');
   });
 
   it('surfaces a Generate failure without crashing', () => {
@@ -1145,6 +1253,8 @@ describe('Content', () => {
       promptVersion: 'SOCIAL_COPY_V1',
       language: 'AUTO',
       tone: 'NEUTRAL',
+      personaId: null,
+      personaName: null,
       hook: status === 'READY' || status === 'APPLIED' ? 'Big news!' : null,
       caption: status === 'READY' || status === 'APPLIED' ? 'This is the generated caption.' : null,
       hashtags: status === 'READY' || status === 'APPLIED' ? ['ai', 'tech'] : [],
@@ -1162,6 +1272,26 @@ describe('Content', () => {
       completedAt: status === 'READY' || status === 'APPLIED' || status === 'FAILED' ? '2026-09-19T08:00:05Z' : null,
       appliedAt: status === 'APPLIED' ? '2026-09-19T08:01:00Z' : null,
       appliedByUserId: status === 'APPLIED' ? 'user-1' : null,
+    };
+  }
+
+  function persona(overrides: Partial<PersonaSummary> = {}): PersonaSummary {
+    return {
+      id: 'persona-1',
+      name: 'Tech Romania',
+      description: null,
+      status: 'ACTIVE',
+      defaultLanguage: 'ROMANIAN',
+      defaultTone: 'INFORMATIVE',
+      audience: 'Founders',
+      voiceDescription: 'Direct and warm.',
+      styleGuidelines: null,
+      avoidGuidelines: null,
+      hashtagGuidelines: null,
+      exampleCopy: null,
+      createdAt: '2026-09-19T08:00:00Z',
+      updatedAt: '2026-09-19T08:00:00Z',
+      ...overrides,
     };
   }
 

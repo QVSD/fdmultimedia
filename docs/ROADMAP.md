@@ -1,6 +1,6 @@
 # Roadmap
 
-The repository is currently at Phase 12A. Completed phases are marked below;
+The repository is currently at Phase 12B. Completed phases are marked below;
 later phases are planned high-level direction and intentionally do not go into
 implementation detail before they are started.
 
@@ -210,12 +210,50 @@ implementation detail before they are started.
    The Content page gained an AI Content section per Draft with durable,
    polled suggestion history (not a spinner holding one request open),
    language/tone controls, and Apply/Discard/Regenerate actions. *(complete)*
-24. **FFmpeg processing** — richer automated video processing pipelines.
-25. **Additional platform integrations** — TikTok, YouTube, or other real
+24. **Persona & Brand Voice (Phase 12B)** — a workspace-scoped `Persona` is
+   reusable, structured editorial configuration (audience/voice/style/avoid/
+   hashtag-guidance/example-copy, each field explicitly bounded) a human may
+   optionally select when generating a `ContentSuggestion` — never a Robot,
+   an AI provider, a raw system prompt, a social account, or a Worker, and
+   never exposed as free-form prompt syntax to the user. `Persona` reuses
+   the exact Phase 12A `SuggestionLanguage`/`SuggestionTone` enums (no
+   parallel semantics) as its optional `defaultLanguage`/`defaultTone`;
+   generation precedence is explicit and backend-authoritative — an explicit
+   request value always wins, otherwise the selected Persona's default
+   applies, otherwise Phase 12A's own default (AUTO/NEUTRAL). Persona
+   selection is fully optional and additive: omitting it reproduces Phase
+   12A behavior exactly. The critical design property is the immutable
+   Persona *snapshot*: at generation time, the selected Persona's editorial
+   fields are copied once onto the `ContentSuggestion` itself (flat columns,
+   not a live reference) and the input fingerprint used for stale-Apply
+   detection is derived only from that frozen snapshot — so editing or
+   archiving a Persona can never retroactively change an existing
+   suggestion's meaning, its historical display, or cause a previously-valid
+   Apply to start failing; only an actual Draft edit still triggers
+   `SUGGESTION_STALE`. Persona-aware generation introduces prompt version
+   `SOCIAL_COPY_V2` (used uniformly, Persona or not) with a clearly
+   delimited, explicitly-untrusted `EDITORIAL_PERSONA` section that can
+   never override structured-output rules, safety rules, or the
+   source-grounding requirement — source context truth always wins over
+   Persona style, and Persona `exampleCopy` is explicitly marked
+   style-reference-only so the model cannot lift facts from it. An archived
+   Persona cannot be selected for new generation but never invalidates
+   suggestions already generated from it. Robots do not reference or use a
+   Persona in this phase (deliberately deferred, not dead configuration).
+   The Worker/Job/prompt-transport architecture from Phase 12A is completely
+   unchanged — a Persona reaches the Worker only as already-rendered text
+   inside the same opaque `promptText` channel. A first-class Personas page
+   (list/create/edit/archive/restore) and an extended Content page AI
+   section (Persona selector, defaults pre-fill, snapshot name shown on
+   every suggestion card even after a rename or archive) round out the
+   phase. *(complete)*
+25. **FFmpeg processing** — richer automated video processing pipelines.
+26. **Additional platform integrations** — TikTok, YouTube, or other real
    platforms behind the same provider-boundary pattern Instagram
    established in Phase 10B.
-26. **AI content personalization** — a Brand Voice/Persona engine and any
-   Robot-driven autonomous AI generation, building on the provider
-   abstraction and suggestion model established in Phase 12A but explicitly
-   out of scope for it.
-27. **Analytics / revenue** — performance analytics and revenue tracking.
+27. **AI content automation** — Robot-driven autonomous AI generation/
+   auto-apply, Persona-to-SocialAccount assignment, multi-persona blending,
+   AI-generated Personas, and engagement-driven voice tuning — all
+   explicitly out of scope through Phase 12B, building on the Persona and
+   suggestion model it established.
+28. **Analytics / revenue** — performance analytics and revenue tracking.

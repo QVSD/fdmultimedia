@@ -11,6 +11,10 @@ import com.fdmultimedia.api.jobs.JobService;
 import com.fdmultimedia.api.jobs.JobStatus;
 import com.fdmultimedia.api.jobs.JobSummary;
 import com.fdmultimedia.api.jobs.JobType;
+import com.fdmultimedia.api.personas.Persona;
+import com.fdmultimedia.api.personas.PersonaRepository;
+import com.fdmultimedia.api.personas.PersonaSnapshot;
+import com.fdmultimedia.api.personas.PersonaStatus;
 import com.fdmultimedia.api.workers.Worker;
 import com.fdmultimedia.api.workers.security.WorkerPrincipal;
 import com.fdmultimedia.api.workspaces.Workspace;
@@ -20,6 +24,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -42,6 +47,7 @@ public class ContentSuggestionService {
     private final SocialCopyPromptBuilder promptBuilder;
     private final ContentAiProperties properties;
     private final JobService jobService;
+    private final PersonaRepository personas;
     private final Clock clock;
 
     public ContentSuggestionService(
@@ -52,6 +58,7 @@ public class ContentSuggestionService {
             SocialCopyPromptBuilder promptBuilder,
             ContentAiProperties properties,
             JobService jobService,
+            PersonaRepository personas,
             Clock clock) {
         this.authService = authService;
         this.suggestions = suggestions;
@@ -60,6 +67,7 @@ public class ContentSuggestionService {
         this.promptBuilder = promptBuilder;
         this.properties = properties;
         this.jobService = jobService;
+        this.personas = personas;
         this.clock = clock;
     }
 
@@ -75,14 +83,21 @@ public class ContentSuggestionService {
         if (draft.getStatus() != ContentDraftStatus.READY) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Draft must be READY to generate a suggestion");
         }
+        Persona persona = resolvePersona(workspace, request.personaId());
+        SuggestionLanguage language = request.language() != null ? request.language()
+                : (persona != null ? persona.getDefaultLanguage() : SuggestionLanguage.AUTO);
+        SuggestionTone tone = request.tone() != null ? request.tone()
+                : (persona != null ? persona.getDefaultTone() : SuggestionTone.NEUTRAL);
+        PersonaSnapshot personaSnapshot = persona == null ? null : persona.toSnapshot();
+
         String provider = properties.getProvider();
         String model = properties.getModel();
         ContentEnrichmentContext context = contextBuilder.build(draft);
-        String prompt = promptBuilder.build(context, request.language(), request.tone());
+        String prompt = promptBuilder.build(context, language, tone, personaSnapshot);
         if (prompt.length() > properties.getMaxPromptCharacters()) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "AI_CONTEXT_UNAVAILABLE");
         }
-        String fingerprint = fingerprint(draft, request.language(), request.tone(), provider, model);
+        String fingerprint = fingerprint(draft, language, tone, provider, model, SocialCopyPromptBuilder.VERSION_V2, personaSnapshot);
 
         Instant now = Instant.now(clock);
         Map<String, Object> payload = new LinkedHashMap<>();
@@ -92,10 +107,23 @@ public class ContentSuggestionService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Generation job was not created"));
 
         ContentSuggestion suggestion = new ContentSuggestion(
-                workspace, draft, job, provider, model, SocialCopyPromptBuilder.VERSION,
-                request.language(), request.tone(), prompt, fingerprint,
-                context.transcriptUsed(), context.transcriptId(), membership.getUser(), now);
+                workspace, draft, job, provider, model, SocialCopyPromptBuilder.VERSION_V2,
+                language, tone, prompt, fingerprint,
+                context.transcriptUsed(), context.transcriptId(), personaSnapshot, membership.getUser(), now);
         return toSummary(suggestions.save(suggestion), draft);
+    }
+
+    /** Cross-workspace personaId resolves as not-found, never leaking whether the id exists elsewhere. Archived Personas cannot start a new generation. */
+    private Persona resolvePersona(Workspace workspace, UUID personaId) {
+        if (personaId == null) {
+            return null;
+        }
+        Persona persona = personas.findByWorkspaceAndId(workspace, personaId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Persona not found"));
+        if (persona.getStatus() != PersonaStatus.ACTIVE) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "PERSONA_ARCHIVED");
+        }
+        return persona;
     }
 
     @Transactional(readOnly = true)
@@ -137,7 +165,10 @@ public class ContentSuggestionService {
         }
         ContentDraft draft = drafts.findByWorkspaceAndIdForUpdate(workspace, suggestion.getContentDraft().getId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Content draft not found"));
-        String currentFingerprint = fingerprint(draft, suggestion.getLanguage(), suggestion.getTone(), suggestion.getProvider(), suggestion.getModel());
+        // Recomputed from the suggestion's OWN stored Persona snapshot, never by re-reading the live Persona —
+        // this is what makes a Persona edit/archive unable to ever cause a stale Apply on its own.
+        String currentFingerprint = fingerprint(draft, suggestion.getLanguage(), suggestion.getTone(), suggestion.getProvider(),
+                suggestion.getModel(), suggestion.getPromptVersion(), suggestion.getPersonaSnapshot());
         if (!currentFingerprint.equals(suggestion.getInputFingerprint())) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "SUGGESTION_STALE");
         }
@@ -376,10 +407,23 @@ public class ContentSuggestionService {
      * candidate identity, and the generation configuration. Never a mutable
      * bookkeeping timestamp like {@code updatedAt}, which also changes for
      * unrelated reasons (e.g. publishing state).
+     *
+     * <p>Branches on {@code promptVersion}: a V1 row's fingerprint is
+     * recomputed with the exact original (pre-Persona) formula — the first
+     * element used to be the hardcoded {@code SocialCopyPromptBuilder.VERSION}
+     * literal, which is byte-identical to passing a V1 row's own
+     * {@code promptVersion} here, so this generalization changes nothing for
+     * historical rows. Only V2 rows fold in the Persona snapshot — and only
+     * the snapshot already stored ON the suggestion itself, never a fresh
+     * lookup of the live Persona, which is what keeps a Persona edit/archive
+     * from ever retroactively changing a V1 or an already-generated V2
+     * suggestion's fingerprint.
      */
-    private String fingerprint(ContentDraft draft, SuggestionLanguage language, SuggestionTone tone, String provider, String model) {
-        String material = String.join("|",
-                SocialCopyPromptBuilder.VERSION,
+    private String fingerprint(
+            ContentDraft draft, SuggestionLanguage language, SuggestionTone tone, String provider, String model,
+            String promptVersion, PersonaSnapshot personaSnapshot) {
+        List<String> parts = new ArrayList<>(List.of(
+                promptVersion,
                 draft.getId().toString(),
                 safe(draft.getTitle()),
                 safe(draft.getCaption()),
@@ -388,8 +432,17 @@ public class ContentSuggestionService {
                 language.name(),
                 tone.name(),
                 provider,
-                model);
-        return sha256Hex(material);
+                model));
+        if (SocialCopyPromptBuilder.VERSION_V2.equals(promptVersion)) {
+            parts.add(personaSnapshot == null ? "" : personaSnapshot.personaId().toString());
+            parts.add(personaSnapshot == null ? "" : safe(personaSnapshot.audience()));
+            parts.add(personaSnapshot == null ? "" : safe(personaSnapshot.voiceDescription()));
+            parts.add(personaSnapshot == null ? "" : safe(personaSnapshot.styleGuidelines()));
+            parts.add(personaSnapshot == null ? "" : safe(personaSnapshot.avoidGuidelines()));
+            parts.add(personaSnapshot == null ? "" : safe(personaSnapshot.hashtagGuidelines()));
+            parts.add(personaSnapshot == null ? "" : safe(personaSnapshot.exampleCopy()));
+        }
+        return sha256Hex(String.join("|", parts));
     }
 
     private String safe(String value) {
@@ -423,7 +476,8 @@ public class ContentSuggestionService {
 
     private ContentSuggestionSummary toSummary(ContentSuggestion suggestion, ContentDraft draft) {
         boolean stale = suggestion.getStatus() == ContentSuggestionStatus.READY
-                && !fingerprint(draft, suggestion.getLanguage(), suggestion.getTone(), suggestion.getProvider(), suggestion.getModel())
+                && !fingerprint(draft, suggestion.getLanguage(), suggestion.getTone(), suggestion.getProvider(), suggestion.getModel(),
+                        suggestion.getPromptVersion(), suggestion.getPersonaSnapshot())
                         .equals(suggestion.getInputFingerprint());
         return new ContentSuggestionSummary(
                 suggestion.getId(),
@@ -436,6 +490,8 @@ public class ContentSuggestionService {
                 suggestion.getPromptVersion(),
                 suggestion.getLanguage(),
                 suggestion.getTone(),
+                suggestion.getPersonaId(),
+                suggestion.getPersonaName(),
                 suggestion.getHook(),
                 suggestion.getCaption(),
                 suggestion.getHashtags(),

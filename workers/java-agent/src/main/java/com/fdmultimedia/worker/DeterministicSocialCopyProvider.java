@@ -9,6 +9,13 @@ import java.util.List;
  * shipped by the backend (no network call, no external dependency), which
  * is what makes full E2E acceptance possible without any provider
  * credentials or a running Ollama instance.
+ *
+ * <p>Phase 12B: when the backend-built prompt carries an
+ * {@code Editorial persona} section (a "Persona name:" line), that name is
+ * visibly woven into the deterministic hook/caption — proof the Persona
+ * context was actually transmitted end-to-end through the opaque prompt
+ * channel, without making this provider "clever" (still fully stable/
+ * deterministic for the same authorization, still zero network calls).
  */
 final class DeterministicSocialCopyProvider implements ContentEnrichmentProvider {
 
@@ -16,10 +23,14 @@ final class DeterministicSocialCopyProvider implements ContentEnrichmentProvider
     public SocialCopyResult generate(SocialCopyAuthorization authorization) {
         long startNanos = System.nanoTime();
         String sourceFile = extractLineValue(authorization.prompt(), "Source file:");
-        String hook = bounded("New clip worth a look" + (sourceFile != null ? ": " + sourceFile : "."), authorization.maxHookLength());
+        String personaName = extractLineValue(authorization.prompt(), "Persona name:");
+        String hook = bounded("New clip worth a look" + (sourceFile != null ? ": " + sourceFile : ".")
+                        + (personaName != null ? " (" + personaName + " voice)" : ""),
+                authorization.maxHookLength());
         String caption = bounded(
                 "Deterministic test caption for draft " + authorization.contentDraftId()
-                        + " (" + authorization.tone().toLowerCase() + ", " + authorization.language().toLowerCase() + ").",
+                        + " (" + authorization.tone().toLowerCase() + ", " + authorization.language().toLowerCase() + ")"
+                        + (personaName != null ? ", styled as " + personaName : "") + ".",
                 authorization.maxCaptionLength());
         List<String> hashtags = List.of("shorts", "contentcreator", authorization.tone().toLowerCase())
                 .stream()

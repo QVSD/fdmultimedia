@@ -17,6 +17,8 @@ import { ContentSourcesService } from '../../core/content-sources/content-source
 import { ContentSourceAssetSummary, ContentSourceSummary } from '../../core/content-sources/content-source.models';
 import { ContentSuggestionsService } from '../../core/content-suggestions/content-suggestions.service';
 import { ContentSuggestionSummary, SuggestionLanguage, SuggestionTone } from '../../core/content-suggestions/content-suggestion.models';
+import { PersonasService } from '../../core/personas/personas.service';
+import { PersonaSummary } from '../../core/personas/persona.models';
 
 type LoadState = 'loading' | 'ready' | 'error';
 
@@ -77,6 +79,8 @@ export class Content implements OnInit, OnDestroy {
   protected readonly aiSuggestions = signal<Record<string, ContentSuggestionSummary[]>>({});
   protected readonly aiLanguage = signal<Record<string, SuggestionLanguage>>({});
   protected readonly aiTone = signal<Record<string, SuggestionTone>>({});
+  protected readonly aiPersonaId = signal<Record<string, string>>({});
+  protected readonly personas = signal<PersonaSummary[]>([]);
   protected readonly aiGenerateBusy = signal<Record<string, boolean>>({});
   protected readonly aiGenerateErrors = signal<Record<string, string | null>>({});
   protected readonly aiApplyBusy = signal<Record<string, boolean>>({});
@@ -127,6 +131,7 @@ export class Content implements OnInit, OnDestroy {
     private readonly publishSchedulesService: PublishSchedulesService,
     private readonly contentSourcesService: ContentSourcesService,
     private readonly contentSuggestionsService: ContentSuggestionsService,
+    private readonly personasService: PersonasService,
   ) {}
 
   ngOnInit(): void {
@@ -134,6 +139,11 @@ export class Content implements OnInit, OnDestroy {
       .list()
       .pipe(catchError(() => EMPTY))
       .subscribe((accounts) => this.socialAccounts.set(accounts));
+
+    this.personasService
+      .list()
+      .pipe(catchError(() => EMPTY))
+      .subscribe((personas) => this.personas.set(personas));
 
     this.subscription = interval(5000)
       .pipe(
@@ -1213,11 +1223,30 @@ export class Content implements OnInit, OnDestroy {
     this.aiTone.update((items) => ({ ...items, [draft.id]: value }));
   }
 
+  protected activePersonas(): PersonaSummary[] {
+    return this.personas().filter((persona) => persona.status === 'ACTIVE');
+  }
+
+  protected aiPersonaIdFor(draft: ContentDraftSummary): string {
+    return this.aiPersonaId()[draft.id] ?? '';
+  }
+
+  /** Selecting a Persona pre-fills language/tone from its defaults — a one-time convenience the human may still override before Generate. */
+  protected setAiPersonaId(draft: ContentDraftSummary, value: string): void {
+    this.aiPersonaId.update((items) => ({ ...items, [draft.id]: value }));
+    const persona = this.personas().find((candidate) => candidate.id === value);
+    if (persona) {
+      this.aiLanguage.update((items) => ({ ...items, [draft.id]: persona.defaultLanguage }));
+      this.aiTone.update((items) => ({ ...items, [draft.id]: persona.defaultTone }));
+    }
+  }
+
   protected generateSuggestion(draft: ContentDraftSummary): void {
     this.aiGenerateErrors.update((errors) => ({ ...errors, [draft.id]: null }));
     this.aiGenerateBusy.update((busy) => ({ ...busy, [draft.id]: true }));
+    const personaId = this.aiPersonaIdFor(draft) || null;
     this.contentSuggestionsService
-      .create(draft.id, { language: this.aiLanguageFor(draft), tone: this.aiToneFor(draft) })
+      .create(draft.id, { language: this.aiLanguageFor(draft), tone: this.aiToneFor(draft), personaId })
       .pipe(finalize(() => this.aiGenerateBusy.update((busy) => ({ ...busy, [draft.id]: false }))))
       .subscribe({
         next: (suggestion) => {

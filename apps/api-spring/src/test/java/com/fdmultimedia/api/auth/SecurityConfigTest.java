@@ -110,6 +110,12 @@ class SecurityConfigTest {
     }
 
     @Test
+    void personasApiRejectsUnauthenticatedUsers() throws Exception {
+        mockMvc.perform(get("/api/personas"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
     void publicMediaEndpointIsReachableWithoutAuthenticationBecauseMetaMustFetchIt() throws Exception {
         mockMvc.perform(get("/api/public-media/some-token"))
                 .andExpect(status().isNoContent());

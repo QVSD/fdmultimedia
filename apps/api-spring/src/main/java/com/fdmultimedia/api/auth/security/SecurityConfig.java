@@ -57,6 +57,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/robot-approvals/**").hasRole("USER")
                         .requestMatchers("/api/content-sources/**").hasRole("USER")
                         .requestMatchers("/api/content-suggestions/**").hasRole("USER")
+                        .requestMatchers("/api/personas/**").hasRole("USER")
                         .anyRequest().authenticated())
                 .exceptionHandling(errors -> errors
                         .authenticationEntryPoint((request, response, exception) ->

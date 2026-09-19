@@ -117,12 +117,22 @@ Robot-agnostic building block; `robots` depends on it, never the reverse.
 `ContentDraft`, always reviewed and applied by a human) was added in
 Phase 12A — it depends on `contentdrafts` and `jobs`, and deliberately has
 no dependency on `robots` and no reverse dependency from `robots` either;
-Robots do not generate suggestions in this phase. `analytics` and `revenue`
-remain placeholders. The package layout under `com.fdmultimedia.api`
-(`auth`, `users`, `workspaces`, `accounts`, `robots`, `contentsources`,
-`assets`, `jobs`, `workers`, `publishing`, `contentdrafts`,
-`publishschedules`, `contentsuggestions`, `analytics`, `revenue`, `shared`)
-is where new domain logic should land. See [ARCHITECTURE.md](ARCHITECTURE.md)
+Robots do not generate suggestions in this phase. `personas` (reusable,
+workspace-scoped editorial identity a human may optionally attach to a
+generation request) was added in Phase 12B — it has no dependency on
+`contentdrafts`, `jobs`, or `robots` (a Persona is pure, reusable
+configuration a caller reads or snapshots, never a Job/Robot participant),
+and `contentsuggestions` depends on it for Persona resolution and
+snapshotting. The one deliberate exception to the usual one-directional
+package convention: `personas` imports `SuggestionLanguage`/
+`SuggestionTone` from `contentsuggestions` to reuse them rather than fork a
+parallel enum — see `personas/package-info.java` for the full rationale.
+`analytics` and `revenue` remain placeholders. The package layout under
+`com.fdmultimedia.api` (`auth`, `users`, `workspaces`, `accounts`, `robots`,
+`contentsources`, `assets`, `jobs`, `workers`, `publishing`,
+`contentdrafts`, `publishschedules`, `contentsuggestions`, `personas`,
+`analytics`, `revenue`, `shared`) is where new domain logic should land.
+See [ARCHITECTURE.md](ARCHITECTURE.md)
 for what each package is for.
 
 ## Testing Instagram publishing locally
@@ -249,6 +259,35 @@ backend's configured provider (e.g. `OLLAMA`) is not registered on the
 Worker (e.g. the Worker never set `CONTENT_AI_RUNTIME`) — the Job fails
 immediately with the safe, terminal `AI_PROVIDER_UNAVAILABLE` code and the
 suggestion moves straight to `FAILED` with no partial output.
+
+## Testing Personas locally
+
+Create a Persona (`POST /api/personas`), minimally `{"name": "Tech Romania",
+"voiceDescription": "Direct, informed and energetic."}` — every other field
+is optional. Generate a suggestion referencing it with `POST
+/api/content-drafts/{draftId}/suggestions`,
+`{"personaId": "<id>"}` and no `language`/`tone`: the resolved values in the
+response come from the Persona's own `defaultLanguage`/`defaultTone`
+(`AUTO`/`NEUTRAL` if the Persona didn't set them either). Pass an explicit
+`language`/`tone` alongside `personaId` to confirm the request value always
+wins over the Persona default. With `DETERMINISTIC_TEST`, the resulting
+`hook`/`caption` visibly include the Persona's name (e.g. `"... (Tech
+Romania voice)"`) — a quick way to confirm the Persona actually reached the
+Worker without needing a real LLM.
+
+To see the snapshot/staleness distinction concretely: generate suggestion A
+with a Persona, `PATCH` that same Persona's `voiceDescription`, generate
+suggestion B with the same `personaId` — A and B will have different
+`promptVersion`-scoped fingerprints and different underlying snapshots
+(visible directly in Postgres via `SELECT persona_voice_description FROM
+content_suggestions WHERE id = ...`), but `POST
+/api/content-suggestions/{A}/apply` still succeeds as long as the Draft
+itself hasn't changed — a Persona edit alone never produces
+`SUGGESTION_STALE`. Only a Draft title/caption edit
+(`PATCH /api/content-drafts/{id}`) does that. `POST
+/api/personas/{id}/archive` immediately blocks that `personaId` from new
+generation (`409 PERSONA_ARCHIVED`) but never invalidates suggestions
+already generated from it — `POST /api/personas/{id}/restore` reverses it.
 
 ## Database migrations
 

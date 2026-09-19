@@ -265,6 +265,19 @@ persisting anything as `READY`; invalid output is rejected as a distinct
 `AI_OUTPUT_REJECTED` terminal failure, separate from a transient provider
 failure that retries through the normal Job lease/retry path.
 
+Phase 12B (Persona/Brand Voice) required no changes here at all: an
+optional editorial Persona a human attaches to a generation request already
+arrives fully rendered inside the same opaque `prompt` string described
+above, delimited by its own `<<<EDITORIAL_PERSONA_START/END>>>` markers —
+the worker still never parses, builds, or needs to understand prompt
+structure. `DeterministicSocialCopyProvider` is the one place that reads a
+little further into that opaque text: it looks for an optional `Persona
+name: ...` line (the same simple line-extraction it already used for
+`Source file: ...`) and weaves that name into its deterministic hook/
+caption when present, purely as visible proof a Persona actually reached
+the worker end-to-end — it still makes no network call and stays fully
+deterministic for the same authorization.
+
 `PUBLISH_MEDIA` for the `TEST` platform is always advertised; it requires no
 external tool and no configuration, backed by the deterministic
 `TestPublishingProvider`. `PublishMediaExecutor` branches on

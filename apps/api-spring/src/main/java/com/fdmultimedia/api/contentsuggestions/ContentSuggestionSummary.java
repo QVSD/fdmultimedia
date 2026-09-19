@@ -16,6 +16,8 @@ public record ContentSuggestionSummary(
         String promptVersion,
         SuggestionLanguage language,
         SuggestionTone tone,
+        UUID personaId,
+        String personaName,
         String hook,
         String caption,
         List<String> hashtags,

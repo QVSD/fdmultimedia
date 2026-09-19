@@ -342,6 +342,15 @@
                       @if (canGenerateSuggestion(draft)) {
                         <form class="content__publish-form" (ngSubmit)="generateSuggestion(draft)">
                           <label>
+                            <span>Persona</span>
+                            <select [ngModel]="aiPersonaIdFor(draft)" (ngModelChange)="setAiPersonaId(draft, $event)" name="ai-persona-{{ draft.id }}">
+                              <option value="">No Persona</option>
+                              @for (persona of activePersonas(); track persona.id) {
+                                <option [value]="persona.id">{{ persona.name }}</option>
+                              }
+                            </select>
+                          </label>
+                          <label>
                             <span>Language</span>
                             <select [ngModel]="aiLanguageFor(draft)" (ngModelChange)="setAiLanguage(draft, $event)" name="ai-language-{{ draft.id }}">
                               <option value="AUTO">Auto</option>
@@ -384,6 +393,7 @@
                                 <span class="content__muted">{{ suggestion.language }} / {{ suggestion.tone }}</span>
                                 <span class="content__muted">{{ suggestion.provider }} ({{ suggestion.model }})</span>
                                 <span class="content__muted">Transcript used: {{ suggestion.transcriptUsed ? 'Yes' : 'No' }}</span>
+                                <span class="content__muted">Persona: {{ suggestion.personaName ?? 'None' }}</span>
                               </div>
                               @if (suggestion.status === 'READY' || suggestion.status === 'APPLIED') {
                                 @if (suggestion.hook) {

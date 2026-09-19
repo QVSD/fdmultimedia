@@ -2,6 +2,7 @@ package com.fdmultimedia.api.contentsuggestions;
 
 import com.fdmultimedia.api.contentdrafts.ContentDraft;
 import com.fdmultimedia.api.jobs.Job;
+import com.fdmultimedia.api.personas.PersonaSnapshot;
 import com.fdmultimedia.api.users.AppUser;
 import com.fdmultimedia.api.workspaces.Workspace;
 import jakarta.persistence.CollectionTable;
@@ -99,6 +100,35 @@ public class ContentSuggestion {
     @Column(name = "input_fingerprint", nullable = false)
     private String inputFingerprint;
 
+    /**
+     * Immutable Persona snapshot fields (Phase 12B), copied once at
+     * generation time from {@link PersonaSnapshot} — never re-read from the
+     * live {@code Persona} row. All null when no Persona was selected.
+     */
+    @Column(name = "persona_id")
+    private UUID personaId;
+
+    @Column(name = "persona_name")
+    private String personaName;
+
+    @Column(name = "persona_audience")
+    private String personaAudience;
+
+    @Column(name = "persona_voice_description")
+    private String personaVoiceDescription;
+
+    @Column(name = "persona_style_guidelines")
+    private String personaStyleGuidelines;
+
+    @Column(name = "persona_avoid_guidelines")
+    private String personaAvoidGuidelines;
+
+    @Column(name = "persona_hashtag_guidelines")
+    private String personaHashtagGuidelines;
+
+    @Column(name = "persona_example_copy")
+    private String personaExampleCopy;
+
     @Column(name = "transcript_used", nullable = false)
     private boolean transcriptUsed;
 
@@ -142,6 +172,7 @@ public class ContentSuggestion {
     protected ContentSuggestion() {
     }
 
+    /** Backward-compatible overload (no Persona) — delegates below with a null snapshot. */
     public ContentSuggestion(
             Workspace workspace,
             ContentDraft contentDraft,
@@ -155,6 +186,26 @@ public class ContentSuggestion {
             String inputFingerprint,
             boolean transcriptUsed,
             UUID transcriptId,
+            AppUser createdByUser,
+            Instant now) {
+        this(workspace, contentDraft, generationJob, provider, model, promptVersion, language, tone, promptText,
+                inputFingerprint, transcriptUsed, transcriptId, null, createdByUser, now);
+    }
+
+    public ContentSuggestion(
+            Workspace workspace,
+            ContentDraft contentDraft,
+            Job generationJob,
+            String provider,
+            String model,
+            String promptVersion,
+            SuggestionLanguage language,
+            SuggestionTone tone,
+            String promptText,
+            String inputFingerprint,
+            boolean transcriptUsed,
+            UUID transcriptId,
+            PersonaSnapshot personaSnapshot,
             AppUser createdByUser,
             Instant now) {
         this.id = UUID.randomUUID();
@@ -173,6 +224,16 @@ public class ContentSuggestion {
         this.inputFingerprint = inputFingerprint;
         this.transcriptUsed = transcriptUsed;
         this.transcriptId = transcriptId;
+        if (personaSnapshot != null) {
+            this.personaId = personaSnapshot.personaId();
+            this.personaName = personaSnapshot.personaName();
+            this.personaAudience = personaSnapshot.audience();
+            this.personaVoiceDescription = personaSnapshot.voiceDescription();
+            this.personaStyleGuidelines = personaSnapshot.styleGuidelines();
+            this.personaAvoidGuidelines = personaSnapshot.avoidGuidelines();
+            this.personaHashtagGuidelines = personaSnapshot.hashtagGuidelines();
+            this.personaExampleCopy = personaSnapshot.exampleCopy();
+        }
         this.createdByUser = createdByUser;
         this.createdAt = now;
     }
@@ -251,7 +312,18 @@ public class ContentSuggestion {
         return value == null || value.isBlank() ? null : value.trim();
     }
 
+    /** Reconstructed from this suggestion's own stored columns only — never re-reads the live Persona row. Null when no Persona was selected. */
+    public PersonaSnapshot getPersonaSnapshot() {
+        if (personaId == null) {
+            return null;
+        }
+        return new PersonaSnapshot(personaId, personaName, personaAudience, personaVoiceDescription,
+                personaStyleGuidelines, personaAvoidGuidelines, personaHashtagGuidelines, personaExampleCopy);
+    }
+
     public UUID getId() { return id; }
+    public UUID getPersonaId() { return personaId; }
+    public String getPersonaName() { return personaName; }
     public Workspace getWorkspace() { return workspace; }
     public ContentDraft getContentDraft() { return contentDraft; }
     public UUID getRobotRunId() { return robotRunId; }

@@ -24,6 +24,9 @@ import com.fdmultimedia.api.jobs.JobService;
 import com.fdmultimedia.api.jobs.JobStatus;
 import com.fdmultimedia.api.jobs.JobSummary;
 import com.fdmultimedia.api.jobs.JobType;
+import com.fdmultimedia.api.personas.Persona;
+import com.fdmultimedia.api.personas.PersonaRepository;
+import com.fdmultimedia.api.personas.PersonaSnapshot;
 import com.fdmultimedia.api.transcripts.MediaTranscriptRepository;
 import com.fdmultimedia.api.transcripts.TranscriptSegmentRepository;
 import com.fdmultimedia.api.users.AppUser;
@@ -61,8 +64,10 @@ class ContentSuggestionServiceTest {
     private final ContentEnrichmentContextBuilder contextBuilder = new ContentEnrichmentContextBuilder(transcripts, transcriptSegments, properties);
     private final SocialCopyPromptBuilder promptBuilder = new SocialCopyPromptBuilder();
     private final JobService jobService = mock(JobService.class);
+    private final PersonaRepository personaRepository = mock(PersonaRepository.class);
     private final ContentSuggestionService service = new ContentSuggestionService(
-            authService, suggestions, drafts, contextBuilder, promptBuilder, properties, jobService, Clock.fixed(NOW, ZoneOffset.UTC));
+            authService, suggestions, drafts, contextBuilder, promptBuilder, properties, jobService, personaRepository,
+            Clock.fixed(NOW, ZoneOffset.UTC));
 
     private Workspace workspace;
     private AppUser owner;
@@ -126,7 +131,7 @@ class ContentSuggestionServiceTest {
         assertThat(summary.language()).isEqualTo(SuggestionLanguage.ENGLISH);
         assertThat(summary.tone()).isEqualTo(SuggestionTone.CASUAL);
         assertThat(summary.provider()).isEqualTo("DETERMINISTIC_TEST");
-        assertThat(summary.promptVersion()).isEqualTo(SocialCopyPromptBuilder.VERSION);
+        assertThat(summary.promptVersion()).isEqualTo(SocialCopyPromptBuilder.VERSION_V2);
         assertThat(summary.transcriptUsed()).isFalse();
     }
 
@@ -424,6 +429,191 @@ class ContentSuggestionServiceTest {
                 .isEqualTo(HttpStatus.NOT_FOUND);
     }
 
+    // ---- persona: create/precedence/isolation ----
+
+    @Test
+    void createsSuggestionWithPersonaSnapshotAndResolvesPersonaDefaultsWhenRequestOmitsThem() {
+        Persona persona = persona("Tech Romania", SuggestionLanguage.ROMANIAN, SuggestionTone.INFORMATIVE, "Founders", "Direct and warm.");
+        when(drafts.findByWorkspaceAndId(workspace, draft.getId())).thenReturn(Optional.of(draft));
+        when(personaRepository.findByWorkspaceAndId(workspace, persona.getId())).thenReturn(Optional.of(persona));
+        when(jobService.createForWorkspace(any(), any())).thenReturn(jobSummary(generationJob));
+        when(jobService.getJobEntityForWorkspace(workspace, generationJob.getId())).thenReturn(Optional.of(generationJob));
+
+        ContentSuggestionSummary summary = service.create(user, draft.getId(), new CreateContentSuggestionRequest(null, null, persona.getId()));
+
+        assertThat(summary.language()).isEqualTo(SuggestionLanguage.ROMANIAN);
+        assertThat(summary.tone()).isEqualTo(SuggestionTone.INFORMATIVE);
+        assertThat(summary.personaId()).isEqualTo(persona.getId());
+        assertThat(summary.personaName()).isEqualTo("Tech Romania");
+        assertThat(summary.promptVersion()).isEqualTo(SocialCopyPromptBuilder.VERSION_V2);
+    }
+
+    @Test
+    void explicitRequestLanguageAndToneOverridePersonaDefaults() {
+        Persona persona = persona("Tech Romania", SuggestionLanguage.ROMANIAN, SuggestionTone.INFORMATIVE, "Founders", "Direct and warm.");
+        when(drafts.findByWorkspaceAndId(workspace, draft.getId())).thenReturn(Optional.of(draft));
+        when(personaRepository.findByWorkspaceAndId(workspace, persona.getId())).thenReturn(Optional.of(persona));
+        when(jobService.createForWorkspace(any(), any())).thenReturn(jobSummary(generationJob));
+        when(jobService.getJobEntityForWorkspace(workspace, generationJob.getId())).thenReturn(Optional.of(generationJob));
+
+        ContentSuggestionSummary summary = service.create(
+                user, draft.getId(), new CreateContentSuggestionRequest(SuggestionLanguage.ENGLISH, SuggestionTone.CASUAL, persona.getId()));
+
+        assertThat(summary.language()).isEqualTo(SuggestionLanguage.ENGLISH);
+        assertThat(summary.tone()).isEqualTo(SuggestionTone.CASUAL);
+    }
+
+    @Test
+    void noPersonaFallsBackToPhase12ADefaultsWhenRequestOmitsLanguageAndTone() {
+        when(drafts.findByWorkspaceAndId(workspace, draft.getId())).thenReturn(Optional.of(draft));
+        when(jobService.createForWorkspace(any(), any())).thenReturn(jobSummary(generationJob));
+        when(jobService.getJobEntityForWorkspace(workspace, generationJob.getId())).thenReturn(Optional.of(generationJob));
+
+        ContentSuggestionSummary summary = service.create(user, draft.getId(), new CreateContentSuggestionRequest(null, null, null));
+
+        assertThat(summary.language()).isEqualTo(SuggestionLanguage.AUTO);
+        assertThat(summary.tone()).isEqualTo(SuggestionTone.NEUTRAL);
+        assertThat(summary.personaId()).isNull();
+        assertThat(summary.personaName()).isNull();
+        verify(personaRepository, never()).findByWorkspaceAndId(any(), any());
+    }
+
+    @Test
+    void noPersonaGenerationRemainsFullyPhase12ACompatible() {
+        when(drafts.findByWorkspaceAndId(workspace, draft.getId())).thenReturn(Optional.of(draft));
+        when(jobService.createForWorkspace(any(), any())).thenReturn(jobSummary(generationJob));
+        when(jobService.getJobEntityForWorkspace(workspace, generationJob.getId())).thenReturn(Optional.of(generationJob));
+
+        ContentSuggestionSummary summary = service.create(user, draft.getId(), new CreateContentSuggestionRequest(SuggestionLanguage.ENGLISH, SuggestionTone.CASUAL));
+
+        assertThat(summary.status()).isEqualTo(ContentSuggestionStatus.PENDING);
+        assertThat(summary.personaId()).isNull();
+    }
+
+    @Test
+    void rejectsGenerationWithArchivedPersona() {
+        Persona persona = persona("Archived Voice", SuggestionLanguage.AUTO, SuggestionTone.NEUTRAL, null, "Voice.");
+        persona.archive(NOW);
+        when(drafts.findByWorkspaceAndId(workspace, draft.getId())).thenReturn(Optional.of(draft));
+        when(personaRepository.findByWorkspaceAndId(workspace, persona.getId())).thenReturn(Optional.of(persona));
+
+        assertThatThrownBy(() -> service.create(user, draft.getId(), new CreateContentSuggestionRequest(null, null, persona.getId())))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting("reason")
+                .isEqualTo("PERSONA_ARCHIVED");
+        verify(jobService, never()).createForWorkspace(any(), any());
+    }
+
+    @Test
+    void rejectsGenerationWithPersonaFromAnotherWorkspaceWithoutLeakingDetails() {
+        UUID otherPersonaId = UUID.randomUUID();
+        when(drafts.findByWorkspaceAndId(workspace, draft.getId())).thenReturn(Optional.of(draft));
+        when(personaRepository.findByWorkspaceAndId(workspace, otherPersonaId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.create(user, draft.getId(), new CreateContentSuggestionRequest(null, null, otherPersonaId)))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting("statusCode")
+                .isEqualTo(HttpStatus.NOT_FOUND);
+        verify(jobService, never()).createForWorkspace(any(), any());
+    }
+
+    // ---- persona: snapshot / historical integrity / fingerprint ----
+
+    @Test
+    void personaSnapshotSurvivesLaterPersonaEditsUnchanged() {
+        Persona persona = persona("Tech Romania", SuggestionLanguage.AUTO, SuggestionTone.NEUTRAL, "Founders", "Direct and warm.");
+        ContentSuggestion suggestion = readySuggestionWithPersona(persona.toSnapshot());
+
+        // Persona is edited after generation — the suggestion's own stored snapshot must not change.
+        persona.update("Tech Romania", null, SuggestionLanguage.AUTO, SuggestionTone.NEUTRAL, "Founders",
+                "Completely different voice now.", null, null, null, null, NOW);
+
+        assertThat(suggestion.getPersonaSnapshot().voiceDescription()).isEqualTo("Direct and warm.");
+        assertThat(suggestion.getPersonaSnapshot().personaName()).isEqualTo("Tech Romania");
+    }
+
+    @Test
+    void fingerprintDiffersWhenPersonaConfigurationDiffers() {
+        PersonaSnapshot personaA = new PersonaSnapshot(UUID.randomUUID(), "Persona A", null, "Voice A", null, null, null, null);
+        PersonaSnapshot personaB = new PersonaSnapshot(UUID.randomUUID(), "Persona B", null, "Voice B", null, null, null, null);
+
+        String fingerprintA = fingerprintForV2(draft, personaA);
+        String fingerprintB = fingerprintForV2(draft, personaB);
+
+        assertThat(fingerprintA).isNotEqualTo(fingerprintB);
+    }
+
+    @Test
+    void fingerprintForV1RowsIsUnaffectedByPersonaGeneralization() {
+        // A V1 row never had a Persona; its fingerprint formula must stay byte-identical to the original Phase 12A algorithm.
+        assertThat(fingerprintForV1(draft)).isEqualTo(fingerprintFor(draft));
+    }
+
+    @Test
+    void applySucceedsUsingOnlyTheSuggestionsOwnPersonaSnapshotNeverTheLivePersonaRepository() {
+        Persona persona = persona("Tech Romania", SuggestionLanguage.AUTO, SuggestionTone.NEUTRAL, "Founders", "Direct and warm.");
+        ContentSuggestion suggestion = readySuggestionWithPersona(persona.toSnapshot());
+        when(suggestions.findByWorkspaceAndIdForUpdate(workspace, suggestion.getId())).thenReturn(Optional.of(suggestion));
+        when(drafts.findByWorkspaceAndIdForUpdate(workspace, draft.getId())).thenReturn(Optional.of(draft));
+
+        ContentSuggestionSummary summary = service.apply(user, suggestion.getId());
+
+        assertThat(summary.status()).isEqualTo(ContentSuggestionStatus.APPLIED);
+        verify(personaRepository, never()).findByWorkspaceAndId(any(), any());
+        verify(personaRepository, never()).findByWorkspaceAndIdForUpdate(any(), any());
+    }
+
+    @Test
+    void archivingPersonaAfterGenerationDoesNotMakeAnUnchangedDraftSuggestionStale() {
+        Persona persona = persona("Tech Romania", SuggestionLanguage.AUTO, SuggestionTone.NEUTRAL, "Founders", "Direct and warm.");
+        PersonaSnapshot snapshot = persona.toSnapshot();
+        persona.archive(NOW);
+        ContentSuggestion suggestion = readySuggestionWithPersona(snapshot);
+        when(suggestions.findByWorkspaceAndIdForUpdate(workspace, suggestion.getId())).thenReturn(Optional.of(suggestion));
+        when(drafts.findByWorkspaceAndIdForUpdate(workspace, draft.getId())).thenReturn(Optional.of(draft));
+
+        ContentSuggestionSummary summary = service.apply(user, suggestion.getId());
+
+        assertThat(summary.status()).isEqualTo(ContentSuggestionStatus.APPLIED);
+    }
+
+    @Test
+    void draftEditStillCausesStaleApplyWhenPersonaSelected() {
+        Persona persona = persona("Tech Romania", SuggestionLanguage.AUTO, SuggestionTone.NEUTRAL, "Founders", "Direct and warm.");
+        ContentSuggestion suggestion = readySuggestionWithPersona(persona.toSnapshot());
+        when(suggestions.findByWorkspaceAndIdForUpdate(workspace, suggestion.getId())).thenReturn(Optional.of(suggestion));
+        draft.updateEditableFields(draft.getTitle(), "A human changed this caption.", NOW);
+        when(drafts.findByWorkspaceAndIdForUpdate(workspace, draft.getId())).thenReturn(Optional.of(draft));
+
+        assertThatThrownBy(() -> service.apply(user, suggestion.getId()))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting("reason")
+                .isEqualTo("SUGGESTION_STALE");
+    }
+
+    @Test
+    void regenerateWithSamePersonaIdUsesTheCurrentLivePersonaConfiguration() {
+        Persona persona = persona("Tech Romania", SuggestionLanguage.AUTO, SuggestionTone.NEUTRAL, "Founders", "Voice version 1.");
+        when(drafts.findByWorkspaceAndId(workspace, draft.getId())).thenReturn(Optional.of(draft));
+        when(personaRepository.findByWorkspaceAndId(workspace, persona.getId())).thenReturn(Optional.of(persona));
+        when(jobService.createForWorkspace(any(), any())).thenReturn(jobSummary(generationJob));
+        when(jobService.getJobEntityForWorkspace(workspace, generationJob.getId())).thenReturn(Optional.of(generationJob));
+        ContentSuggestionSummary first = service.create(user, draft.getId(), new CreateContentSuggestionRequest(null, null, persona.getId()));
+
+        // The SAME Persona row is edited in place between the two generations — exactly what PersonaService.update() does in production.
+        persona.update("Tech Romania", null, SuggestionLanguage.AUTO, SuggestionTone.NEUTRAL, "Founders", "Voice version 2.", null, null, null, null, NOW);
+        Job secondJob = new Job(workspace, JobType.GENERATE_SOCIAL_COPY, Map.of("draftId", draft.getId().toString()), 3, NOW);
+        when(jobService.createForWorkspace(any(), any())).thenReturn(jobSummary(secondJob));
+        when(jobService.getJobEntityForWorkspace(workspace, secondJob.getId())).thenReturn(Optional.of(secondJob));
+        ContentSuggestionSummary second = service.create(user, draft.getId(), new CreateContentSuggestionRequest(null, null, persona.getId()));
+
+        assertThat(first.id()).isNotEqualTo(second.id());
+        ArgumentCaptor<ContentSuggestion> saved = ArgumentCaptor.forClass(ContentSuggestion.class);
+        verify(suggestions, times(2)).save(saved.capture());
+        assertThat(saved.getAllValues().get(0).getPersonaSnapshot().voiceDescription()).isEqualTo("Voice version 1.");
+        assertThat(saved.getAllValues().get(1).getPersonaSnapshot().voiceDescription()).isEqualTo("Voice version 2.");
+    }
+
     // ---- helpers ----
 
     private void assertOutputRejected(WorkerContentSuggestionCompletionRequest partialRequest) {
@@ -481,18 +671,58 @@ class ContentSuggestionServiceTest {
 
     /** Mirrors ContentSuggestionService's own private fingerprint algorithm so tests can construct an already-matching suggestion. */
     private String fingerprintFor(ContentDraft draft) {
+        return sha256(String.join("|",
+                SocialCopyPromptBuilder.VERSION,
+                draft.getId().toString(),
+                draft.getTitle() == null ? "" : draft.getTitle(),
+                draft.getCaption() == null ? "" : draft.getCaption(),
+                draft.getSourceAsset().getId().toString(),
+                draft.getSourceHighlightCandidate() == null ? "" : draft.getSourceHighlightCandidate().getId().toString(),
+                SuggestionLanguage.AUTO.name(),
+                SuggestionTone.NEUTRAL.name(),
+                "DETERMINISTIC_TEST",
+                "deterministic-v1"));
+    }
+
+    /** Same as {@link #fingerprintFor(ContentDraft)}, spelled out explicitly for the V1-generalization regression test. */
+    private String fingerprintForV1(ContentDraft draft) {
+        return sha256(String.join("|",
+                SocialCopyPromptBuilder.VERSION,
+                draft.getId().toString(),
+                draft.getTitle() == null ? "" : draft.getTitle(),
+                draft.getCaption() == null ? "" : draft.getCaption(),
+                draft.getSourceAsset().getId().toString(),
+                draft.getSourceHighlightCandidate() == null ? "" : draft.getSourceHighlightCandidate().getId().toString(),
+                SuggestionLanguage.AUTO.name(),
+                SuggestionTone.NEUTRAL.name(),
+                "DETERMINISTIC_TEST",
+                "deterministic-v1"));
+    }
+
+    /** Mirrors the V2 branch of ContentSuggestionService's fingerprint algorithm (adds the Persona snapshot fields). */
+    private String fingerprintForV2(ContentDraft draft, PersonaSnapshot persona) {
+        return sha256(String.join("|",
+                SocialCopyPromptBuilder.VERSION_V2,
+                draft.getId().toString(),
+                draft.getTitle() == null ? "" : draft.getTitle(),
+                draft.getCaption() == null ? "" : draft.getCaption(),
+                draft.getSourceAsset().getId().toString(),
+                draft.getSourceHighlightCandidate() == null ? "" : draft.getSourceHighlightCandidate().getId().toString(),
+                SuggestionLanguage.AUTO.name(),
+                SuggestionTone.NEUTRAL.name(),
+                "DETERMINISTIC_TEST",
+                "deterministic-v1",
+                persona == null ? "" : persona.personaId().toString(),
+                persona == null || persona.audience() == null ? "" : persona.audience(),
+                persona == null || persona.voiceDescription() == null ? "" : persona.voiceDescription(),
+                persona == null || persona.styleGuidelines() == null ? "" : persona.styleGuidelines(),
+                persona == null || persona.avoidGuidelines() == null ? "" : persona.avoidGuidelines(),
+                persona == null || persona.hashtagGuidelines() == null ? "" : persona.hashtagGuidelines(),
+                persona == null || persona.exampleCopy() == null ? "" : persona.exampleCopy()));
+    }
+
+    private String sha256(String material) {
         try {
-            String material = String.join("|",
-                    SocialCopyPromptBuilder.VERSION,
-                    draft.getId().toString(),
-                    draft.getTitle() == null ? "" : draft.getTitle(),
-                    draft.getCaption() == null ? "" : draft.getCaption(),
-                    draft.getSourceAsset().getId().toString(),
-                    draft.getSourceHighlightCandidate() == null ? "" : draft.getSourceHighlightCandidate().getId().toString(),
-                    SuggestionLanguage.AUTO.name(),
-                    SuggestionTone.NEUTRAL.name(),
-                    "DETERMINISTIC_TEST",
-                    "deterministic-v1");
             java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256");
             byte[] hash = digest.digest(material.getBytes(java.nio.charset.StandardCharsets.UTF_8));
             StringBuilder hex = new StringBuilder();
@@ -503,6 +733,22 @@ class ContentSuggestionServiceTest {
         } catch (Exception ex) {
             throw new RuntimeException(ex);
         }
+    }
+
+    private Persona persona(String name, SuggestionLanguage language, SuggestionTone tone, String audience, String voiceDescription) {
+        return new Persona(workspace, name, null, language, tone, audience, voiceDescription, null, null, null, null, owner, NOW);
+    }
+
+    private ContentSuggestion readySuggestionWithPersona(PersonaSnapshot personaSnapshot) {
+        Job job = new Job(workspace, JobType.GENERATE_SOCIAL_COPY, Map.of("draftId", draft.getId().toString()), 3, NOW);
+        String fingerprint = fingerprintForV2(draft, personaSnapshot);
+        ContentSuggestion suggestion = new ContentSuggestion(
+                workspace, draft, job, "DETERMINISTIC_TEST", "deterministic-v1", SocialCopyPromptBuilder.VERSION_V2,
+                SuggestionLanguage.AUTO, SuggestionTone.NEUTRAL, "prompt text", fingerprint, false, null,
+                personaSnapshot, owner, NOW);
+        suggestion.markGenerating(NOW);
+        suggestion.markReady("hook", "caption", List.of("tag"), null, null, null, null, null, NOW);
+        return suggestion;
     }
 
     private ContentDraft draftReadyFromExistingAsset() {

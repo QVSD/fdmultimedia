@@ -14,6 +14,8 @@ export interface ContentSuggestionSummary {
   promptVersion: string;
   language: SuggestionLanguage;
   tone: SuggestionTone;
+  personaId: string | null;
+  personaName: string | null;
   hook: string | null;
   caption: string | null;
   hashtags: string[];
@@ -34,6 +36,7 @@ export interface ContentSuggestionSummary {
 }
 
 export interface CreateContentSuggestionRequest {
-  language: SuggestionLanguage;
-  tone: SuggestionTone;
+  language: SuggestionLanguage | null;
+  tone: SuggestionTone | null;
+  personaId: string | null;
 }

@@ -5,9 +5,9 @@ social-media content workflows, video processing workers running across
 multiple laptops/cloud machines, scheduling, AI-assisted content creation,
 publishing, analytics, and revenue tracking.
 
-## Phase 12A scope
+## Phase 12B scope
 
-This repository is currently at **Phase 12A: AI content enrichment foundation**.
+This repository is currently at **Phase 12B: Persona & Brand Voice**.
 Phase 9A introduced current Worker telemetry and per-attempt execution metrics;
 Phase 9B introduced deterministic `TELEMETRY_AWARE_V1` selection; Phase 9C
 persisted successful claim decisions and exposed bounded workspace-scoped
@@ -72,7 +72,21 @@ generation — no domain code depends on a vendor SDK directly. A deterministic
 input fingerprint detects when a human has edited the Draft since
 generation, rejecting a stale Apply instead of silently overwriting the
 edit; regenerating always creates a new, independent suggestion, never
-overwriting history.
+overwriting history. Phase 12B adds `Persona`: reusable, workspace-scoped
+editorial configuration (audience/voice/style/avoid/hashtag-guidance/
+example-copy, each field explicitly bounded, never a raw prompt) a human
+may optionally attach to a generation request — never a Robot, provider, or
+social account. A generation request's resolved language/tone follow an
+explicit precedence (request value, then Persona default, then the Phase
+12A global default), and the selected Persona's editorial fields are copied
+once into an immutable snapshot stored directly on the resulting
+`ContentSuggestion`; later editing or archiving that Persona can never
+change an existing suggestion's history, its displayed name, or cause a
+previously-valid Apply to start failing — only an actual Draft edit still
+does that. Archiving a Persona only blocks it from *new* generation.
+Persona data reaches the Worker exactly the way the rest of the prompt
+already did in Phase 12A — as text inside the same opaque, frozen prompt —
+so no Worker/Job architecture changed at all.
 
 Claim decisions are written in the same transaction as assignment. Empty polls
 and capacity rejections are not persisted, preventing poll-noise growth. Decision
