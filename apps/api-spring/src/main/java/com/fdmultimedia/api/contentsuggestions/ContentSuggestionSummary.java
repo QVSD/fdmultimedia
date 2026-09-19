@@ -8,6 +8,7 @@ import java.util.UUID;
 public record ContentSuggestionSummary(
         UUID id,
         UUID contentDraftId,
+        ContentSuggestionOrigin origin,
         UUID robotRunId,
         ContentSuggestionType type,
         ContentSuggestionStatus status,

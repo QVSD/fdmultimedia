@@ -1,6 +1,7 @@
 import { DatePipe } from '@angular/common';
 import { Component, OnDestroy, OnInit, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { RouterLink } from '@angular/router';
 import { EMPTY, Subscription, catchError, finalize, interval, startWith, switchMap } from 'rxjs';
 
 import { AssetsService } from '../../core/assets/assets.service';
@@ -10,6 +11,7 @@ import { SocialAccountSummary } from '../../core/social-accounts/social-account.
 import { RobotsService } from '../../core/robots/robots.service';
 import { RobotApprovalsService } from '../../core/robots/robot-approvals.service';
 import {
+  RobotAiPolicy,
   RobotAutonomyMode,
   RobotCadenceType,
   RobotRunSummary,
@@ -20,12 +22,15 @@ import {
 } from '../../core/robots/robot.models';
 import { ContentSourcesService } from '../../core/content-sources/content-sources.service';
 import { ContentSourceSummary } from '../../core/content-sources/content-source.models';
+import { PersonasService } from '../../core/personas/personas.service';
+import { PersonaSummary } from '../../core/personas/persona.models';
+import { SuggestionLanguage, SuggestionTone } from '../../core/content-suggestions/content-suggestion.models';
 
 type LoadState = 'loading' | 'ready' | 'error';
 
 @Component({
   selector: 'app-robots',
-  imports: [DatePipe, FormsModule],
+  imports: [DatePipe, FormsModule, RouterLink],
   templateUrl: './robots.html',
   styleUrl: './robots.scss',
 })
@@ -41,6 +46,7 @@ export class Robots implements OnInit, OnDestroy {
   protected readonly eligibleAssets = signal<MediaAssetSummary[]>([]);
   protected readonly socialAccounts = signal<SocialAccountSummary[]>([]);
   protected readonly contentSources = signal<ContentSourceSummary[]>([]);
+  protected readonly personas = signal<PersonaSummary[]>([]);
 
   protected readonly expandedRobots = signal<Record<string, boolean>>({});
   protected readonly runNowBusy = signal<Record<string, boolean>>({});
@@ -60,6 +66,10 @@ export class Robots implements OnInit, OnDestroy {
   protected readonly createCadenceIntervalHours = signal(24);
   protected readonly createScheduleDelayMinutes = signal(60);
   protected readonly createMaxRunsPerDay = signal(1);
+  protected readonly createAiPolicy = signal<RobotAiPolicy>('NO_AI');
+  protected readonly createPersonaId = signal('');
+  protected readonly createAiLanguageOverride = signal<SuggestionLanguage | ''>('');
+  protected readonly createAiToneOverride = signal<SuggestionTone | ''>('');
   protected readonly createBusy = signal(false);
   protected readonly createError = signal<string | null>(null);
 
@@ -69,6 +79,7 @@ export class Robots implements OnInit, OnDestroy {
 
   private robotsSubscription?: Subscription;
   private approvalsSubscription?: Subscription;
+  private runsSubscription?: Subscription;
 
   constructor(
     private readonly robotsService: RobotsService,
@@ -76,6 +87,7 @@ export class Robots implements OnInit, OnDestroy {
     private readonly assetsService: AssetsService,
     private readonly socialAccountsService: SocialAccountsService,
     private readonly contentSourcesService: ContentSourcesService,
+    private readonly personasService: PersonasService,
   ) {}
 
   ngOnInit(): void {
@@ -93,6 +105,11 @@ export class Robots implements OnInit, OnDestroy {
       .list()
       .pipe(catchError(() => EMPTY))
       .subscribe((sources) => this.contentSources.set(sources));
+
+    this.personasService
+      .list()
+      .pipe(catchError(() => EMPTY))
+      .subscribe((personas) => this.personas.set(personas));
 
     this.robotsSubscription = interval(5000)
       .pipe(
@@ -128,15 +145,18 @@ export class Robots implements OnInit, OnDestroy {
         this.approvalsLoadState.set('ready');
       });
 
-    this.robotsService
-      .allRuns()
-      .pipe(catchError(() => EMPTY))
+    this.runsSubscription = interval(5000)
+      .pipe(
+        startWith(0),
+        switchMap(() => this.robotsService.allRuns().pipe(catchError(() => EMPTY))),
+      )
       .subscribe((runs) => this.runs.set(runs));
   }
 
   ngOnDestroy(): void {
     this.robotsSubscription?.unsubscribe();
     this.approvalsSubscription?.unsubscribe();
+    this.runsSubscription?.unsubscribe();
   }
 
   protected switchView(view: 'robots' | 'approvals'): void {
@@ -208,6 +228,27 @@ export class Robots implements OnInit, OnDestroy {
     return this.contentSources().filter((source) => source.status === 'ACTIVE');
   }
 
+  // ---- Phase 12C: AI enrichment policy ----
+
+  protected activePersonas(): PersonaSummary[] {
+    return this.personas().filter((persona) => persona.status === 'ACTIVE');
+  }
+
+  protected aiPolicyExplanation(policy: RobotAiPolicy): string {
+    switch (policy) {
+      case 'NO_AI':
+        return 'Prepare the Draft without AI copy.';
+      case 'GENERATE_FOR_REVIEW':
+        return 'Generate AI copy and wait for you to review/apply it.';
+      case 'GENERATE_AND_APPLY':
+        return 'Generate and apply AI copy automatically before the Robot continues.';
+    }
+  }
+
+  protected requiresAiConfig(policy: RobotAiPolicy): boolean {
+    return policy !== 'NO_AI';
+  }
+
   protected createRobot(): void {
     this.createError.set(null);
     const name = this.createName().trim();
@@ -229,6 +270,7 @@ export class Robots implements OnInit, OnDestroy {
       this.createError.set('Choose a target account for this autonomy mode.');
       return;
     }
+    const aiPolicy = this.createAiPolicy();
     this.createBusy.set(true);
     this.robotsService
       .create({
@@ -244,6 +286,10 @@ export class Robots implements OnInit, OnDestroy {
         cadenceIntervalHours: this.createCadenceType() === 'INTERVAL' ? this.createCadenceIntervalHours() : null,
         scheduleDelayMinutes: this.requiresDelay(mode) ? this.createScheduleDelayMinutes() : null,
         maxRunsPerDay: this.createMaxRunsPerDay(),
+        aiPolicy,
+        personaId: this.requiresAiConfig(aiPolicy) && this.createPersonaId() ? this.createPersonaId() : null,
+        aiLanguageOverride: this.requiresAiConfig(aiPolicy) && this.createAiLanguageOverride() ? this.createAiLanguageOverride() as SuggestionLanguage : null,
+        aiToneOverride: this.requiresAiConfig(aiPolicy) && this.createAiToneOverride() ? this.createAiToneOverride() as SuggestionTone : null,
       })
       .pipe(finalize(() => this.createBusy.set(false)))
       .subscribe({
@@ -293,11 +339,15 @@ export class Robots implements OnInit, OnDestroy {
   protected runStatusLabel(status: RobotRunSummary['status']): string {
     switch (status) {
       case 'RUNNING':
-        return 'Running';
+        return 'Preparing media';
       case 'WAITING_FOR_DRAFT':
         return 'Preparing draft';
+      case 'WAITING_FOR_AI':
+        return 'Generating AI';
+      case 'WAITING_FOR_AI_REVIEW':
+        return 'Waiting for AI review';
       case 'WAITING_FOR_REVIEW':
-        return 'Waiting for review';
+        return 'Waiting for publishing approval';
       case 'SUCCEEDED':
         return 'Succeeded';
       case 'FAILED':

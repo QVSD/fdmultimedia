@@ -15,6 +15,7 @@ import com.fdmultimedia.api.personas.Persona;
 import com.fdmultimedia.api.personas.PersonaRepository;
 import com.fdmultimedia.api.personas.PersonaSnapshot;
 import com.fdmultimedia.api.personas.PersonaStatus;
+import com.fdmultimedia.api.users.AppUser;
 import com.fdmultimedia.api.workers.Worker;
 import com.fdmultimedia.api.workers.security.WorkerPrincipal;
 import com.fdmultimedia.api.workspaces.Workspace;
@@ -34,6 +35,7 @@ import java.util.Set;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -75,18 +77,59 @@ public class ContentSuggestionService {
     public ContentSuggestionSummary create(AuthenticatedUser principal, UUID draftId, CreateContentSuggestionRequest request) {
         WorkspaceMembership membership = authService.currentMembershipFor(principal);
         Workspace workspace = membership.getWorkspace();
+        ContentDraft draft = drafts.findByWorkspaceAndId(workspace, draftId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Content draft not found"));
+        return generate(workspace, draft, request.personaId(), request.language(), request.tone(), null, membership.getUser());
+    }
+
+    /**
+     * The Robot-generation path (Phase 12C): identical validation/snapshot/
+     * Job-creation semantics as {@link #create}, reused rather than
+     * duplicated — the only differences are the caller (a resolved
+     * {@code Workspace}/{@code ContentDraft} instead of an
+     * {@code AuthenticatedUser}/draft id, since {@code RobotRunOrchestrator}
+     * is not itself an authenticated human request) and that the resulting
+     * suggestion is tagged {@code origin=ROBOT} with the given
+     * {@code robotRunId} via {@link ContentSuggestion#forRobot}. Must only
+     * ever be called by the orchestrator under that RobotRun's own row
+     * lock — this method itself does not attempt any Robot-level
+     * idempotency guard beyond the ordinary AI_DISABLED/not-READY/Persona
+     * checks; the "exactly one automatic suggestion per run" guarantee
+     * comes from the caller never invoking this twice for the same run
+     * (reinforced by the {@code content_suggestions_one_robot_suggestion_per_run}
+     * unique index as defense in depth).
+     *
+     * <p>Runs in its own transaction ({@code REQUIRES_NEW}), deliberately not
+     * joining the caller's RobotRun reconciliation transaction: the
+     * orchestrator (see {@code RobotRunOrchestrator.beginAiGeneration})
+     * catches a validation failure here (AI disabled, Persona archived, ...)
+     * and marks the RobotRun failed in the same call. If this ran in the
+     * ambient transaction instead, Spring would mark that shared transaction
+     * rollback-only on the thrown {@link org.springframework.web.server.ResponseStatusException},
+     * and the orchestrator's own state transition would then fail with
+     * {@code UnexpectedRollbackException} even though it never sees the
+     * exception itself.</p>
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public ContentSuggestionSummary createForRobot(
+            Workspace workspace, ContentDraft draft, UUID personaId,
+            SuggestionLanguage languageOverride, SuggestionTone toneOverride, UUID robotRunId, AppUser initiatingUser) {
+        return generate(workspace, draft, personaId, languageOverride, toneOverride, robotRunId, initiatingUser);
+    }
+
+    private ContentSuggestionSummary generate(
+            Workspace workspace, ContentDraft draft, UUID personaId,
+            SuggestionLanguage languageOverride, SuggestionTone toneOverride, UUID robotRunId, AppUser initiatingUser) {
         if (!properties.isEnabled()) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "AI_DISABLED");
         }
-        ContentDraft draft = drafts.findByWorkspaceAndId(workspace, draftId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Content draft not found"));
         if (draft.getStatus() != ContentDraftStatus.READY) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Draft must be READY to generate a suggestion");
         }
-        Persona persona = resolvePersona(workspace, request.personaId());
-        SuggestionLanguage language = request.language() != null ? request.language()
+        Persona persona = resolvePersona(workspace, personaId);
+        SuggestionLanguage language = languageOverride != null ? languageOverride
                 : (persona != null ? persona.getDefaultLanguage() : SuggestionLanguage.AUTO);
-        SuggestionTone tone = request.tone() != null ? request.tone()
+        SuggestionTone tone = toneOverride != null ? toneOverride
                 : (persona != null ? persona.getDefaultTone() : SuggestionTone.NEUTRAL);
         PersonaSnapshot personaSnapshot = persona == null ? null : persona.toSnapshot();
 
@@ -106,10 +149,15 @@ public class ContentSuggestionService {
         Job job = jobService.getJobEntityForWorkspace(workspace, jobSummary.id())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Generation job was not created"));
 
-        ContentSuggestion suggestion = new ContentSuggestion(
-                workspace, draft, job, provider, model, SocialCopyPromptBuilder.VERSION_V2,
-                language, tone, prompt, fingerprint,
-                context.transcriptUsed(), context.transcriptId(), personaSnapshot, membership.getUser(), now);
+        ContentSuggestion suggestion = robotRunId == null
+                ? new ContentSuggestion(
+                        workspace, draft, job, provider, model, SocialCopyPromptBuilder.VERSION_V2,
+                        language, tone, prompt, fingerprint,
+                        context.transcriptUsed(), context.transcriptId(), personaSnapshot, initiatingUser, now)
+                : ContentSuggestion.forRobot(
+                        workspace, draft, job, provider, model, SocialCopyPromptBuilder.VERSION_V2,
+                        language, tone, prompt, fingerprint,
+                        context.transcriptUsed(), context.transcriptId(), personaSnapshot, robotRunId, initiatingUser, now);
         return toSummary(suggestions.save(suggestion), draft);
     }
 
@@ -150,8 +198,17 @@ public class ContentSuggestionService {
      * mutating anything, so a Draft change and an Apply can never interleave
      * into an inconsistent state, and a double-click either applies once or
      * returns a clear conflict (already APPLIED) rather than reapplying.
+     *
+     * <p>Runs in its own transaction ({@code REQUIRES_NEW}) for the same
+     * reason as {@link #createForRobot}: {@code RobotRunOrchestrator} calls
+     * this from inside its own reconciliation transaction and catches
+     * SUGGESTION_STALE/SUGGESTION_ALREADY_APPLIED to fail or continue the
+     * RobotRun safely. Joining the ambient transaction would mark it
+     * rollback-only on that thrown exception and turn a handled, expected
+     * conflict into an unrelated {@code UnexpectedRollbackException} on the
+     * orchestrator's own commit.</p>
      */
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public ContentSuggestionSummary apply(AuthenticatedUser principal, UUID suggestionId) {
         WorkspaceMembership membership = authService.currentMembershipFor(principal);
         Workspace workspace = membership.getWorkspace();
@@ -482,6 +539,7 @@ public class ContentSuggestionService {
         return new ContentSuggestionSummary(
                 suggestion.getId(),
                 suggestion.getContentDraft().getId(),
+                suggestion.getOrigin(),
                 suggestion.getRobotRunId(),
                 suggestion.getType(),
                 suggestion.getStatus(),

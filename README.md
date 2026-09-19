@@ -5,9 +5,9 @@ social-media content workflows, video processing workers running across
 multiple laptops/cloud machines, scheduling, AI-assisted content creation,
 publishing, analytics, and revenue tracking.
 
-## Phase 12B scope
+## Phase 12C scope
 
-This repository is currently at **Phase 12B: Persona & Brand Voice**.
+This repository is currently at **Phase 12C: Robot AI Enrichment Policies**.
 Phase 9A introduced current Worker telemetry and per-attempt execution metrics;
 Phase 9B introduced deterministic `TELEMETRY_AWARE_V1` selection; Phase 9C
 persisted successful claim decisions and exposed bounded workspace-scoped
@@ -86,7 +86,28 @@ previously-valid Apply to start failing — only an actual Draft edit still
 does that. Archiving a Persona only blocks it from *new* generation.
 Persona data reaches the Worker exactly the way the rest of the prompt
 already did in Phase 12A — as text inside the same opaque, frozen prompt —
-so no Worker/Job architecture changed at all.
+so no Worker/Job architecture changed at all. Phase 12C connects Robots
+(11C/11D) to AI generation (12A/12B) for the first time, through a new
+`RobotAiPolicy` (`NO_AI`/`GENERATE_FOR_REVIEW`/`GENERATE_AND_APPLY`) kept
+strictly independent of the existing `RobotAutonomyMode` axis. `NO_AI`
+reproduces prior behavior exactly. `GENERATE_FOR_REVIEW` creates exactly
+one automatic `ContentSuggestion` and parks the `RobotRun` in a new
+`WAITING_FOR_AI_REVIEW` state — deliberately distinct from the pre-existing
+publishing-approval `WAITING_FOR_REVIEW` state — until a human Applies or
+Discards it, after which the Robot resumes unattended.
+`GENERATE_AND_APPLY` auto-applies through the exact same human Apply path
+(fingerprint/staleness checks included) before continuing. A Robot may
+optionally reference a Persona, validated `ACTIVE` at both configure time
+and generation time; `RobotRun` snapshots the AI policy and Persona
+*identity* at run-creation time so a mid-run Robot edit can never redirect
+an in-flight run. Every automatic suggestion carries an explicit
+`origin=ROBOT` and its originating `robotRunId` — no longer inferred from
+the Draft's own Robot provenance, a latent conflation this phase fixed.
+Reconciliation reuses Phase 11C's existing row-locked bounded poller
+unchanged, giving idempotent, multi-instance-safe progress (at most one
+automatic suggestion and one Job per run) with zero new locking code.
+`AUTO_SCHEDULE`'s real-provider gate (TEST only) is unaffected by AI
+policy.
 
 Claim decisions are written in the same transaction as assignment. Empty polls
 and capacity rejections are not persisted, preventing poll-noise growth. Decision

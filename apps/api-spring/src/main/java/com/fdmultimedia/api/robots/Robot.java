@@ -3,6 +3,9 @@ package com.fdmultimedia.api.robots;
 import com.fdmultimedia.api.accounts.SocialAccount;
 import com.fdmultimedia.api.assets.MediaAsset;
 import com.fdmultimedia.api.contentsources.ContentSource;
+import com.fdmultimedia.api.contentsuggestions.SuggestionLanguage;
+import com.fdmultimedia.api.contentsuggestions.SuggestionTone;
+import com.fdmultimedia.api.personas.Persona;
 import com.fdmultimedia.api.users.AppUser;
 import com.fdmultimedia.api.workspaces.Workspace;
 import jakarta.persistence.Column;
@@ -87,6 +90,22 @@ public class Robot {
     @Column(name = "max_runs_per_day", nullable = false)
     private int maxRunsPerDay;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "ai_policy", nullable = false)
+    private RobotAiPolicy aiPolicy;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "persona_id")
+    private Persona persona;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "ai_language_override")
+    private SuggestionLanguage aiLanguageOverride;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "ai_tone_override")
+    private SuggestionTone aiToneOverride;
+
     @Column(name = "next_run_at")
     private Instant nextRunAt;
 
@@ -106,7 +125,7 @@ public class Robot {
     protected Robot() {
     }
 
-    /** EXISTING_ASSET convenience constructor — Phase 11C shape, unchanged. */
+    /** EXISTING_ASSET convenience constructor — Phase 11C shape, unchanged. NO_AI/no Persona. */
     public Robot(
             Workspace workspace,
             String name,
@@ -124,6 +143,7 @@ public class Robot {
                 targetSocialAccount, cadenceType, cadenceIntervalHours, scheduleDelayMinutes, maxRunsPerDay, createdByUser, now);
     }
 
+    /** Phase 11D shape, unchanged — NO_AI/no Persona. */
     public Robot(
             Workspace workspace,
             String name,
@@ -138,6 +158,32 @@ public class Robot {
             Integer cadenceIntervalHours,
             Integer scheduleDelayMinutes,
             int maxRunsPerDay,
+            AppUser createdByUser,
+            Instant now) {
+        this(workspace, name, description, autonomyMode, sourcePolicy, sourceAsset, contentSource, selectionPolicy,
+                targetSocialAccount, cadenceType, cadenceIntervalHours, scheduleDelayMinutes, maxRunsPerDay,
+                RobotAiPolicy.NO_AI, null, null, null, createdByUser, now);
+    }
+
+    /** Phase 12C: full shape including the independent AI enrichment policy axis. */
+    public Robot(
+            Workspace workspace,
+            String name,
+            String description,
+            RobotAutonomyMode autonomyMode,
+            RobotSourcePolicy sourcePolicy,
+            MediaAsset sourceAsset,
+            ContentSource contentSource,
+            RobotSelectionPolicy selectionPolicy,
+            SocialAccount targetSocialAccount,
+            RobotCadenceType cadenceType,
+            Integer cadenceIntervalHours,
+            Integer scheduleDelayMinutes,
+            int maxRunsPerDay,
+            RobotAiPolicy aiPolicy,
+            Persona persona,
+            SuggestionLanguage aiLanguageOverride,
+            SuggestionTone aiToneOverride,
             AppUser createdByUser,
             Instant now) {
         this.id = UUID.randomUUID();
@@ -156,6 +202,10 @@ public class Robot {
         this.cadenceIntervalHours = cadenceIntervalHours;
         this.scheduleDelayMinutes = scheduleDelayMinutes;
         this.maxRunsPerDay = maxRunsPerDay;
+        this.aiPolicy = aiPolicy;
+        this.persona = persona;
+        this.aiLanguageOverride = aiLanguageOverride;
+        this.aiToneOverride = aiToneOverride;
         this.createdByUser = createdByUser;
         this.createdAt = now;
         this.updatedAt = now;
@@ -187,6 +237,10 @@ public class Robot {
             Integer cadenceIntervalHours,
             Integer scheduleDelayMinutes,
             int maxRunsPerDay,
+            RobotAiPolicy aiPolicy,
+            Persona persona,
+            SuggestionLanguage aiLanguageOverride,
+            SuggestionTone aiToneOverride,
             Instant now) {
         this.name = name;
         this.description = description;
@@ -194,6 +248,10 @@ public class Robot {
         this.targetSocialAccount = targetSocialAccount;
         this.maxRunsPerDay = maxRunsPerDay;
         this.scheduleDelayMinutes = scheduleDelayMinutes;
+        this.aiPolicy = aiPolicy;
+        this.persona = persona;
+        this.aiLanguageOverride = aiLanguageOverride;
+        this.aiToneOverride = aiToneOverride;
         boolean cadenceChanged = this.cadenceType != cadenceType
                 || !java.util.Objects.equals(this.cadenceIntervalHours, cadenceIntervalHours);
         this.cadenceType = cadenceType;
@@ -256,6 +314,10 @@ public class Robot {
     public Integer getCadenceIntervalHours() { return cadenceIntervalHours; }
     public Integer getScheduleDelayMinutes() { return scheduleDelayMinutes; }
     public int getMaxRunsPerDay() { return maxRunsPerDay; }
+    public RobotAiPolicy getAiPolicy() { return aiPolicy; }
+    public Persona getPersona() { return persona; }
+    public SuggestionLanguage getAiLanguageOverride() { return aiLanguageOverride; }
+    public SuggestionTone getAiToneOverride() { return aiToneOverride; }
     public Instant getNextRunAt() { return nextRunAt; }
     public Instant getLastRunAt() { return lastRunAt; }
     public AppUser getCreatedByUser() { return createdByUser; }

@@ -23,6 +23,15 @@ import com.fdmultimedia.api.contentdrafts.ContentDraftStatus;
 import com.fdmultimedia.api.contentdrafts.ContentDraftSummary;
 import com.fdmultimedia.api.contentdrafts.ContentDraftWorkflowStage;
 import com.fdmultimedia.api.contentsources.ContentSourceRepository;
+import com.fdmultimedia.api.contentsuggestions.ContentSuggestion;
+import com.fdmultimedia.api.contentsuggestions.ContentSuggestionRepository;
+import com.fdmultimedia.api.contentsuggestions.ContentSuggestionService;
+import com.fdmultimedia.api.contentsuggestions.ContentSuggestionStatus;
+import com.fdmultimedia.api.contentsuggestions.ContentSuggestionSummary;
+import com.fdmultimedia.api.contentsuggestions.ContentSuggestionType;
+import com.fdmultimedia.api.contentsuggestions.ContentSuggestionOrigin;
+import com.fdmultimedia.api.contentsuggestions.SuggestionLanguage;
+import com.fdmultimedia.api.contentsuggestions.SuggestionTone;
 import com.fdmultimedia.api.highlights.HighlightAnalysis;
 import com.fdmultimedia.api.highlights.HighlightAnalysisRepository;
 import com.fdmultimedia.api.highlights.HighlightAnalysisStatus;
@@ -33,6 +42,7 @@ import com.fdmultimedia.api.highlights.HighlightProperties;
 import com.fdmultimedia.api.highlights.HighlightService;
 import com.fdmultimedia.api.jobs.Job;
 import com.fdmultimedia.api.jobs.JobType;
+import com.fdmultimedia.api.personas.PersonaRepository;
 import com.fdmultimedia.api.publishing.PublicationStatus;
 import com.fdmultimedia.api.publishschedules.PublishScheduleService;
 import com.fdmultimedia.api.publishschedules.PublishScheduleStatus;
@@ -70,9 +80,13 @@ class RobotRunOrchestratorTest {
     private final RobotApprovalRepository approvals = mock(RobotApprovalRepository.class);
     private final PublishScheduleService publishScheduleService = mock(PublishScheduleService.class);
     private final ContentSourceRepository contentSources = mock(ContentSourceRepository.class);
+    private final ContentSuggestionService contentSuggestionService = mock(ContentSuggestionService.class);
+    private final ContentSuggestionRepository contentSuggestions = mock(ContentSuggestionRepository.class);
+    private final PersonaRepository personaRepository = mock(PersonaRepository.class);
     private final RobotRunOrchestrator orchestrator = new RobotRunOrchestrator(
             authService, robotRepository, runs, analyses, candidates, highlightService, highlightProperties,
-            contentDraftService, contentDrafts, approvals, publishScheduleService, contentSources, Clock.fixed(NOW, ZoneOffset.UTC));
+            contentDraftService, contentDrafts, approvals, publishScheduleService, contentSources,
+            contentSuggestionService, contentSuggestions, personaRepository, Clock.fixed(NOW, ZoneOffset.UTC));
 
     private Workspace workspace;
     private AppUser owner;
@@ -392,6 +406,407 @@ class RobotRunOrchestratorTest {
         RobotRunSummary summary = orchestrator.cancel(ownerPrincipal, run.getId());
 
         assertThat(summary.status()).isEqualTo(RobotRunStatus.CANCELLED);
+    }
+
+    // ---- Phase 12C: AI enrichment ----
+
+    @Test
+    void repeatedReconciliationCreatesExactlyOneSuggestionAndJob() {
+        Robot robot = aiRobot(RobotAutonomyMode.DRAFT_ONLY, RobotAiPolicy.GENERATE_FOR_REVIEW, null, null);
+        RobotRun run = waitingForDraftRun(robot);
+        ContentDraft draftEntity = mock(ContentDraft.class);
+        when(runs.findByIdForUpdateSkipLocked(run.getId())).thenReturn(Optional.of(run));
+        when(contentDraftService.getFor(any(), eq(run.getContentDraftId())))
+                .thenReturn(draftSummary(run.getContentDraftId(), ContentDraftStatus.READY, ContentDraftWorkflowStage.READY));
+        when(contentDrafts.findByWorkspaceAndId(workspace, run.getContentDraftId())).thenReturn(Optional.of(draftEntity));
+        UUID suggestionId = UUID.randomUUID();
+        when(contentSuggestionService.createForRobot(any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(suggestionSummary(suggestionId, ContentSuggestionStatus.PENDING));
+        ContentSuggestion pending = pendingRobotSuggestion(run.getId());
+        when(contentSuggestions.findById(suggestionId)).thenReturn(Optional.of(pending));
+
+        orchestrator.reconcileOne(run.getId());
+        orchestrator.reconcileOne(run.getId());
+        orchestrator.reconcileOne(run.getId());
+
+        verify(contentSuggestionService, times(1)).createForRobot(any(), any(), any(), any(), any(), any(), any());
+        assertThat(run.getContentSuggestionId()).isEqualTo(suggestionId);
+        assertThat(run.getStatus()).isEqualTo(RobotRunStatus.WAITING_FOR_AI);
+    }
+
+    @Test
+    void pendingAndGeneratingSuggestionsKeepRunWaitingWithoutDuplicateJobsOrPublishing() {
+        Robot robot = aiRobot(RobotAutonomyMode.DRAFT_ONLY, RobotAiPolicy.GENERATE_AND_APPLY, null, null);
+        RobotRun run = waitingForAiRun(robot);
+        ContentSuggestion generating = pendingRobotSuggestion(run.getId());
+        generating.markGenerating(NOW);
+        when(runs.findByIdForUpdateSkipLocked(run.getId())).thenReturn(Optional.of(run));
+        when(contentSuggestions.findById(run.getContentSuggestionId())).thenReturn(Optional.of(generating));
+
+        orchestrator.reconcileOne(run.getId());
+
+        assertThat(run.getStatus()).isEqualTo(RobotRunStatus.WAITING_FOR_AI);
+        verify(contentSuggestionService, never()).apply(any(), any());
+        verify(publishScheduleService, never()).create(any(), any(), any());
+        verify(approvals, never()).save(any());
+    }
+
+    @Test
+    void generateForReviewMovesToAiReviewAndDoesNotApplyOrScheduleUntilHumanApplies() {
+        Robot robot = aiRobot(RobotAutonomyMode.DRAFT_ONLY, RobotAiPolicy.GENERATE_FOR_REVIEW, null, null);
+        RobotRun run = waitingForAiRun(robot);
+        ContentSuggestion ready = readyRobotSuggestion(run.getId());
+        when(runs.findByIdForUpdateSkipLocked(run.getId())).thenReturn(Optional.of(run));
+        when(contentSuggestions.findById(run.getContentSuggestionId())).thenReturn(Optional.of(ready));
+
+        orchestrator.reconcileOne(run.getId());
+
+        assertThat(run.getStatus()).isEqualTo(RobotRunStatus.WAITING_FOR_AI_REVIEW);
+        verify(contentSuggestionService, never()).apply(any(), any());
+        verify(approvals, never()).save(any());
+        verify(publishScheduleService, never()).create(any(), any(), any());
+    }
+
+    @Test
+    void afterHumanAppliesGenerateForReviewSuggestionReconciliationContinuesToSucceeded() {
+        Robot robot = aiRobot(RobotAutonomyMode.DRAFT_ONLY, RobotAiPolicy.GENERATE_FOR_REVIEW, null, null);
+        RobotRun run = waitingForAiRun(robot);
+        run.markWaitingForAiReview(NOW);
+        ContentSuggestion applied = appliedRobotSuggestion(run.getId());
+        when(runs.findByIdForUpdateSkipLocked(run.getId())).thenReturn(Optional.of(run));
+        when(contentSuggestions.findById(run.getContentSuggestionId())).thenReturn(Optional.of(applied));
+        when(contentDraftService.getFor(any(), eq(run.getContentDraftId())))
+                .thenReturn(draftSummary(run.getContentDraftId(), ContentDraftStatus.READY, ContentDraftWorkflowStage.READY));
+
+        orchestrator.reconcileOne(run.getId());
+
+        assertThat(run.getStatus()).isEqualTo(RobotRunStatus.SUCCEEDED);
+    }
+
+    @Test
+    void doubleReviewGeneratesAiReviewFirstThenPublishingApprovalAfterApply() {
+        SocialAccount account = new SocialAccount(workspace, SocialPlatform.TEST, "TEST", owner, NOW);
+        Robot robot = aiRobot(RobotAutonomyMode.REVIEW_REQUIRED, RobotAiPolicy.GENERATE_FOR_REVIEW, account, 60);
+        RobotRun run = waitingForAiRun(robot);
+        ContentSuggestion ready = readyRobotSuggestion(run.getId());
+        when(runs.findByIdForUpdateSkipLocked(run.getId())).thenReturn(Optional.of(run));
+        when(contentSuggestions.findById(run.getContentSuggestionId())).thenReturn(Optional.of(ready));
+
+        orchestrator.reconcileOne(run.getId());
+
+        assertThat(run.getStatus()).isEqualTo(RobotRunStatus.WAITING_FOR_AI_REVIEW);
+        verify(approvals, never()).save(any());
+
+        // Human applies the AI suggestion out of band; the next reconciliation pass notices APPLIED and continues.
+        ContentSuggestion applied = appliedRobotSuggestion(run.getId());
+        when(contentSuggestions.findById(run.getContentSuggestionId())).thenReturn(Optional.of(applied));
+        when(contentDraftService.getFor(any(), eq(run.getContentDraftId())))
+                .thenReturn(draftSummary(run.getContentDraftId(), ContentDraftStatus.READY, ContentDraftWorkflowStage.READY));
+
+        orchestrator.reconcileOne(run.getId());
+
+        assertThat(run.getStatus()).isEqualTo(RobotRunStatus.WAITING_FOR_REVIEW);
+        verify(approvals, times(1)).save(any(RobotApproval.class));
+        verify(publishScheduleService, never()).create(any(), any(), any());
+    }
+
+    @Test
+    void generateAndApplyCallsApplyExactlyOnceThenContinuesAutonomy() {
+        Robot robot = aiRobot(RobotAutonomyMode.DRAFT_ONLY, RobotAiPolicy.GENERATE_AND_APPLY, null, null);
+        RobotRun run = waitingForAiRun(robot);
+        ContentSuggestion ready = readyRobotSuggestion(run.getId());
+        when(runs.findByIdForUpdateSkipLocked(run.getId())).thenReturn(Optional.of(run));
+        when(contentSuggestions.findById(run.getContentSuggestionId())).thenReturn(Optional.of(ready));
+        when(contentSuggestionService.apply(any(), eq(ready.getId()))).thenReturn(suggestionSummary(ready.getId(), ContentSuggestionStatus.APPLIED));
+        when(contentDraftService.getFor(any(), eq(run.getContentDraftId())))
+                .thenReturn(draftSummary(run.getContentDraftId(), ContentDraftStatus.READY, ContentDraftWorkflowStage.READY));
+
+        orchestrator.reconcileOne(run.getId());
+
+        verify(contentSuggestionService, times(1)).apply(any(), eq(ready.getId()));
+        assertThat(run.getStatus()).isEqualTo(RobotRunStatus.SUCCEEDED);
+    }
+
+    @Test
+    void repeatedReconciliationAfterApplyNeverCallsApplyTwice() {
+        Robot robot = aiRobot(RobotAutonomyMode.DRAFT_ONLY, RobotAiPolicy.GENERATE_AND_APPLY, null, null);
+        RobotRun run = waitingForAiRun(robot);
+        ContentSuggestion applied = appliedRobotSuggestion(run.getId());
+        when(runs.findByIdForUpdateSkipLocked(run.getId())).thenReturn(Optional.of(run));
+        when(contentSuggestions.findById(run.getContentSuggestionId())).thenReturn(Optional.of(applied));
+        when(contentDraftService.getFor(any(), eq(run.getContentDraftId())))
+                .thenReturn(draftSummary(run.getContentDraftId(), ContentDraftStatus.READY, ContentDraftWorkflowStage.READY));
+
+        orchestrator.reconcileOne(run.getId());
+
+        verify(contentSuggestionService, never()).apply(any(), any());
+        assertThat(run.getStatus()).isEqualTo(RobotRunStatus.SUCCEEDED);
+    }
+
+    /** Crash recovery: Apply already committed (by a prior in-flight reconcile or a human) but the run never advanced past WAITING_FOR_AI. */
+    @Test
+    void crashRecoveryDetectsAlreadyAppliedSuggestionAndContinuesWithoutReapplying() {
+        Robot robot = aiRobot(RobotAutonomyMode.DRAFT_ONLY, RobotAiPolicy.GENERATE_AND_APPLY, null, null);
+        RobotRun run = waitingForAiRun(robot);
+        assertThat(run.getStatus()).isEqualTo(RobotRunStatus.WAITING_FOR_AI);
+        ContentSuggestion applied = appliedRobotSuggestion(run.getId());
+        when(runs.findByIdForUpdateSkipLocked(run.getId())).thenReturn(Optional.of(run));
+        when(contentSuggestions.findById(run.getContentSuggestionId())).thenReturn(Optional.of(applied));
+        when(contentDraftService.getFor(any(), eq(run.getContentDraftId())))
+                .thenReturn(draftSummary(run.getContentDraftId(), ContentDraftStatus.READY, ContentDraftWorkflowStage.READY));
+
+        orchestrator.reconcileOne(run.getId());
+
+        verify(contentSuggestionService, never()).apply(any(), any());
+        assertThat(run.getStatus()).isEqualTo(RobotRunStatus.SUCCEEDED);
+    }
+
+    @Test
+    void staleApplyFailsRunWithSafeCodeAndNeverOverwritesTheHumanEdit() {
+        Robot robot = aiRobot(RobotAutonomyMode.DRAFT_ONLY, RobotAiPolicy.GENERATE_AND_APPLY, null, null);
+        RobotRun run = waitingForAiRun(robot);
+        ContentSuggestion ready = readyRobotSuggestion(run.getId());
+        when(runs.findByIdForUpdateSkipLocked(run.getId())).thenReturn(Optional.of(run));
+        when(contentSuggestions.findById(run.getContentSuggestionId())).thenReturn(Optional.of(ready));
+        when(contentSuggestionService.apply(any(), eq(ready.getId())))
+                .thenThrow(new ResponseStatusException(HttpStatus.CONFLICT, "SUGGESTION_STALE"));
+
+        orchestrator.reconcileOne(run.getId());
+
+        assertThat(run.getStatus()).isEqualTo(RobotRunStatus.FAILED);
+        assertThat(run.getFailureCode()).isEqualTo("ROBOT_AI_SUGGESTION_STALE");
+        verify(publishScheduleService, never()).create(any(), any(), any());
+        verify(approvals, never()).save(any());
+    }
+
+    @Test
+    void suggestionFailureFailsRunWithSafeGenericCode() {
+        Robot robot = aiRobot(RobotAutonomyMode.DRAFT_ONLY, RobotAiPolicy.GENERATE_AND_APPLY, null, null);
+        RobotRun run = waitingForAiRun(robot);
+        ContentSuggestion failed = failedRobotSuggestion(run.getId());
+        when(runs.findByIdForUpdateSkipLocked(run.getId())).thenReturn(Optional.of(run));
+        when(contentSuggestions.findById(run.getContentSuggestionId())).thenReturn(Optional.of(failed));
+
+        orchestrator.reconcileOne(run.getId());
+
+        assertThat(run.getStatus()).isEqualTo(RobotRunStatus.FAILED);
+        assertThat(run.getFailureCode()).isEqualTo("ROBOT_AI_GENERATION_FAILED");
+    }
+
+    @Test
+    void discardedSuggestionFailsRunWithoutAutomaticRegeneration() {
+        Robot robot = aiRobot(RobotAutonomyMode.DRAFT_ONLY, RobotAiPolicy.GENERATE_FOR_REVIEW, null, null);
+        RobotRun run = waitingForAiRun(robot);
+        run.markWaitingForAiReview(NOW);
+        ContentSuggestion discarded = discardedRobotSuggestion(run.getId());
+        when(runs.findByIdForUpdateSkipLocked(run.getId())).thenReturn(Optional.of(run));
+        when(contentSuggestions.findById(run.getContentSuggestionId())).thenReturn(Optional.of(discarded));
+
+        orchestrator.reconcileOne(run.getId());
+
+        assertThat(run.getStatus()).isEqualTo(RobotRunStatus.FAILED);
+        assertThat(run.getFailureCode()).isEqualTo("ROBOT_AI_SUGGESTION_DISCARDED");
+        verify(contentSuggestionService, never()).createForRobot(any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void archivedPersonaFailsRunWithSafeCodeAtGenerationTime() {
+        Robot robot = aiRobot(RobotAutonomyMode.DRAFT_ONLY, RobotAiPolicy.GENERATE_FOR_REVIEW, null, null);
+        RobotRun run = waitingForDraftRun(robot);
+        ContentDraft draftEntity = mock(ContentDraft.class);
+        when(runs.findByIdForUpdateSkipLocked(run.getId())).thenReturn(Optional.of(run));
+        when(contentDraftService.getFor(any(), eq(run.getContentDraftId())))
+                .thenReturn(draftSummary(run.getContentDraftId(), ContentDraftStatus.READY, ContentDraftWorkflowStage.READY));
+        when(contentDrafts.findByWorkspaceAndId(workspace, run.getContentDraftId())).thenReturn(Optional.of(draftEntity));
+        when(contentSuggestionService.createForRobot(any(), any(), any(), any(), any(), any(), any()))
+                .thenThrow(new ResponseStatusException(HttpStatus.CONFLICT, "PERSONA_ARCHIVED"));
+
+        orchestrator.reconcileOne(run.getId());
+
+        assertThat(run.getStatus()).isEqualTo(RobotRunStatus.FAILED);
+        assertThat(run.getFailureCode()).isEqualTo("ROBOT_AI_PERSONA_UNAVAILABLE");
+    }
+
+    @Test
+    void aiDisabledFailsRunWithSafeCodeAtGenerationTime() {
+        Robot robot = aiRobot(RobotAutonomyMode.DRAFT_ONLY, RobotAiPolicy.GENERATE_FOR_REVIEW, null, null);
+        RobotRun run = waitingForDraftRun(robot);
+        ContentDraft draftEntity = mock(ContentDraft.class);
+        when(runs.findByIdForUpdateSkipLocked(run.getId())).thenReturn(Optional.of(run));
+        when(contentDraftService.getFor(any(), eq(run.getContentDraftId())))
+                .thenReturn(draftSummary(run.getContentDraftId(), ContentDraftStatus.READY, ContentDraftWorkflowStage.READY));
+        when(contentDrafts.findByWorkspaceAndId(workspace, run.getContentDraftId())).thenReturn(Optional.of(draftEntity));
+        when(contentSuggestionService.createForRobot(any(), any(), any(), any(), any(), any(), any()))
+                .thenThrow(new ResponseStatusException(HttpStatus.CONFLICT, "AI_DISABLED"));
+
+        orchestrator.reconcileOne(run.getId());
+
+        assertThat(run.getStatus()).isEqualTo(RobotRunStatus.FAILED);
+        assertThat(run.getFailureCode()).isEqualTo("ROBOT_AI_DISABLED");
+    }
+
+    @Test
+    void draftOnlyGenerateAndApplySucceedsWithNoApprovalAndNoSchedule() {
+        Robot robot = aiRobot(RobotAutonomyMode.DRAFT_ONLY, RobotAiPolicy.GENERATE_AND_APPLY, null, null);
+        RobotRun run = waitingForAiRun(robot);
+        ContentSuggestion ready = readyRobotSuggestion(run.getId());
+        when(runs.findByIdForUpdateSkipLocked(run.getId())).thenReturn(Optional.of(run));
+        when(contentSuggestions.findById(run.getContentSuggestionId())).thenReturn(Optional.of(ready));
+        when(contentSuggestionService.apply(any(), eq(ready.getId()))).thenReturn(suggestionSummary(ready.getId(), ContentSuggestionStatus.APPLIED));
+        when(contentDraftService.getFor(any(), eq(run.getContentDraftId())))
+                .thenReturn(draftSummary(run.getContentDraftId(), ContentDraftStatus.READY, ContentDraftWorkflowStage.READY));
+
+        orchestrator.reconcileOne(run.getId());
+
+        assertThat(run.getStatus()).isEqualTo(RobotRunStatus.SUCCEEDED);
+        verify(approvals, never()).save(any());
+        verify(publishScheduleService, never()).create(any(), any(), any());
+    }
+
+    @Test
+    void reviewRequiredGenerateAndApplyCreatesOneApprovalAndNoScheduleBeforeApproval() {
+        SocialAccount account = new SocialAccount(workspace, SocialPlatform.TEST, "TEST", owner, NOW);
+        Robot robot = aiRobot(RobotAutonomyMode.REVIEW_REQUIRED, RobotAiPolicy.GENERATE_AND_APPLY, account, 60);
+        RobotRun run = waitingForAiRun(robot);
+        ContentSuggestion ready = readyRobotSuggestion(run.getId());
+        when(runs.findByIdForUpdateSkipLocked(run.getId())).thenReturn(Optional.of(run));
+        when(contentSuggestions.findById(run.getContentSuggestionId())).thenReturn(Optional.of(ready));
+        when(contentSuggestionService.apply(any(), eq(ready.getId()))).thenReturn(suggestionSummary(ready.getId(), ContentSuggestionStatus.APPLIED));
+        when(contentDraftService.getFor(any(), eq(run.getContentDraftId())))
+                .thenReturn(draftSummary(run.getContentDraftId(), ContentDraftStatus.READY, ContentDraftWorkflowStage.READY));
+
+        orchestrator.reconcileOne(run.getId());
+
+        assertThat(run.getStatus()).isEqualTo(RobotRunStatus.WAITING_FOR_REVIEW);
+        verify(approvals, times(1)).save(any(RobotApproval.class));
+        verify(publishScheduleService, never()).create(any(), any(), any());
+    }
+
+    @Test
+    void autoScheduleGenerateAndApplyCreatesOnePublishScheduleForTest() {
+        SocialAccount account = new SocialAccount(workspace, SocialPlatform.TEST, "TEST", owner, NOW);
+        Robot robot = aiRobot(RobotAutonomyMode.AUTO_SCHEDULE, RobotAiPolicy.GENERATE_AND_APPLY, account, 60);
+        RobotRun run = waitingForAiRun(robot);
+        ContentSuggestion ready = readyRobotSuggestion(run.getId());
+        when(runs.findByIdForUpdateSkipLocked(run.getId())).thenReturn(Optional.of(run));
+        when(contentSuggestions.findById(run.getContentSuggestionId())).thenReturn(Optional.of(ready));
+        when(contentSuggestionService.apply(any(), eq(ready.getId()))).thenReturn(suggestionSummary(ready.getId(), ContentSuggestionStatus.APPLIED));
+        when(contentDraftService.getFor(any(), eq(run.getContentDraftId())))
+                .thenReturn(draftSummary(run.getContentDraftId(), ContentDraftStatus.READY, ContentDraftWorkflowStage.READY));
+        UUID scheduleId = UUID.randomUUID();
+        when(publishScheduleService.create(any(), eq(run.getContentDraftId()), any())).thenReturn(publishScheduleSummary(scheduleId));
+
+        orchestrator.reconcileOne(run.getId());
+
+        assertThat(run.getStatus()).isEqualTo(RobotRunStatus.SUCCEEDED);
+        assertThat(run.getPublishScheduleId()).isEqualTo(scheduleId);
+        verify(publishScheduleService, times(1)).create(any(), any(), any());
+    }
+
+    @Test
+    void autoScheduleGenerateAndApplyStillRejectsInstagramAfterApply() {
+        SocialAccount instagram = new SocialAccount(workspace, SocialPlatform.INSTAGRAM, "creator", "ig-1", owner, NOW);
+        Robot robot = aiRobot(RobotAutonomyMode.AUTO_SCHEDULE, RobotAiPolicy.GENERATE_AND_APPLY, instagram, 60);
+        RobotRun run = waitingForAiRun(robot);
+        ContentSuggestion ready = readyRobotSuggestion(run.getId());
+        when(runs.findByIdForUpdateSkipLocked(run.getId())).thenReturn(Optional.of(run));
+        when(contentSuggestions.findById(run.getContentSuggestionId())).thenReturn(Optional.of(ready));
+        when(contentSuggestionService.apply(any(), eq(ready.getId()))).thenReturn(suggestionSummary(ready.getId(), ContentSuggestionStatus.APPLIED));
+        when(contentDraftService.getFor(any(), eq(run.getContentDraftId())))
+                .thenReturn(draftSummary(run.getContentDraftId(), ContentDraftStatus.READY, ContentDraftWorkflowStage.READY));
+
+        orchestrator.reconcileOne(run.getId());
+
+        assertThat(run.getStatus()).isEqualTo(RobotRunStatus.FAILED);
+        assertThat(run.getFailureCode()).isEqualTo("AUTONOMOUS_PROVIDER_NOT_ALLOWED");
+        verify(publishScheduleService, never()).create(any(), any(), any());
+    }
+
+    @Test
+    void noAiRobotNeverCreatesAutomaticSuggestion() {
+        Robot robot = draftOnlyRobot();
+        RobotRun run = waitingForDraftRun(robot);
+        assertThat(run.getAiPolicySnapshot()).isEqualTo(RobotAiPolicy.NO_AI);
+        when(runs.findByIdForUpdateSkipLocked(run.getId())).thenReturn(Optional.of(run));
+        when(contentDraftService.getFor(any(), eq(run.getContentDraftId())))
+                .thenReturn(draftSummary(run.getContentDraftId(), ContentDraftStatus.READY, ContentDraftWorkflowStage.READY));
+
+        orchestrator.reconcileOne(run.getId());
+
+        assertThat(run.getStatus()).isEqualTo(RobotRunStatus.SUCCEEDED);
+        verify(contentSuggestionService, never()).createForRobot(any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void runSnapshotsAiPolicyAndPersonaAtCreationTimeIndependentOfLaterRobotEdits() {
+        Robot robot = aiRobot(RobotAutonomyMode.DRAFT_ONLY, RobotAiPolicy.GENERATE_AND_APPLY, null, null);
+        RobotRun run = newRun(robot);
+
+        assertThat(run.getAiPolicySnapshot()).isEqualTo(RobotAiPolicy.GENERATE_AND_APPLY);
+
+        // Editing the live Robot afterward must never change this already-created run's snapshot.
+        robot.update(robot.getName(), robot.getDescription(), robot.getAutonomyMode(), robot.getTargetSocialAccount(),
+                robot.getCadenceType(), robot.getCadenceIntervalHours(), robot.getScheduleDelayMinutes(), robot.getMaxRunsPerDay(),
+                RobotAiPolicy.NO_AI, null, null, null, NOW);
+
+        assertThat(run.getAiPolicySnapshot()).isEqualTo(RobotAiPolicy.GENERATE_AND_APPLY);
+        assertThat(robot.getAiPolicy()).isEqualTo(RobotAiPolicy.NO_AI);
+    }
+
+    // ---- helpers ----
+
+    private Robot aiRobot(RobotAutonomyMode autonomyMode, RobotAiPolicy aiPolicy, SocialAccount account, Integer delayMinutes) {
+        return new Robot(workspace, "AI Robot", null, autonomyMode, RobotSourcePolicy.EXISTING_ASSET, sourceAsset, null, null,
+                account, RobotCadenceType.MANUAL_ONLY, null, delayMinutes, 1, aiPolicy, null, null, null, owner, NOW);
+    }
+
+    private RobotRun waitingForAiRun(Robot robot) {
+        RobotRun run = waitingForDraftRun(robot);
+        UUID suggestionId = UUID.randomUUID();
+        run.setContentSuggestionId(suggestionId);
+        run.markWaitingForAi(NOW);
+        return run;
+    }
+
+    private ContentSuggestionSummary suggestionSummary(UUID id, ContentSuggestionStatus status) {
+        return new ContentSuggestionSummary(
+                id, UUID.randomUUID(), ContentSuggestionOrigin.ROBOT, UUID.randomUUID(), ContentSuggestionType.SOCIAL_COPY, status,
+                "DETERMINISTIC_TEST", "deterministic-v1", "SOCIAL_COPY_V2", SuggestionLanguage.AUTO, SuggestionTone.NEUTRAL,
+                null, null, "hook", "caption", List.of("tag"), null, false, null, null, null, null, null,
+                null, null, false, NOW, NOW, NOW, owner.getId());
+    }
+
+    private ContentSuggestion pendingRobotSuggestion(UUID robotRunId) {
+        ContentDraft draftEntity = mock(ContentDraft.class);
+        Job job = new Job(workspace, JobType.GENERATE_SOCIAL_COPY, Map.of("draftId", UUID.randomUUID().toString()), 3, NOW);
+        return ContentSuggestion.forRobot(
+                workspace, draftEntity, job, "DETERMINISTIC_TEST", "deterministic-v1", "SOCIAL_COPY_V2",
+                SuggestionLanguage.AUTO, SuggestionTone.NEUTRAL, "prompt", "fingerprint", false, null, null, robotRunId, owner, NOW);
+    }
+
+    private ContentSuggestion readyRobotSuggestion(UUID robotRunId) {
+        ContentSuggestion suggestion = pendingRobotSuggestion(robotRunId);
+        suggestion.markGenerating(NOW);
+        suggestion.markReady("hook", "caption", List.of("tag"), null, null, null, null, null, NOW);
+        return suggestion;
+    }
+
+    private ContentSuggestion failedRobotSuggestion(UUID robotRunId) {
+        ContentSuggestion suggestion = pendingRobotSuggestion(robotRunId);
+        suggestion.markFailed("AI_TIMEOUT", "timed out", NOW);
+        return suggestion;
+    }
+
+    private ContentSuggestion discardedRobotSuggestion(UUID robotRunId) {
+        ContentSuggestion suggestion = readyRobotSuggestion(robotRunId);
+        suggestion.discard();
+        return suggestion;
+    }
+
+    private ContentSuggestion appliedRobotSuggestion(UUID robotRunId) {
+        ContentSuggestion suggestion = readyRobotSuggestion(robotRunId);
+        suggestion.markApplied(owner.getId(), NOW);
+        return suggestion;
     }
 
     // ---- helpers ----

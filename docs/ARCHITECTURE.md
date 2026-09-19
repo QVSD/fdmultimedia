@@ -2110,3 +2110,279 @@ reaction videos, AI avatars, image/video generation, TTS, voice cloning,
 NotebookLM, comments/DMs/engagement bots, scraping, arbitrary prompts or
 provider URLs, TikTok, YouTube, a generic workflow engine, and any change
 to the Worker scheduler.
+
+## Robot AI enrichment policies (Phase 12C)
+
+Phase 12C is the first phase where a Robot may invoke AI automatically. It
+connects Robot orchestration (Phase 11C/11D) to `ContentSuggestion`/Persona
+(Phase 12A/12B) without duplicating either architecture: Robot orchestration
+never talks to Ollama, `ContentEnrichmentProvider`, the prompt builder, or a
+Worker executor directly, and it never hand-composes a caption — it only
+calls the same `ContentSuggestionService` methods a human uses.
+
+### Two independent autonomy axes
+
+The pre-existing `RobotAutonomyMode` (`DRAFT_ONLY` / `REVIEW_REQUIRED` /
+`AUTO_SCHEDULE` — *what happens once a Draft/caption is ready*) and the new
+`RobotAiPolicy` (`NO_AI` / `GENERATE_FOR_REVIEW` / `GENERATE_AND_APPLY` —
+*whether and how AI copy gets attached before that*) are deliberately kept
+as two separate enums, never merged into one switch. `NO_AI` reproduces
+Phase 11C/11D behavior byte-for-byte: no automatic suggestion, no Persona
+reference allowed on the Robot (rejected at create/update time rather than
+silently ignored). `GENERATE_FOR_REVIEW` creates exactly one automatic
+suggestion and stops for human review before any autonomy action runs.
+`GENERATE_AND_APPLY` creates and applies that one suggestion automatically,
+then the existing autonomy mode continues exactly as it would for a
+human-composed Draft. Every combination of the two axes is valid and tested
+(e.g. `AUTO_SCHEDULE` + `GENERATE_AND_APPLY` fully automates Draft → AI →
+Apply → Schedule → Publish with zero human action, while `AUTO_SCHEDULE`'s
+existing TEST-only real-provider gate is completely unaffected by AI
+policy — Instagram is still rejected regardless of AI configuration).
+
+### RobotRun state machine: two new waiting states, one preserved distinction
+
+`RobotRunStatus` gains `WAITING_FOR_AI` (the automatic suggestion's
+`GENERATE_SOCIAL_COPY` Job is still PENDING/GENERATING) and
+`WAITING_FOR_AI_REVIEW` (the suggestion is READY and a human must Apply or
+Discard it through the ordinary `ContentSuggestion` endpoints — the Robot
+never applies on the human's behalf in this mode). The pre-existing
+`WAITING_FOR_REVIEW` continues to mean exactly one thing: the *publishing*
+approval gate (`RobotApproval`), never conflated with AI content review.
+This makes "double review" a natural, fully-supported combination —
+`GENERATE_FOR_REVIEW` + `REVIEW_REQUIRED` walks AI review → human Apply →
+*then* a publishing `RobotApproval` is created → human approves → only then
+a `PublishSchedule` — proven end-to-end in runtime acceptance, including
+that no `PublishSchedule` exists before the second approval.
+
+`Robot` gains `aiPolicy` (not null), an optional `persona` reference, and
+optional `aiLanguageOverride`/`aiToneOverride` reusing Phase 12A's own
+enums, validated by a small `RobotService.resolveAiConfig` helper: `NO_AI`
+must carry no Persona/overrides; an AI-enabled Robot's Persona, if any, must
+belong to the same workspace and be `ACTIVE` both at Robot create/update
+time *and* again at the moment generation actually happens (`RobotRun`
+extends the same nullable-provenance-field idiom already used for
+`highlightAnalysisId` → `highlightCandidateId` → `contentDraftId` with a
+`contentSuggestionId` field, so "has this run already started/finished AI
+generation" is answered by which field is populated, not by extra states.
+
+### Snapshot boundary: identity now, content later — the same split Phase 12B established
+
+`RobotRun` snapshots `aiPolicySnapshot`, `personaIdSnapshot`, and any
+override snapshots from the live `Robot` at *run-creation* time (the same
+pattern already used for `contentSourceId`/`selectionPolicy`), guaranteeing
+a Robot edit mid-run can never redirect an in-flight run to a different
+Persona or policy. Critically, only the Persona *identity* (a bare UUID) is
+frozen this early — the actual editorial *content* (`PersonaSnapshot`, per
+Phase 12B) is resolved fresh from the live `Persona` row only inside
+`ContentSuggestionService.generate()` at the moment generation truly
+happens, re-validating `ACTIVE` at that point too. This reproduces exactly
+the property Phase 12B established for humans ("if the Persona changed
+between the two events, generation should reflect the *current* Persona")
+while still satisfying Phase 12C's own requirement ("if the Robot was
+edited to a different Persona while this run was mid-flight, this run must
+still use the Persona it started with") — because the *identity* frozen at
+run-creation time never changes, only what that identity currently resolves
+to. An archived Persona at generation time fails the run safely with
+`ROBOT_AI_PERSONA_UNAVAILABLE` rather than silently generating without it
+or substituting another.
+
+### One generation architecture, reused not duplicated
+
+`ContentSuggestionService.create()` (the human path) and the new
+`createForRobot(...)` (the Robot path) both delegate to the same private
+`generate(...)` method; the only branch is at the very end, on whether the
+caller supplied a `robotRunId` (human → the ordinary constructor;
+Robot → `ContentSuggestion.forRobot(...)`, the only path that ever produces
+`origin=ROBOT`). This guarantees byte-identical validation, Persona
+resolution/precedence, prompt construction, fingerprinting, and Job creation
+for both callers, and it means the Worker/Job layer needed **zero** changes
+for this phase — Persona-or-not, human-or-Robot, the Worker still only ever
+sees an opaque, already-rendered `promptText` (confirmed by running the
+full Worker test suite unchanged, 91/91 passing).
+
+`RobotRunOrchestrator.applyAiSuggestion` similarly reuses
+`ContentSuggestionService.apply(...)` — the exact method a human's Apply
+button calls, including its fingerprint/staleness re-check and idempotent
+"already APPLIED" handling — never a hand-composed caption in the
+orchestrator.
+
+### Provenance: `origin` is now explicit, never inferred
+
+Before this phase, `ContentSuggestion.robotRunId` was silently
+auto-inherited from `ContentDraft.robotRunId` in the suggestion
+constructor — which quietly conflated "this Draft happens to have been
+created by a Robot" with "this specific suggestion was generated by that
+Robot," a distinction that only starts to matter once a human can manually
+generate a suggestion on a Robot-created Draft (which was already possible
+before this phase, just not exercised in a way that surfaced the bug). This
+phase fixes it: `ContentSuggestion` gains an explicit `origin`
+(`MANUAL`/`ROBOT`) field; the ordinary constructor now always sets
+`origin=MANUAL, robotRunId=null`, and only the new `ContentSuggestion.forRobot(...)`
+static factory — called exclusively from `RobotRunOrchestrator` — sets
+`origin=ROBOT` together with the given `robotRunId`. A human generating on
+a Robot-created Draft now correctly gets a `MANUAL` suggestion with a null
+`robotRunId`, verified both in a dedicated test and live in runtime
+acceptance. `origin` is DB-backed with `CHECK` constraints enforcing
+`origin='MANUAL' ⇒ robot_run_id IS NULL` and
+`origin='ROBOT' ⇒ robot_run_id IS NOT NULL`.
+
+### Idempotency and multi-instance safety, for free
+
+Phase 11C's existing `RobotRunOrchestrator.doReconcile` architecture —
+advance exactly one bounded step per call, entered only after
+`RobotRunRepository.findByIdForUpdateSkipLocked` acquires the run's row
+lock, triggered by the bounded `findNonTerminalIds` background poller
+(`RobotAutomationScheduler`) and by read-triggered calls (`getFor`/
+`listFor`) — already gives Phase 12C's AI steps idempotency and
+multi-instance safety without a single new locking primitive: only one
+instance can ever be mid-reconciliation for a given run at a time, so
+"create the automatic suggestion" and "call Apply" both happen at most once
+per run per logical step, guarded first by `run.getContentSuggestionId() ==
+null` and second by the suggestion's own state machine (an already-APPLIED
+suggestion is detected and simply continues rather than re-applying — the
+same path that recovers a crash between Apply committing and the RobotRun's
+own state advancing). `content_suggestions_one_robot_suggestion_per_run`
+(a unique partial index on `robot_run_id WHERE origin='ROBOT'`) backs this
+transactionally as defense in depth. This was proven live: stopping the
+Worker mid-run, restarting the API container, then resuming the Worker
+produced exactly one `ContentSuggestion` and one `GENERATE_SOCIAL_COPY`
+Job — no duplication — and the run resumed and completed purely through the
+existing background scheduler poller, with no browser or manual "continue"
+step involved at any point.
+
+### A transaction-propagation bug this phase found and fixed
+
+`ContentSuggestionService.createForRobot(...)` and `.apply(...)` are called
+from inside `RobotRunOrchestrator`'s own `@Transactional` reconciliation
+methods, which then catch an expected `ResponseStatusException` (AI
+disabled, Persona archived, stale, already-applied) to fail or continue the
+`RobotRun` safely. Because both callee methods were originally plain
+`@Transactional` (propagation `REQUIRED`), Spring joined the *caller's*
+ambient transaction — and marked it rollback-only the instant the callee
+threw, regardless of whether the caller went on to catch and handle that
+exception. The result was not the intended safe failure code but an
+unrelated `UnexpectedRollbackException` surfacing from the *next* read of
+that RobotRun, discovered live during forced-AI-failure runtime testing.
+The fix: both `createForRobot` and `apply` now run with
+`propagation = Propagation.REQUIRES_NEW`, so a validation failure inside
+either one rolls back only its own isolated transaction and never poisons
+the orchestrator's. This is safe for the pre-existing human-facing
+`apply()` call path too (a top-level Controller call has no ambient
+transaction to protect either way) and is documented on both methods.
+
+### Failure codes and the global kill switches
+
+AI-stage failures map to a small bounded set of RobotRun failure codes —
+`ROBOT_AI_DISABLED` (the global `CONTENT_AI_ENABLED=false` kill switch was
+hit at generation time; `NO_AI` Robots are unaffected by this switch
+entirely), `ROBOT_AI_PERSONA_UNAVAILABLE` (Persona archived or missing at
+generation time), `ROBOT_AI_GENERATION_FAILED` (the suggestion itself
+failed, or is no longer reachable), `ROBOT_AI_SUGGESTION_DISCARDED` (a
+human discarded the automatic suggestion — a controlled terminal outcome,
+never an automatic regeneration), `ROBOT_AI_APPLY_FAILED` (Apply rejected
+for a reason other than staleness/already-applied), and
+`ROBOT_AI_SUGGESTION_STALE` (Apply rejected because a human edited the
+Draft's title/caption after generation — the human edit is always
+preserved, never overwritten). The Robot itself never retries a provider
+call; the existing `GENERATE_SOCIAL_COPY` Job owns all bounded provider
+retries exactly as it did before this phase. The pre-existing
+`ROBOT_AUTOMATION_ENABLED=false` kill switch is unchanged: it continues to
+block *new* RobotRuns; already-running runs keep reconciling exactly as
+Phase 11C intended, so this phase did not alter that switch's behavior.
+
+### Dynamic source consumption on AI failure
+
+Phase 11D's rule — once a `CONTENT_SOURCE` asset is selected for a
+RobotRun, it stays consumed for that Robot even if something later fails —
+is preserved unchanged when the "something" is an AI failure. This was
+verified live: a `CONTENT_SOURCE` Robot whose only asset failed at the AI
+stage (forced via `CONTENT_AI_ENABLED=false`) left that Robot with zero
+eligible assets on the next Run Now (`NO_ELIGIBLE_SOURCE`), never
+re-selecting the same asset — preventing a broken AI provider from
+silently hammering a dynamic source's assets one failed run at a time.
+
+### Stale protection under real Robot timing
+
+`GENERATE_AND_APPLY`'s auto-apply reuses the human Apply path's existing
+fingerprint check unchanged, so a human edit to the Draft's title/caption
+between generation and the Robot's own apply attempt is caught exactly the
+same way a human-vs-human race would be, failing the RobotRun with
+`ROBOT_AI_SUGGESTION_STALE` and leaving the human's edit untouched. Proving
+this live required winning a real race against the background scheduler
+(which can complete generation-then-apply within roughly one
+`app.robots.poll-interval-ms` tick once the suggestion is READY): the
+suggestion's own draft-scoped read endpoint was polled directly (not the
+RobotRun, whose own GET is itself a reconciliation trigger) so detecting
+"suggestion now exists" and issuing the Draft edit could happen in a single
+script invocation with no LLM-turn latency in between.
+
+### Runtime acceptance summary
+
+All of the following were exercised against the real Docker stack (a real
+Worker process, real FFmpeg/FFprobe, the deterministic AI provider by
+default) rather than only unit tests: `NO_AI` regression; `DRAFT_ONLY` +
+`GENERATE_AND_APPLY` with no Persona (exactly one `ROBOT` suggestion,
+auto-Applied, `RobotRun` `SUCCEEDED`, zero `RobotApproval`/
+`PublishSchedule`/`Publication`); `GENERATE_FOR_REVIEW` with a Persona
+(suggestion `READY` with the Persona's voice woven in, human Apply, the run
+completing to `SUCCEEDED` purely via the background scheduler with no
+further reads in between, proving no-browser progression); the double
+review combination end-to-end; `REVIEW_REQUIRED` + `GENERATE_AND_APPLY`
+(auto-apply, then exactly one `RobotApproval`, no `PublishSchedule` until
+approved); a fully automated `AUTO_SCHEDULE` + `GENERATE_AND_APPLY` +
+`CONTENT_SOURCE` + TEST run from Run Now through highlight → clip → social
+vertical → Draft → AI → Apply → `PublishSchedule` → due → `Publication`
+`PUBLISHED`, with zero human action after Run Now; dynamic-source
+consumption surviving an AI failure; stale protection; a forced
+`ROBOT_AI_DISABLED` failure (and the `UnexpectedRollbackException` bug it
+surfaced and the fix described above); discard semantics
+(`ROBOT_AI_SUGGESTION_DISCARDED`, no auto-regeneration); a genuine restart
+recovery (Worker stopped mid-highlight-analysis, API container restarted,
+Worker resumed — state intact, then the run completed to
+`WAITING_FOR_AI_REVIEW` with exactly one suggestion and one Job, no
+duplication); and a real local Ollama acceptance pass (`CONTENT_AI_PROVIDER=OLLAMA`,
+`llama3.2:latest`, ~8s real inference latency, genuine non-templated
+output, Persona applied, `origin=ROBOT`, successful Apply and RobotRun
+continuation) — `REAL_ROBOT_AI_ACCEPTANCE: PASSED`, not environment-blocked.
+A full browser pass created an AI-enabled Robot with a Persona through the
+UI, ran it, and confirmed the run list live-updates through "Preparing
+draft" → "Waiting for AI review" (see below), the Draft's AI section
+showing "Generated by Robot" with the correct Persona, and the Robot
+resuming to "Succeeded" after a browser-driven Apply with no manual
+"continue" action.
+
+One frontend gap this runtime pass surfaced and fixed: the Robots page's
+run history (`allRuns()`) was fetched exactly once on page load with no
+periodic refresh, unlike the Robots list and Approvals list which already
+polled every 5 seconds. This was mostly invisible before this phase because
+run states changed slowly enough that a manual page reload was an adequate
+workaround; Phase 12C's new `WAITING_FOR_AI`/`WAITING_FOR_AI_REVIEW` states
+are specifically meant to be watched live, so `allRuns()` now polls on the
+same 5-second `interval()` as the other two lists.
+
+Repeating the Phase 12B runtime-hygiene lesson, because it recurred in this
+phase too: verifying "only the Worker process I intend is running" via `ps
+aux` inside the Bash tool is not reliable on this Windows host across a
+long session's repeated `nohup java -jar ... &` restarts, and a stale
+Worker JVM racing the current one for Job claims is exactly the kind of bug
+that looks like nondeterministic AI/Robot behavior instead of an
+environment problem. `Get-CimInstance Win32_Process | Where-Object {
+$_.CommandLine -match 'worker-agent' }` (via PowerShell, checked before and
+after every Worker restart in this phase) is the reliable check — and note
+it will legitimately show *two* `java.exe` processes with identical command
+lines for one running Worker on a machine where the `javapath` launcher
+stub execs into the real JDK `java.exe` as a child process; the `/api/workers`
+endpoint's single `ONLINE` entry is the authoritative confirmation of
+"one logical Worker," not the raw OS process count.
+
+### Out of scope for this phase
+
+Automatic AI regeneration, Robot A/B testing of multiple suggestions,
+analytics/engagement-driven prompt or Persona optimization, AI-assisted
+source or highlight selection, Persona optimization, multiple Personas per
+run or Persona blending, autonomous Instagram/TikTok/YouTube publishing,
+comments/DMs/engagement bots, AI image/video generation, avatars, lip sync,
+TTS, voice cloning, reaction videos, NotebookLM, arbitrary prompts or
+provider URLs, browser automation, scraping, CAPTCHA/anti-bot bypass, proxy
+rotation, a generic workflow engine, any RabbitMQ redesign, any Worker
+scheduler redesign, and cloud autoscaling.

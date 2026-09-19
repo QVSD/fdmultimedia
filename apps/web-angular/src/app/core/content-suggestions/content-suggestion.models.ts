@@ -2,10 +2,13 @@ export type ContentSuggestionType = 'SOCIAL_COPY';
 export type ContentSuggestionStatus = 'PENDING' | 'GENERATING' | 'READY' | 'FAILED' | 'APPLIED' | 'DISCARDED';
 export type SuggestionLanguage = 'AUTO' | 'ENGLISH' | 'ROMANIAN';
 export type SuggestionTone = 'NEUTRAL' | 'INFORMATIVE' | 'CASUAL' | 'ENERGETIC';
+/** Phase 12C: explicit provenance — never inferred from robotRunId alone. */
+export type ContentSuggestionOrigin = 'MANUAL' | 'ROBOT';
 
 export interface ContentSuggestionSummary {
   id: string;
   contentDraftId: string;
+  origin: ContentSuggestionOrigin;
   robotRunId: string | null;
   type: ContentSuggestionType;
   status: ContentSuggestionStatus;

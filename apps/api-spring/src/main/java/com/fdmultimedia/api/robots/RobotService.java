@@ -12,6 +12,11 @@ import com.fdmultimedia.api.auth.AuthService;
 import com.fdmultimedia.api.auth.security.AuthenticatedUser;
 import com.fdmultimedia.api.contentsources.ContentSource;
 import com.fdmultimedia.api.contentsources.ContentSourceRepository;
+import com.fdmultimedia.api.contentsuggestions.SuggestionLanguage;
+import com.fdmultimedia.api.contentsuggestions.SuggestionTone;
+import com.fdmultimedia.api.personas.Persona;
+import com.fdmultimedia.api.personas.PersonaRepository;
+import com.fdmultimedia.api.personas.PersonaStatus;
 import com.fdmultimedia.api.publishschedules.PublishScheduleProperties;
 import com.fdmultimedia.api.workspaces.Workspace;
 import com.fdmultimedia.api.workspaces.WorkspaceMembership;
@@ -36,6 +41,7 @@ public class RobotService {
     private final MediaAssetRepository assets;
     private final SocialAccountRepository socialAccounts;
     private final ContentSourceRepository contentSources;
+    private final PersonaRepository personas;
     private final RobotProperties properties;
     private final PublishScheduleProperties publishScheduleProperties;
     private final RobotAutomationDispatchService dispatchService;
@@ -48,6 +54,7 @@ public class RobotService {
             MediaAssetRepository assets,
             SocialAccountRepository socialAccounts,
             ContentSourceRepository contentSources,
+            PersonaRepository personas,
             RobotProperties properties,
             PublishScheduleProperties publishScheduleProperties,
             RobotAutomationDispatchService dispatchService,
@@ -58,6 +65,7 @@ public class RobotService {
         this.assets = assets;
         this.socialAccounts = socialAccounts;
         this.contentSources = contentSources;
+        this.personas = personas;
         this.properties = properties;
         this.publishScheduleProperties = publishScheduleProperties;
         this.dispatchService = dispatchService;
@@ -76,13 +84,50 @@ public class RobotService {
         Integer cadenceHours = validateCadence(request.cadenceType(), request.cadenceIntervalHours());
         Integer delayMinutes = validateScheduleDelay(request.autonomyMode(), request.scheduleDelayMinutes());
         int maxRunsPerDay = validateMaxRunsPerDay(request.maxRunsPerDay());
+        AiConfig aiConfig = resolveAiConfig(workspace, request.aiPolicy(), request.personaId(), request.aiLanguageOverride(), request.aiToneOverride());
 
         Instant now = Instant.now(clock);
         Robot robot = new Robot(
                 workspace, name, description, request.autonomyMode(),
                 sourceConfig.sourcePolicy(), sourceConfig.sourceAsset(), sourceConfig.contentSource(), sourceConfig.selectionPolicy(),
-                account, request.cadenceType(), cadenceHours, delayMinutes, maxRunsPerDay, membership.getUser(), now);
+                account, request.cadenceType(), cadenceHours, delayMinutes, maxRunsPerDay,
+                aiConfig.policy(), aiConfig.persona(), aiConfig.languageOverride(), aiConfig.toneOverride(), membership.getUser(), now);
         return toSummary(robots.save(robot));
+    }
+
+    /**
+     * Validates the independent AI enrichment axis (Phase 12C): NO_AI must
+     * not carry Persona/override configuration it will never use (avoids
+     * misleading dead config, mirrors the DB-level
+     * {@code robots_ai_config_matches_policy} constraint); an AI-enabled
+     * Robot's Persona, if any, must belong to this workspace and be ACTIVE —
+     * re-validated again at actual generation time in
+     * {@code ContentSuggestionService}, since a Persona may be archived
+     * between Robot configuration and a much later run.
+     */
+    private AiConfig resolveAiConfig(
+            Workspace workspace, RobotAiPolicy aiPolicy, UUID personaId,
+            SuggestionLanguage aiLanguageOverride, SuggestionTone aiToneOverride) {
+        RobotAiPolicy policy = aiPolicy != null ? aiPolicy : RobotAiPolicy.NO_AI;
+        if (policy == RobotAiPolicy.NO_AI) {
+            if (personaId != null || aiLanguageOverride != null || aiToneOverride != null) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "personaId/aiLanguageOverride/aiToneOverride are not allowed when aiPolicy is NO_AI");
+            }
+            return new AiConfig(policy, null, null, null);
+        }
+        Persona persona = null;
+        if (personaId != null) {
+            persona = personas.findByWorkspaceAndId(workspace, personaId)
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Persona not found"));
+            if (persona.getStatus() != PersonaStatus.ACTIVE) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "PERSONA_ARCHIVED");
+            }
+        }
+        return new AiConfig(policy, persona, aiLanguageOverride, aiToneOverride);
+    }
+
+    private record AiConfig(RobotAiPolicy policy, Persona persona, SuggestionLanguage languageOverride, SuggestionTone toneOverride) {
     }
 
     /**
@@ -144,8 +189,10 @@ public class RobotService {
         Integer cadenceHours = validateCadence(request.cadenceType(), request.cadenceIntervalHours());
         Integer delayMinutes = validateScheduleDelay(request.autonomyMode(), request.scheduleDelayMinutes());
         int maxRunsPerDay = validateMaxRunsPerDay(request.maxRunsPerDay());
+        AiConfig aiConfig = resolveAiConfig(workspace, request.aiPolicy(), request.personaId(), request.aiLanguageOverride(), request.aiToneOverride());
         Instant now = Instant.now(clock);
-        robot.update(name, description, request.autonomyMode(), account, request.cadenceType(), cadenceHours, delayMinutes, maxRunsPerDay, now);
+        robot.update(name, description, request.autonomyMode(), account, request.cadenceType(), cadenceHours, delayMinutes, maxRunsPerDay,
+                aiConfig.policy(), aiConfig.persona(), aiConfig.languageOverride(), aiConfig.toneOverride(), now);
         return toSummary(robot);
     }
 
@@ -286,6 +333,7 @@ public class RobotService {
         SocialAccount account = robot.getTargetSocialAccount();
         MediaAsset sourceAsset = robot.getSourceAsset();
         ContentSource contentSource = robot.getContentSource();
+        Persona persona = robot.getPersona();
         return new RobotSummary(
                 robot.getId(),
                 robot.getName(),
@@ -305,6 +353,11 @@ public class RobotService {
                 robot.getCadenceIntervalHours(),
                 robot.getScheduleDelayMinutes(),
                 robot.getMaxRunsPerDay(),
+                robot.getAiPolicy(),
+                persona == null ? null : persona.getId(),
+                persona == null ? null : persona.getName(),
+                robot.getAiLanguageOverride(),
+                robot.getAiToneOverride(),
                 robot.getNextRunAt(),
                 robot.getLastRunAt(),
                 robot.getCreatedAt(),

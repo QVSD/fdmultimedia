@@ -18,8 +18,12 @@ import com.fdmultimedia.api.auth.AuthService;
 import com.fdmultimedia.api.auth.security.AuthenticatedUser;
 import com.fdmultimedia.api.contentsources.ContentSource;
 import com.fdmultimedia.api.contentsources.ContentSourceRepository;
+import com.fdmultimedia.api.contentsuggestions.SuggestionLanguage;
+import com.fdmultimedia.api.contentsuggestions.SuggestionTone;
 import com.fdmultimedia.api.jobs.Job;
 import com.fdmultimedia.api.jobs.JobType;
+import com.fdmultimedia.api.personas.Persona;
+import com.fdmultimedia.api.personas.PersonaRepository;
 import com.fdmultimedia.api.publishschedules.PublishScheduleProperties;
 import com.fdmultimedia.api.users.AppUser;
 import com.fdmultimedia.api.workspaces.Workspace;
@@ -46,12 +50,13 @@ class RobotServiceTest {
     private final MediaAssetRepository assets = mock(MediaAssetRepository.class);
     private final SocialAccountRepository socialAccounts = mock(SocialAccountRepository.class);
     private final ContentSourceRepository contentSources = mock(ContentSourceRepository.class);
+    private final PersonaRepository personas = mock(PersonaRepository.class);
     private final RobotProperties properties = new RobotProperties();
     private final PublishScheduleProperties publishScheduleProperties = new PublishScheduleProperties();
     private final RobotAutomationDispatchService dispatchService = mock(RobotAutomationDispatchService.class);
     private final RobotRunOrchestrator orchestrator = mock(RobotRunOrchestrator.class);
     private final RobotService service = new RobotService(
-            authService, robots, assets, socialAccounts, contentSources, properties, publishScheduleProperties,
+            authService, robots, assets, socialAccounts, contentSources, personas, properties, publishScheduleProperties,
             dispatchService, orchestrator, Clock.fixed(NOW, ZoneOffset.UTC));
 
     private Workspace workspace;
@@ -83,6 +88,122 @@ class RobotServiceTest {
         assertThat(summary.targetSocialAccountId()).isNull();
         assertThat(summary.scheduleDelayMinutes()).isNull();
         assertThat(summary.cadenceType()).isEqualTo(RobotCadenceType.MANUAL_ONLY);
+        assertThat(summary.aiPolicy()).isEqualTo(RobotAiPolicy.NO_AI);
+        assertThat(summary.personaId()).isNull();
+    }
+
+    // ---- Phase 12C: AI policy / Persona validation ----
+
+    @Test
+    void createsAiEnabledRobotWithActivePersonaInSameWorkspace() {
+        MediaAsset asset = readyInspectedVideoAsset();
+        when(assets.findByWorkspaceAndId(workspace, asset.getId())).thenReturn(Optional.of(asset));
+        Persona persona = activePersona();
+        when(personas.findByWorkspaceAndId(workspace, persona.getId())).thenReturn(Optional.of(persona));
+
+        RobotSummary summary = service.create(user, new CreateRobotRequest(
+                "AI Robot", null, RobotAutonomyMode.DRAFT_ONLY, RobotSourcePolicy.EXISTING_ASSET, asset.getId(), null, null, null,
+                RobotCadenceType.MANUAL_ONLY, null, null, null,
+                RobotAiPolicy.GENERATE_AND_APPLY, persona.getId(), SuggestionLanguage.ENGLISH, SuggestionTone.CASUAL));
+
+        assertThat(summary.aiPolicy()).isEqualTo(RobotAiPolicy.GENERATE_AND_APPLY);
+        assertThat(summary.personaId()).isEqualTo(persona.getId());
+        assertThat(summary.aiLanguageOverride()).isEqualTo(SuggestionLanguage.ENGLISH);
+        assertThat(summary.aiToneOverride()).isEqualTo(SuggestionTone.CASUAL);
+    }
+
+    @Test
+    void createsAiEnabledRobotWithoutPersonaWhenNoPersonaIsIntentional() {
+        MediaAsset asset = readyInspectedVideoAsset();
+        when(assets.findByWorkspaceAndId(workspace, asset.getId())).thenReturn(Optional.of(asset));
+
+        RobotSummary summary = service.create(user, new CreateRobotRequest(
+                "AI Robot No Persona", null, RobotAutonomyMode.DRAFT_ONLY, RobotSourcePolicy.EXISTING_ASSET, asset.getId(), null, null, null,
+                RobotCadenceType.MANUAL_ONLY, null, null, null,
+                RobotAiPolicy.GENERATE_FOR_REVIEW, null, null, null));
+
+        assertThat(summary.aiPolicy()).isEqualTo(RobotAiPolicy.GENERATE_FOR_REVIEW);
+        assertThat(summary.personaId()).isNull();
+    }
+
+    @Test
+    void rejectsNoAiRobotWithPersonaConfigured() {
+        MediaAsset asset = readyInspectedVideoAsset();
+        when(assets.findByWorkspaceAndId(workspace, asset.getId())).thenReturn(Optional.of(asset));
+        Persona persona = activePersona();
+        when(personas.findByWorkspaceAndId(workspace, persona.getId())).thenReturn(Optional.of(persona));
+
+        assertThatThrownBy(() -> service.create(user, new CreateRobotRequest(
+                "Bad Robot", null, RobotAutonomyMode.DRAFT_ONLY, RobotSourcePolicy.EXISTING_ASSET, asset.getId(), null, null, null,
+                RobotCadenceType.MANUAL_ONLY, null, null, null,
+                RobotAiPolicy.NO_AI, persona.getId(), null, null)))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting("statusCode")
+                .isEqualTo(HttpStatus.BAD_REQUEST);
+    }
+
+    @Test
+    void rejectsCrossWorkspacePersona() {
+        MediaAsset asset = readyInspectedVideoAsset();
+        when(assets.findByWorkspaceAndId(workspace, asset.getId())).thenReturn(Optional.of(asset));
+        UUID otherPersonaId = UUID.randomUUID();
+        when(personas.findByWorkspaceAndId(workspace, otherPersonaId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.create(user, new CreateRobotRequest(
+                "Bad Robot", null, RobotAutonomyMode.DRAFT_ONLY, RobotSourcePolicy.EXISTING_ASSET, asset.getId(), null, null, null,
+                RobotCadenceType.MANUAL_ONLY, null, null, null,
+                RobotAiPolicy.GENERATE_FOR_REVIEW, otherPersonaId, null, null)))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting("statusCode")
+                .isEqualTo(HttpStatus.NOT_FOUND);
+    }
+
+    @Test
+    void rejectsArchivedPersona() {
+        MediaAsset asset = readyInspectedVideoAsset();
+        when(assets.findByWorkspaceAndId(workspace, asset.getId())).thenReturn(Optional.of(asset));
+        Persona persona = activePersona();
+        persona.archive(NOW);
+        when(personas.findByWorkspaceAndId(workspace, persona.getId())).thenReturn(Optional.of(persona));
+
+        assertThatThrownBy(() -> service.create(user, new CreateRobotRequest(
+                "Bad Robot", null, RobotAutonomyMode.DRAFT_ONLY, RobotSourcePolicy.EXISTING_ASSET, asset.getId(), null, null, null,
+                RobotCadenceType.MANUAL_ONLY, null, null, null,
+                RobotAiPolicy.GENERATE_FOR_REVIEW, persona.getId(), null, null)))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting("reason")
+                .isEqualTo("PERSONA_ARCHIVED");
+    }
+
+    @Test
+    void autoScheduleInstagramGateRemainsRejectedEvenWithAiEnabled() {
+        MediaAsset asset = readyInspectedVideoAsset();
+        when(assets.findByWorkspaceAndId(workspace, asset.getId())).thenReturn(Optional.of(asset));
+        SocialAccount instagram = new SocialAccount(workspace, SocialPlatform.INSTAGRAM, "creator", "ig-1", owner, NOW);
+        when(socialAccounts.findByWorkspaceAndId(workspace, instagram.getId())).thenReturn(Optional.of(instagram));
+
+        assertThatThrownBy(() -> service.create(user, new CreateRobotRequest(
+                "Bad Robot", null, RobotAutonomyMode.AUTO_SCHEDULE, RobotSourcePolicy.EXISTING_ASSET, asset.getId(), null, null, instagram.getId(),
+                RobotCadenceType.MANUAL_ONLY, null, 60, null,
+                RobotAiPolicy.GENERATE_AND_APPLY, null, null, null)))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting("reason")
+                .isEqualTo("AUTONOMOUS_PROVIDER_NOT_ALLOWED");
+    }
+
+    @Test
+    void updateAllowsChangingAiPolicyAndPersonaOnExistingRobot() {
+        Robot robot = draftOnlyRobot();
+        when(robots.findByWorkspaceAndIdForUpdate(workspace, robot.getId())).thenReturn(Optional.of(robot));
+        Persona persona = activePersona();
+        when(personas.findByWorkspaceAndId(workspace, persona.getId())).thenReturn(Optional.of(persona));
+
+        RobotSummary summary = service.update(user, robot.getId(), new UpdateRobotRequest(
+                "Renamed", null, RobotAutonomyMode.DRAFT_ONLY, null, RobotCadenceType.MANUAL_ONLY, null, null, 1,
+                RobotAiPolicy.GENERATE_FOR_REVIEW, persona.getId(), null, null));
+
+        assertThat(summary.aiPolicy()).isEqualTo(RobotAiPolicy.GENERATE_FOR_REVIEW);
+        assertThat(summary.personaId()).isEqualTo(persona.getId());
     }
 
     @Test
@@ -330,6 +451,11 @@ class RobotServiceTest {
         MediaAsset asset = readyInspectedVideoAsset();
         return new Robot(workspace, "Robot", null, RobotAutonomyMode.DRAFT_ONLY, asset, null,
                 RobotCadenceType.MANUAL_ONLY, null, null, 1, owner, NOW);
+    }
+
+    private Persona activePersona() {
+        return new Persona(workspace, "Tech Romania", null, SuggestionLanguage.AUTO, SuggestionTone.NEUTRAL,
+                null, "Direct voice.", null, null, null, null, owner, NOW);
     }
 
     private MediaAsset readyInspectedVideoAsset() {

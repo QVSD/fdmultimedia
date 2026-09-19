@@ -45,7 +45,19 @@ public class ContentSuggestion {
     @JoinColumn(name = "content_draft_id", nullable = false)
     private ContentDraft contentDraft;
 
-    /** Plain UUID, no relationship — provenance only, mirrors {@code ContentDraft.robotRunId}. */
+    /**
+     * Explicit provenance (Phase 12C). {@code origin} is never inferred: a
+     * human-initiated generation is always MANUAL with a null
+     * {@code robotRunId}, regardless of whether the Draft itself happens to
+     * carry its own {@code ContentDraft.robotRunId} provenance — those are
+     * two different questions ("who made this Draft" vs. "who triggered
+     * this suggestion"). {@code robotRunId} is a plain UUID, no
+     * relationship, set only by {@link #forRobot}.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private ContentSuggestionOrigin origin;
+
     @Column(name = "robot_run_id")
     private UUID robotRunId;
 
@@ -211,7 +223,8 @@ public class ContentSuggestion {
         this.id = UUID.randomUUID();
         this.workspace = workspace;
         this.contentDraft = contentDraft;
-        this.robotRunId = contentDraft.getRobotRunId();
+        this.origin = ContentSuggestionOrigin.MANUAL;
+        this.robotRunId = null;
         this.generationJob = generationJob;
         this.type = ContentSuggestionType.SOCIAL_COPY;
         this.status = ContentSuggestionStatus.PENDING;
@@ -236,6 +249,42 @@ public class ContentSuggestion {
         }
         this.createdByUser = createdByUser;
         this.createdAt = now;
+    }
+
+    /**
+     * The only path that produces an {@code origin == ROBOT} suggestion
+     * (Phase 12C) — {@code createdByUser} is still the Robot's own
+     * {@code createdByUser} (the human who owns it for workspace audit),
+     * never a fabricated system actor; {@code origin} is what actually
+     * distinguishes this from a human-initiated generation. Called only by
+     * {@code ContentSuggestionService.createForRobot}, which is itself only
+     * ever invoked by {@code RobotRunOrchestrator} under that run's own row
+     * lock — see there for why at most one of these can ever be created per
+     * RobotRun.
+     */
+    public static ContentSuggestion forRobot(
+            Workspace workspace,
+            ContentDraft contentDraft,
+            Job generationJob,
+            String provider,
+            String model,
+            String promptVersion,
+            SuggestionLanguage language,
+            SuggestionTone tone,
+            String promptText,
+            String inputFingerprint,
+            boolean transcriptUsed,
+            UUID transcriptId,
+            PersonaSnapshot personaSnapshot,
+            UUID robotRunId,
+            AppUser createdByUser,
+            Instant now) {
+        ContentSuggestion suggestion = new ContentSuggestion(
+                workspace, contentDraft, generationJob, provider, model, promptVersion, language, tone, promptText,
+                inputFingerprint, transcriptUsed, transcriptId, personaSnapshot, createdByUser, now);
+        suggestion.origin = ContentSuggestionOrigin.ROBOT;
+        suggestion.robotRunId = robotRunId;
+        return suggestion;
     }
 
     @PrePersist
@@ -326,6 +375,7 @@ public class ContentSuggestion {
     public String getPersonaName() { return personaName; }
     public Workspace getWorkspace() { return workspace; }
     public ContentDraft getContentDraft() { return contentDraft; }
+    public ContentSuggestionOrigin getOrigin() { return origin; }
     public UUID getRobotRunId() { return robotRunId; }
     public Job getGenerationJob() { return generationJob; }
     public ContentSuggestionType getType() { return type; }

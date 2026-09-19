@@ -289,6 +289,44 @@ itself hasn't changed — a Persona edit alone never produces
 generation (`409 PERSONA_ARCHIVED`) but never invalidates suggestions
 already generated from it — `POST /api/personas/{id}/restore` reverses it.
 
+## Testing Robot AI enrichment locally
+
+Create a Robot with `aiPolicy: "GENERATE_FOR_REVIEW"` (and optionally
+`personaId`) instead of the default `"NO_AI"`, e.g. `POST /api/robots`
+`{"name": "AI Robot", "autonomyMode": "DRAFT_ONLY", "sourcePolicy":
+"EXISTING_ASSET", "sourceAssetId": "<id>", "cadenceType": "MANUAL_ONLY",
+"aiPolicy": "GENERATE_FOR_REVIEW", "personaId": "<personaId>"}`, then `POST
+/api/robots/{id}/run`. Poll `GET /api/robot-runs/{runId}` — it progresses
+through `WAITING_FOR_DRAFT` → `WAITING_FOR_AI` (the automatic
+`ContentSuggestion` and its `GENERATE_SOCIAL_COPY` Job exist;
+`contentSuggestionId` is populated) → `WAITING_FOR_AI_REVIEW` once the
+suggestion is `READY`. This state is a deliberately separate gate from the
+pre-existing publishing-approval `WAITING_FOR_REVIEW` state; `POST
+/api/content-suggestions/{suggestionId}/apply` (the same endpoint a human
+uses) resumes the Robot's existing autonomy automatically — no dedicated
+"continue Robot" endpoint exists or is needed, since the background
+`RobotAutomationScheduler` poller (or any subsequent read of the run) picks
+the `APPLIED` suggestion up on its own. Use `"aiPolicy":
+"GENERATE_AND_APPLY"` instead to skip the review gate entirely: the Robot
+applies the suggestion itself through that same endpoint before continuing
+its autonomy mode.
+
+To see the stale-protection path, create a `GENERATE_AND_APPLY` Robot,
+`run` it, and — before the automatic Apply happens — `PATCH
+/api/content-drafts/{draftId}` with a different `caption` (poll `GET
+/api/content-drafts/{draftId}/suggestions` rather than the RobotRun itself
+while waiting, since a RobotRun read is itself a reconciliation trigger).
+The RobotRun fails with `failureCode: "ROBOT_AI_SUGGESTION_STALE"` and the
+Draft keeps your edited caption. To force an AI failure, restart the API
+with `CONTENT_AI_ENABLED=false` (see the AI content enrichment section
+above) — an AI-enabled Robot's next run fails with `failureCode:
+"ROBOT_AI_DISABLED"` rather than hanging in `WAITING_FOR_AI`; a `NO_AI`
+Robot is completely unaffected by this switch. `POST
+/api/content-suggestions/{suggestionId}/discard` on a
+`WAITING_FOR_AI_REVIEW` suggestion fails the run with
+`ROBOT_AI_SUGGESTION_DISCARDED` and never auto-regenerates — start a new
+`run` instead.
+
 ## Database migrations
 
 Migrations live in `apps/api-spring/src/main/resources/db/migration` and

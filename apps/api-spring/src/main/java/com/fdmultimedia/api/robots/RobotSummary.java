@@ -1,5 +1,7 @@
 package com.fdmultimedia.api.robots;
 
+import com.fdmultimedia.api.contentsuggestions.SuggestionLanguage;
+import com.fdmultimedia.api.contentsuggestions.SuggestionTone;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -22,6 +24,11 @@ public record RobotSummary(
         Integer cadenceIntervalHours,
         Integer scheduleDelayMinutes,
         int maxRunsPerDay,
+        RobotAiPolicy aiPolicy,
+        UUID personaId,
+        String personaName,
+        SuggestionLanguage aiLanguageOverride,
+        SuggestionTone aiToneOverride,
         Instant nextRunAt,
         Instant lastRunAt,
         Instant createdAt,

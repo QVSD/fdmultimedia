@@ -1,4 +1,5 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { provideRouter } from '@angular/router';
 import { of, throwError } from 'rxjs';
 
 import { AssetsService } from '../../core/assets/assets.service';
@@ -10,6 +11,8 @@ import { RobotApprovalsService } from '../../core/robots/robot-approvals.service
 import { RobotApprovalSummary, RobotRunSummary, RobotSummary } from '../../core/robots/robot.models';
 import { ContentSourcesService } from '../../core/content-sources/content-sources.service';
 import { ContentSourceSummary } from '../../core/content-sources/content-source.models';
+import { PersonasService } from '../../core/personas/personas.service';
+import { PersonaSummary } from '../../core/personas/persona.models';
 import { Robots } from './robots';
 
 describe('Robots', () => {
@@ -20,6 +23,7 @@ describe('Robots', () => {
   let assetsService: Pick<AssetsService, 'list'>;
   let socialAccountsService: Pick<SocialAccountsService, 'list'>;
   let contentSourcesService: Pick<ContentSourcesService, 'list'>;
+  let personasService: Pick<PersonasService, 'list'>;
 
   beforeEach(async () => {
     robotsService = {
@@ -46,15 +50,20 @@ describe('Robots', () => {
     contentSourcesService = {
       list: vi.fn().mockReturnValue(of([contentSource()])),
     };
+    personasService = {
+      list: vi.fn().mockReturnValue(of([activePersona(), archivedPersona()])),
+    };
 
     await TestBed.configureTestingModule({
       imports: [Robots],
       providers: [
+        provideRouter([]),
         { provide: RobotsService, useValue: robotsService },
         { provide: RobotApprovalsService, useValue: approvalsService },
         { provide: AssetsService, useValue: assetsService },
         { provide: SocialAccountsService, useValue: socialAccountsService },
         { provide: ContentSourcesService, useValue: contentSourcesService },
+        { provide: PersonasService, useValue: personasService },
       ],
     }).compileComponents();
 
@@ -144,6 +153,67 @@ describe('Robots', () => {
 
     expect(robotsService.create).not.toHaveBeenCalled();
     expect(component['createError']()).toBe('Choose a content source.');
+  });
+
+  it('creates a NO_AI robot with no persona or overrides by default', () => {
+    fixture.detectChanges();
+    component['toggleCreateForm']();
+    component['createName'].set('No AI Robot');
+    component['createSourceAssetId'].set('asset-1');
+
+    component['createRobot']();
+
+    expect(robotsService.create).toHaveBeenCalledWith(expect.objectContaining({
+      aiPolicy: 'NO_AI',
+      personaId: null,
+      aiLanguageOverride: null,
+      aiToneOverride: null,
+    }));
+  });
+
+  it('creates a GENERATE_FOR_REVIEW robot with a selected Persona and overrides', () => {
+    fixture.detectChanges();
+    component['toggleCreateForm']();
+    component['createName'].set('AI Review Robot');
+    component['createSourceAssetId'].set('asset-1');
+    component['createAiPolicy'].set('GENERATE_FOR_REVIEW');
+    component['createPersonaId'].set('persona-1');
+    component['createAiLanguageOverride'].set('ENGLISH');
+    component['createAiToneOverride'].set('CASUAL');
+
+    component['createRobot']();
+
+    expect(robotsService.create).toHaveBeenCalledWith(expect.objectContaining({
+      aiPolicy: 'GENERATE_FOR_REVIEW',
+      personaId: 'persona-1',
+      aiLanguageOverride: 'ENGLISH',
+      aiToneOverride: 'CASUAL',
+    }));
+  });
+
+  it('only offers active Personas in the Persona selector', () => {
+    fixture.detectChanges();
+
+    const options = component['activePersonas']();
+
+    expect(options.map((persona) => persona.id)).toEqual(['persona-1']);
+    expect(options.some((persona) => persona.status === 'ARCHIVED')).toBe(false);
+  });
+
+  it('does not require AI config for NO_AI but does for AI-enabled policies', () => {
+    fixture.detectChanges();
+
+    expect(component['requiresAiConfig']('NO_AI')).toBe(false);
+    expect(component['requiresAiConfig']('GENERATE_FOR_REVIEW')).toBe(true);
+    expect(component['requiresAiConfig']('GENERATE_AND_APPLY')).toBe(true);
+  });
+
+  it('uses the mandated explanation wording for each AI policy', () => {
+    fixture.detectChanges();
+
+    expect(component['aiPolicyExplanation']('NO_AI')).toBe('Prepare the Draft without AI copy.');
+    expect(component['aiPolicyExplanation']('GENERATE_FOR_REVIEW')).toBe('Generate AI copy and wait for you to review/apply it.');
+    expect(component['aiPolicyExplanation']('GENERATE_AND_APPLY')).toBe('Generate and apply AI copy automatically before the Robot continues.');
   });
 
   it('shows a human-readable selection policy label', () => {
@@ -268,6 +338,68 @@ describe('Robots', () => {
     expect(text).not.toContain('undefined');
   });
 
+  it('shows Waiting for AI review status and a link to review the Draft', () => {
+    const aiRun: RobotRunSummary = {
+      ...run('WAITING_FOR_AI_REVIEW'),
+      contentDraftId: 'draft-1',
+      aiPolicySnapshot: 'GENERATE_FOR_REVIEW',
+      personaIdSnapshot: 'persona-1',
+      personaNameSnapshot: 'Tech Brand Voice',
+    };
+    vi.mocked(robotsService.list).mockReturnValue(of([robot('ACTIVE', 'DRAFT_ONLY')]));
+    vi.mocked(robotsService.allRuns).mockReturnValue(of([aiRun]));
+    fixture = TestBed.createComponent(Robots);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+    const theRobot = component['robots']()[0];
+    component['toggleExpanded'](theRobot);
+    fixture.detectChanges();
+
+    const text = fixture.nativeElement.textContent as string;
+    expect(text).toContain('Waiting for AI review');
+    expect(text).toContain('Tech Brand Voice');
+    expect(text).toContain('Review AI suggestion');
+    expect(text).not.toContain('undefined');
+  });
+
+  it('shows Generating AI status while a run is WAITING_FOR_AI', () => {
+    const aiRun: RobotRunSummary = {
+      ...run('WAITING_FOR_AI'),
+      aiPolicySnapshot: 'GENERATE_AND_APPLY',
+      personaIdSnapshot: null,
+      personaNameSnapshot: null,
+    };
+    vi.mocked(robotsService.list).mockReturnValue(of([robot('ACTIVE', 'DRAFT_ONLY')]));
+    vi.mocked(robotsService.allRuns).mockReturnValue(of([aiRun]));
+    fixture = TestBed.createComponent(Robots);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+    const theRobot = component['robots']()[0];
+    component['toggleExpanded'](theRobot);
+    fixture.detectChanges();
+
+    const text = fixture.nativeElement.textContent as string;
+    expect(text).toContain('Generating AI');
+    expect(text).toContain('No Persona');
+  });
+
+  it('shows AI policy and Persona on an AI-enabled robot card, keeping publishing review separate', () => {
+    const aiRobot: RobotSummary = {
+      ...robot('ACTIVE', 'REVIEW_REQUIRED'),
+      aiPolicy: 'GENERATE_FOR_REVIEW',
+      personaId: 'persona-1',
+      personaName: 'Tech Brand Voice',
+    };
+    vi.mocked(robotsService.list).mockReturnValue(of([aiRobot]));
+    fixture = TestBed.createComponent(Robots);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+
+    const text = fixture.nativeElement.textContent as string;
+    expect(text).toContain('GENERATE_FOR_REVIEW');
+    expect(text).toContain('Tech Brand Voice');
+  });
+
   it('shows the empty approvals state', () => {
     fixture.detectChanges();
     component['switchView']('approvals');
@@ -338,6 +470,11 @@ describe('Robots', () => {
       maxRunsPerDay: 1,
       nextRunAt: null,
       lastRunAt: null,
+      aiPolicy: 'NO_AI',
+      personaId: null,
+      personaName: null,
+      aiLanguageOverride: null,
+      aiToneOverride: null,
       createdAt: '2026-09-18T08:00:00Z',
       updatedAt: '2026-09-18T08:00:00Z',
     };
@@ -360,6 +497,10 @@ describe('Robots', () => {
       highlightCandidateId: null,
       contentDraftId: null,
       publishScheduleId: null,
+      aiPolicySnapshot: 'NO_AI',
+      personaIdSnapshot: null,
+      personaNameSnapshot: null,
+      contentSuggestionId: null,
       failureCode: status === 'FAILED' ? 'SOURCE_UNAVAILABLE' : null,
       failureMessage: status === 'FAILED' ? 'Source asset is not ready' : null,
       createdAt: '2026-09-18T08:05:00Z',
@@ -457,5 +598,28 @@ describe('Robots', () => {
       createdAt: '2026-09-18T08:00:00Z',
       updatedAt: '2026-09-18T08:00:00Z',
     };
+  }
+
+  function activePersona(): PersonaSummary {
+    return {
+      id: 'persona-1',
+      name: 'Tech Brand Voice',
+      description: null,
+      status: 'ACTIVE',
+      defaultLanguage: 'AUTO',
+      defaultTone: 'ENERGETIC',
+      audience: null,
+      voiceDescription: 'Upbeat and concise.',
+      styleGuidelines: null,
+      avoidGuidelines: null,
+      hashtagGuidelines: null,
+      exampleCopy: null,
+      createdAt: '2026-09-18T07:00:00Z',
+      updatedAt: '2026-09-18T07:00:00Z',
+    };
+  }
+
+  function archivedPersona(): PersonaSummary {
+    return { ...activePersona(), id: 'persona-2', name: 'Retired Voice', status: 'ARCHIVED' };
   }
 });

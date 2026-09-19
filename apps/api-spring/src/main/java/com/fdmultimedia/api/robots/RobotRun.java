@@ -1,6 +1,8 @@
 package com.fdmultimedia.api.robots;
 
 import com.fdmultimedia.api.assets.MediaAsset;
+import com.fdmultimedia.api.contentsuggestions.SuggestionLanguage;
+import com.fdmultimedia.api.contentsuggestions.SuggestionTone;
 import com.fdmultimedia.api.workspaces.Workspace;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -74,6 +76,34 @@ public class RobotRun {
     @Column(name = "content_draft_id")
     private UUID contentDraftId;
 
+    /**
+     * Immutable snapshot of the Robot's AI configuration, captured once at
+     * run creation (see RobotAutomationDispatchService.startRun) — editing
+     * the Robot afterward never redirects an in-flight run. personaId is a
+     * plain reference (which Persona to resolve when generation actually
+     * begins), never the Persona's editorial fields themselves; those are
+     * only ever snapshotted onto the ContentSuggestion, exactly as Phase
+     * 12B established.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "ai_policy_snapshot", nullable = false)
+    private RobotAiPolicy aiPolicySnapshot;
+
+    @Column(name = "persona_id_snapshot")
+    private UUID personaIdSnapshot;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "ai_language_override_snapshot")
+    private SuggestionLanguage aiLanguageOverrideSnapshot;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "ai_tone_override_snapshot")
+    private SuggestionTone aiToneOverrideSnapshot;
+
+    /** The one automatic ContentSuggestion this run has created, if any — set exactly once. */
+    @Column(name = "content_suggestion_id")
+    private UUID contentSuggestionId;
+
     @Column(name = "publish_schedule_id")
     private UUID publishScheduleId;
 
@@ -89,7 +119,7 @@ public class RobotRun {
     protected RobotRun() {
     }
 
-    /** EXISTING_ASSET convenience constructor — Phase 11C shape, unchanged. */
+    /** EXISTING_ASSET convenience constructor — Phase 11C shape, unchanged. Snapshots the Robot's current AI configuration. */
     public RobotRun(Workspace workspace, Robot robot, RobotRunTriggerType triggerType, MediaAsset sourceAsset, Instant now) {
         this(workspace, robot, triggerType, sourceAsset, null, null, now);
     }
@@ -112,6 +142,12 @@ public class RobotRun {
         this.selectionPolicy = selectionPolicy;
         this.startedAt = now;
         this.createdAt = now;
+        // Snapshotted once, here, at run creation — never re-read from the
+        // live Robot again for this run (see class Javadoc on the fields).
+        this.aiPolicySnapshot = robot.getAiPolicy();
+        this.personaIdSnapshot = robot.getPersona() == null ? null : robot.getPersona().getId();
+        this.aiLanguageOverrideSnapshot = robot.getAiLanguageOverride();
+        this.aiToneOverrideSnapshot = robot.getAiToneOverride();
     }
 
     @PrePersist
@@ -143,6 +179,19 @@ public class RobotRun {
 
     public void markWaitingForReview(Instant now) {
         this.status = RobotRunStatus.WAITING_FOR_REVIEW;
+    }
+
+    /** Set exactly once, atomically with the WAITING_FOR_AI transition below — see RobotRunOrchestrator for the idempotency guard. */
+    public void setContentSuggestionId(UUID contentSuggestionId) {
+        this.contentSuggestionId = contentSuggestionId;
+    }
+
+    public void markWaitingForAi(Instant now) {
+        this.status = RobotRunStatus.WAITING_FOR_AI;
+    }
+
+    public void markWaitingForAiReview(Instant now) {
+        this.status = RobotRunStatus.WAITING_FOR_AI_REVIEW;
     }
 
     public void setPublishScheduleId(UUID publishScheduleId) {
@@ -186,6 +235,11 @@ public class RobotRun {
     public UUID getHighlightAnalysisId() { return highlightAnalysisId; }
     public UUID getHighlightCandidateId() { return highlightCandidateId; }
     public UUID getContentDraftId() { return contentDraftId; }
+    public RobotAiPolicy getAiPolicySnapshot() { return aiPolicySnapshot; }
+    public UUID getPersonaIdSnapshot() { return personaIdSnapshot; }
+    public SuggestionLanguage getAiLanguageOverrideSnapshot() { return aiLanguageOverrideSnapshot; }
+    public SuggestionTone getAiToneOverrideSnapshot() { return aiToneOverrideSnapshot; }
+    public UUID getContentSuggestionId() { return contentSuggestionId; }
     public UUID getPublishScheduleId() { return publishScheduleId; }
     public String getFailureCode() { return failureCode; }
     public String getFailureMessage() { return failureMessage; }

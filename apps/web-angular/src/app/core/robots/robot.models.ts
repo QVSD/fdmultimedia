@@ -1,3 +1,5 @@
+import { SuggestionLanguage, SuggestionTone } from '../content-suggestions/content-suggestion.models';
+
 export type RobotStatus = 'ACTIVE' | 'PAUSED' | 'DISABLED';
 export type RobotAutonomyMode = 'DRAFT_ONLY' | 'REVIEW_REQUIRED' | 'AUTO_SCHEDULE';
 export type RobotHighlightStrategy = 'TOP_HIGHLIGHT';
@@ -5,9 +7,13 @@ export type RobotSourcePolicy = 'EXISTING_ASSET' | 'CONTENT_SOURCE';
 export type RobotSelectionPolicy = 'OLDEST_UNPROCESSED' | 'NEWEST_UNPROCESSED';
 export type RobotCadenceType = 'MANUAL_ONLY' | 'INTERVAL';
 export type RobotRunTriggerType = 'MANUAL' | 'SCHEDULED';
+/** Independent of autonomyMode (Phase 12C) — never merge the two axes. */
+export type RobotAiPolicy = 'NO_AI' | 'GENERATE_FOR_REVIEW' | 'GENERATE_AND_APPLY';
 export type RobotRunStatus =
   | 'RUNNING'
   | 'WAITING_FOR_DRAFT'
+  | 'WAITING_FOR_AI'
+  | 'WAITING_FOR_AI_REVIEW'
   | 'WAITING_FOR_REVIEW'
   | 'SUCCEEDED'
   | 'FAILED'
@@ -33,6 +39,11 @@ export interface RobotSummary {
   cadenceIntervalHours: number | null;
   scheduleDelayMinutes: number | null;
   maxRunsPerDay: number;
+  aiPolicy: RobotAiPolicy;
+  personaId: string | null;
+  personaName: string | null;
+  aiLanguageOverride: SuggestionLanguage | null;
+  aiToneOverride: SuggestionTone | null;
   nextRunAt: string | null;
   lastRunAt: string | null;
   createdAt: string;
@@ -54,6 +65,10 @@ export interface RobotRunSummary {
   highlightAnalysisId: string | null;
   highlightCandidateId: string | null;
   contentDraftId: string | null;
+  aiPolicySnapshot: RobotAiPolicy;
+  personaIdSnapshot: string | null;
+  personaNameSnapshot: string | null;
+  contentSuggestionId: string | null;
   publishScheduleId: string | null;
   failureCode: string | null;
   failureMessage: string | null;
@@ -91,6 +106,10 @@ export interface CreateRobotRequest {
   cadenceIntervalHours: number | null;
   scheduleDelayMinutes: number | null;
   maxRunsPerDay: number | null;
+  aiPolicy: RobotAiPolicy;
+  personaId: string | null;
+  aiLanguageOverride: SuggestionLanguage | null;
+  aiToneOverride: SuggestionTone | null;
 }
 
 export type UpdateRobotRequest = Omit<CreateRobotRequest, 'sourcePolicy' | 'sourceAssetId' | 'contentSourceId' | 'selectionPolicy'>;

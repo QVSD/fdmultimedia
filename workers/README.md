@@ -278,6 +278,14 @@ caption when present, purely as visible proof a Persona actually reached
 the worker end-to-end — it still makes no network call and stays fully
 deterministic for the same authorization.
 
+Phase 12C (Robot AI enrichment policies) likewise required no changes here.
+A Robot's automatic `GENERATE_SOCIAL_COPY` request flows through the
+identical authorization/prompt/execution/result-reporting path described
+above; the worker has no notion of whether a generation request originated
+from a human or a Robot; provenance (`origin`/`robotRunId`) is tracked
+entirely on the backend's `ContentSuggestion` row and never sent to or
+reported by the worker.
+
 `PUBLISH_MEDIA` for the `TEST` platform is always advertised; it requires no
 external tool and no configuration, backed by the deterministic
 `TestPublishingProvider`. `PublishMediaExecutor` branches on

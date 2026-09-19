@@ -5,11 +5,18 @@ import com.fdmultimedia.api.accounts.SocialPlatform;
 import com.fdmultimedia.api.assets.MediaAsset;
 import com.fdmultimedia.api.auth.AuthService;
 import com.fdmultimedia.api.auth.security.AuthenticatedUser;
+import com.fdmultimedia.api.contentdrafts.ContentDraft;
 import com.fdmultimedia.api.contentdrafts.ContentDraftRepository;
 import com.fdmultimedia.api.contentdrafts.ContentDraftService;
 import com.fdmultimedia.api.contentdrafts.ContentDraftStatus;
 import com.fdmultimedia.api.contentdrafts.ContentDraftSummary;
 import com.fdmultimedia.api.contentsources.ContentSourceRepository;
+import com.fdmultimedia.api.contentsuggestions.ContentSuggestion;
+import com.fdmultimedia.api.contentsuggestions.ContentSuggestionRepository;
+import com.fdmultimedia.api.contentsuggestions.ContentSuggestionService;
+import com.fdmultimedia.api.contentsuggestions.ContentSuggestionStatus;
+import com.fdmultimedia.api.contentsuggestions.ContentSuggestionSummary;
+import com.fdmultimedia.api.personas.PersonaRepository;
 import com.fdmultimedia.api.highlights.CreateHighlightAnalysisRequest;
 import com.fdmultimedia.api.highlights.HighlightAnalysis;
 import com.fdmultimedia.api.highlights.HighlightAnalysisRepository;
@@ -67,6 +74,9 @@ public class RobotRunOrchestrator {
     private final RobotApprovalRepository approvals;
     private final PublishScheduleService publishScheduleService;
     private final ContentSourceRepository contentSources;
+    private final ContentSuggestionService contentSuggestionService;
+    private final ContentSuggestionRepository contentSuggestions;
+    private final PersonaRepository personas;
     private final Clock clock;
 
     public RobotRunOrchestrator(
@@ -82,6 +92,9 @@ public class RobotRunOrchestrator {
             RobotApprovalRepository approvals,
             PublishScheduleService publishScheduleService,
             ContentSourceRepository contentSources,
+            ContentSuggestionService contentSuggestionService,
+            ContentSuggestionRepository contentSuggestions,
+            PersonaRepository personas,
             Clock clock) {
         this.authService = authService;
         this.robotRepository = robotRepository;
@@ -95,6 +108,9 @@ public class RobotRunOrchestrator {
         this.approvals = approvals;
         this.publishScheduleService = publishScheduleService;
         this.contentSources = contentSources;
+        this.contentSuggestionService = contentSuggestionService;
+        this.contentSuggestions = contentSuggestions;
+        this.personas = personas;
         this.clock = clock;
     }
 
@@ -154,6 +170,8 @@ public class RobotRunOrchestrator {
             switch (run.getStatus()) {
                 case RUNNING -> advanceRunning(run, principal, now);
                 case WAITING_FOR_DRAFT -> advanceWaitingForDraft(run, principal, now);
+                case WAITING_FOR_AI -> advanceWaitingForAi(run, principal, now);
+                case WAITING_FOR_AI_REVIEW -> advanceWaitingForAiReview(run, principal, now);
                 case WAITING_FOR_REVIEW -> { /* human action required; nothing to auto-advance */ }
                 default -> { /* terminal; unreachable due to the guard above */ }
             }
@@ -252,10 +270,142 @@ public class RobotRunOrchestrator {
     private void advanceWaitingForDraft(RobotRun run, AuthenticatedUser principal, Instant now) {
         ContentDraftSummary draft = contentDraftService.getFor(principal, run.getContentDraftId());
         switch (draft.status()) {
-            case READY, PUBLISHED -> takeAutonomyAction(run, draft, principal, now);
+            case READY -> {
+                if (run.getAiPolicySnapshot() == RobotAiPolicy.NO_AI) {
+                    takeAutonomyAction(run, draft, principal, now);
+                } else {
+                    beginAiGeneration(run, draft, principal, now);
+                }
+            }
+            case PUBLISHED -> takeAutonomyAction(run, draft, principal, now);
             case FAILED -> run.markFailed("DRAFT_PREPARATION_FAILED", safe(draft.failureMessage(), "Draft preparation failed"), now);
             case DRAFT, PUBLISHING -> { /* still preparing or already mid-publish from a prior action; keep waiting */ }
         }
+    }
+
+    /**
+     * The only place an automatic {@code ContentSuggestion} is ever created
+     * for this run — reached exactly once, since a successful call
+     * transitions {@code run.status} away from WAITING_FOR_DRAFT to
+     * WAITING_FOR_AI atomically (same transaction as the suggestion/Job
+     * creation itself, both under this run's own row lock), so no later
+     * reconciliation pass can re-enter this method for the same run. The
+     * {@code contentSuggestionId == null} guard below is defense in depth,
+     * not the primary idempotency mechanism; the DB-level
+     * {@code content_suggestions_one_robot_suggestion_per_run} unique index
+     * is the final backstop.
+     */
+    private void beginAiGeneration(RobotRun run, ContentDraftSummary draft, AuthenticatedUser principal, Instant now) {
+        if (run.getContentSuggestionId() != null) {
+            run.markWaitingForAi(now);
+            return;
+        }
+        ContentDraft draftEntity = contentDrafts.findByWorkspaceAndId(run.getWorkspace(), draft.id()).orElse(null);
+        if (draftEntity == null) {
+            run.markFailed("ROBOT_AI_GENERATION_FAILED", "Draft is no longer available", now);
+            return;
+        }
+        try {
+            ContentSuggestionSummary suggestion = contentSuggestionService.createForRobot(
+                    run.getWorkspace(), draftEntity, run.getPersonaIdSnapshot(),
+                    run.getAiLanguageOverrideSnapshot(), run.getAiToneOverrideSnapshot(),
+                    run.getId(), run.getRobot().getCreatedByUser());
+            run.setContentSuggestionId(suggestion.id());
+            run.markWaitingForAi(now);
+        } catch (ResponseStatusException ex) {
+            run.markFailed(mapAiCreateFailureCode(ex.getReason()), safe(ex.getReason(), "AI generation could not be started"), now);
+        }
+    }
+
+    private String mapAiCreateFailureCode(String reason) {
+        return switch (reason == null ? "" : reason) {
+            case "AI_DISABLED" -> "ROBOT_AI_DISABLED";
+            case "PERSONA_ARCHIVED", "Persona not found" -> "ROBOT_AI_PERSONA_UNAVAILABLE";
+            default -> "ROBOT_AI_GENERATION_FAILED";
+        };
+    }
+
+    /**
+     * PENDING/GENERATING: the {@code GENERATE_SOCIAL_COPY} Job owns bounded
+     * retries — this method never retries anything itself, only observes.
+     * FAILED/DISCARDED: terminal from the Robot's own perspective. READY:
+     * either wait for human review (GENERATE_FOR_REVIEW) or apply
+     * immediately (GENERATE_AND_APPLY) — the same authoritative Apply path
+     * a human uses, never a hand-composed caption here. APPLIED: crash-
+     * recovery path — a prior Apply already committed (by this method or by
+     * a human, for GENERATE_FOR_REVIEW) but the run never advanced past
+     * WAITING_FOR_AI; simply continue rather than re-applying.
+     */
+    private void advanceWaitingForAi(RobotRun run, AuthenticatedUser principal, Instant now) {
+        ContentSuggestion suggestion = contentSuggestions.findById(run.getContentSuggestionId()).orElse(null);
+        if (suggestion == null) {
+            run.markFailed("ROBOT_AI_GENERATION_FAILED", "The AI suggestion is no longer available", now);
+            return;
+        }
+        switch (suggestion.getStatus()) {
+            case PENDING, GENERATING -> { /* still processing; nothing to do until the Job finishes */ }
+            case FAILED -> run.markFailed("ROBOT_AI_GENERATION_FAILED", safe(suggestion.getFailureMessage(), "AI content generation failed"), now);
+            case DISCARDED -> run.markFailed("ROBOT_AI_SUGGESTION_DISCARDED", "The AI suggestion was discarded", now);
+            case READY -> {
+                if (run.getAiPolicySnapshot() == RobotAiPolicy.GENERATE_FOR_REVIEW) {
+                    run.markWaitingForAiReview(now);
+                } else {
+                    applyAiSuggestion(run, suggestion, principal, now);
+                }
+            }
+            case APPLIED -> continueAfterAiResolved(run, principal, now);
+        }
+    }
+
+    /**
+     * WAITING_FOR_AI_REVIEW: the AI content review gate — deliberately
+     * distinct from the (pre-existing) publishing approval review gate
+     * below. READY: still waiting for a human to Apply or Discard through
+     * the ordinary ContentSuggestion endpoints; this method never applies
+     * on the human's behalf here (that would defeat the point of
+     * GENERATE_FOR_REVIEW). APPLIED: the human applied it — continue
+     * autonomy. DISCARDED: a controlled terminal outcome, never an infinite
+     * wait and never a silent auto-regeneration.
+     */
+    private void advanceWaitingForAiReview(RobotRun run, AuthenticatedUser principal, Instant now) {
+        ContentSuggestion suggestion = contentSuggestions.findById(run.getContentSuggestionId()).orElse(null);
+        if (suggestion == null) {
+            run.markFailed("ROBOT_AI_GENERATION_FAILED", "The AI suggestion is no longer available", now);
+            return;
+        }
+        switch (suggestion.getStatus()) {
+            case READY, PENDING, GENERATING -> { /* still waiting for human review */ }
+            case APPLIED -> continueAfterAiResolved(run, principal, now);
+            case DISCARDED -> run.markFailed("ROBOT_AI_SUGGESTION_DISCARDED", "The AI suggestion was discarded", now);
+            case FAILED -> run.markFailed("ROBOT_AI_GENERATION_FAILED", safe(suggestion.getFailureMessage(), "AI content generation failed"), now);
+        }
+    }
+
+    /**
+     * Reuses the exact authoritative {@code ContentSuggestionService.apply}
+     * path a human uses — never a hand-composed caption, never bypassing
+     * the fingerprint/staleness check. A stale Draft (edited by a human
+     * after generation) fails the run without ever overwriting that edit.
+     */
+    private void applyAiSuggestion(RobotRun run, ContentSuggestion suggestion, AuthenticatedUser principal, Instant now) {
+        try {
+            contentSuggestionService.apply(principal, suggestion.getId());
+            continueAfterAiResolved(run, principal, now);
+        } catch (ResponseStatusException ex) {
+            String reason = ex.getReason();
+            if ("SUGGESTION_STALE".equals(reason)) {
+                run.markFailed("ROBOT_AI_SUGGESTION_STALE", "The Draft changed after AI generation; the human edit was preserved", now);
+            } else if ("SUGGESTION_ALREADY_APPLIED".equals(reason)) {
+                continueAfterAiResolved(run, principal, now);
+            } else {
+                run.markFailed("ROBOT_AI_APPLY_FAILED", safe(reason, "Failed to apply the AI suggestion"), now);
+            }
+        }
+    }
+
+    private void continueAfterAiResolved(RobotRun run, AuthenticatedUser principal, Instant now) {
+        ContentDraftSummary draft = contentDraftService.getFor(principal, run.getContentDraftId());
+        takeAutonomyAction(run, draft, principal, now);
     }
 
     private void takeAutonomyAction(RobotRun run, ContentDraftSummary draft, AuthenticatedUser principal, Instant now) {
@@ -321,6 +471,9 @@ public class RobotRunOrchestrator {
         String contentSourceName = run.getContentSourceId() == null
                 ? null
                 : contentSources.findById(run.getContentSourceId()).map(source -> source.getName()).orElse(null);
+        String personaName = run.getPersonaIdSnapshot() == null
+                ? null
+                : personas.findById(run.getPersonaIdSnapshot()).map(persona -> persona.getName()).orElse(null);
         return new RobotRunSummary(
                 run.getId(),
                 run.getRobot().getId(),
@@ -336,6 +489,10 @@ public class RobotRunOrchestrator {
                 run.getHighlightAnalysisId(),
                 run.getHighlightCandidateId(),
                 run.getContentDraftId(),
+                run.getAiPolicySnapshot(),
+                run.getPersonaIdSnapshot(),
+                personaName,
+                run.getContentSuggestionId(),
                 run.getPublishScheduleId(),
                 run.getFailureCode(),
                 run.getFailureMessage(),

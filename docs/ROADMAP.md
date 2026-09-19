@@ -1,6 +1,6 @@
 # Roadmap
 
-The repository is currently at Phase 12B. Completed phases are marked below;
+The repository is currently at Phase 12C. Completed phases are marked below;
 later phases are planned high-level direction and intentionally do not go into
 implementation detail before they are started.
 
@@ -247,13 +247,46 @@ implementation detail before they are started.
    section (Persona selector, defaults pre-fill, snapshot name shown on
    every suggestion card even after a rename or archive) round out the
    phase. *(complete)*
-25. **FFmpeg processing** — richer automated video processing pipelines.
-26. **Additional platform integrations** — TikTok, YouTube, or other real
+25. **Robot AI Enrichment (Phase 12C)** — Robots may now automatically
+   invoke Phase 12A/12B AI content generation, on a new `RobotAiPolicy` axis
+   (`NO_AI` / `GENERATE_FOR_REVIEW` / `GENERATE_AND_APPLY`) kept strictly
+   independent of the existing `RobotAutonomyMode` axis — the two are never
+   collapsed into one switch. `NO_AI` reproduces Phase 11C/11D behavior
+   exactly. `GENERATE_FOR_REVIEW` creates exactly one automatic
+   `ContentSuggestion` and parks the RobotRun in a new `WAITING_FOR_AI_REVIEW`
+   state — a human review gate deliberately distinct from the pre-existing
+   publishing-approval `WAITING_FOR_REVIEW` gate — until a human Applies or
+   Discards it through the ordinary suggestion endpoints, after which the
+   Robot resumes its existing autonomy unattended. `GENERATE_AND_APPLY`
+   auto-applies through the exact same human Apply path (fingerprint/staleness
+   checks included) before continuing. A Robot may optionally reference a
+   Persona (workspace-scoped, validated ACTIVE at both configure time and
+   generation time); `RobotRun` snapshots the AI policy and Persona
+   *identity* at run-creation time so a mid-run Robot edit never redirects
+   an in-flight run, while the Persona's editorial *content* is still
+   resolved fresh (and re-validated ACTIVE) at the moment generation
+   actually happens. Every automatically generated suggestion carries an
+   explicit `origin` (`MANUAL` vs `ROBOT`) and, for `ROBOT`, the originating
+   `robotRunId` — no longer inferred from the Draft's own Robot provenance,
+   which was a latent conflation fixed in this phase. Reconciliation reuses
+   the existing Phase 11C row-locked (`FOR UPDATE SKIP LOCKED`) bounded
+   poller unchanged, giving idempotent, multi-instance-safe progress (at
+   most one automatic suggestion and one Job per run) for free, and a
+   `content_suggestions_one_robot_suggestion_per_run` unique index as
+   defense in depth. AI failure, an archived Persona, a discarded
+   suggestion, or the global `CONTENT_AI_ENABLED` kill switch all fail the
+   RobotRun safely with a bounded failure code — never an infinite wait,
+   never a Robot-level retry (the existing Job owns bounded provider
+   retries). AUTO_SCHEDULE's real-provider gate (TEST only, Instagram still
+   rejected) is unaffected by AI policy. *(complete)*
+26. **FFmpeg processing** — richer automated video processing pipelines.
+27. **Additional platform integrations** — TikTok, YouTube, or other real
    platforms behind the same provider-boundary pattern Instagram
    established in Phase 10B.
-27. **AI content automation** — Robot-driven autonomous AI generation/
-   auto-apply, Persona-to-SocialAccount assignment, multi-persona blending,
-   AI-generated Personas, and engagement-driven voice tuning — all
-   explicitly out of scope through Phase 12B, building on the Persona and
-   suggestion model it established.
-28. **Analytics / revenue** — performance analytics and revenue tracking.
+28. **Further AI content automation** — automatic AI regeneration, Robot
+   A/B testing of multiple suggestions, analytics/engagement-driven prompt
+   or Persona optimization, AI-assisted source or highlight selection,
+   multiple Personas per run or Persona blending, and AI-generated
+   Personas — all explicitly out of scope through Phase 12C, which covers
+   only a single bounded automatic-or-reviewed generation per RobotRun.
+29. **Analytics / revenue** — performance analytics and revenue tracking.

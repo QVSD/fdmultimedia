@@ -113,6 +113,45 @@
           <span>Max runs per day</span>
           <input type="number" min="1" max="24" [ngModel]="createMaxRunsPerDay()" (ngModelChange)="createMaxRunsPerDay.set($event)" name="maxRunsPerDay" />
         </label>
+        <label>
+          <span>AI enrichment</span>
+          <select [ngModel]="createAiPolicy()" (ngModelChange)="createAiPolicy.set($event)" name="aiPolicy">
+            <option value="NO_AI">No AI</option>
+            <option value="GENERATE_FOR_REVIEW">Generate for review</option>
+            <option value="GENERATE_AND_APPLY">Generate and apply</option>
+          </select>
+          <p class="robots__muted">{{ aiPolicyExplanation(createAiPolicy()) }}</p>
+        </label>
+        @if (requiresAiConfig(createAiPolicy())) {
+          <label>
+            <span>Persona</span>
+            <select [ngModel]="createPersonaId()" (ngModelChange)="createPersonaId.set($event)" name="personaId">
+              <option value="">No Persona</option>
+              @for (persona of activePersonas(); track persona.id) {
+                <option [value]="persona.id">{{ persona.name }}</option>
+              }
+            </select>
+          </label>
+          <label>
+            <span>Language override</span>
+            <select [ngModel]="createAiLanguageOverride()" (ngModelChange)="createAiLanguageOverride.set($event)" name="aiLanguageOverride">
+              <option value="">Use Persona/default</option>
+              <option value="AUTO">Auto</option>
+              <option value="ENGLISH">English</option>
+              <option value="ROMANIAN">Romanian</option>
+            </select>
+          </label>
+          <label>
+            <span>Tone override</span>
+            <select [ngModel]="createAiToneOverride()" (ngModelChange)="createAiToneOverride.set($event)" name="aiToneOverride">
+              <option value="">Use Persona/default</option>
+              <option value="NEUTRAL">Neutral</option>
+              <option value="INFORMATIVE">Informative</option>
+              <option value="CASUAL">Casual</option>
+              <option value="ENERGETIC">Energetic</option>
+            </select>
+          </label>
+        }
         <button type="submit" [disabled]="createBusy()">{{ createBusy() ? 'Creating...' : 'Create' }}</button>
         @if (createError()) {
           <p class="robots__error">{{ createError() }}</p>
@@ -148,6 +187,16 @@
                     <span>{{ robot.cadenceType === 'INTERVAL' ? 'Every ' + robot.cadenceIntervalHours + 'h' : 'Manual only' }}</span>
                     @if (robot.targetSocialAccountDisplayName) {
                       <span>{{ robot.targetSocialAccountDisplayName }}</span>
+                    }
+                    @if (robot.aiPolicy !== 'NO_AI') {
+                      <span class="robots__badge">{{ robot.aiPolicy }}</span>
+                      <span>{{ robot.personaName || 'No Persona' }}</span>
+                      @if (robot.aiLanguageOverride) {
+                        <span>Language: {{ robot.aiLanguageOverride }}</span>
+                      }
+                      @if (robot.aiToneOverride) {
+                        <span>Tone: {{ robot.aiToneOverride }}</span>
+                      }
                     }
                     <span>Latest run: {{ latestRunStatusFor(robot) }}</span>
                     @if (robot.nextRunAt) {
@@ -186,6 +235,12 @@
                           }
                           @if (run.contentDraftId) {
                             <span class="robots__muted">Draft: {{ run.contentDraftId.slice(0, 8) }}</span>
+                          }
+                          @if (run.aiPolicySnapshot !== 'NO_AI') {
+                            <span class="robots__muted">{{ run.personaNameSnapshot || 'No Persona' }}</span>
+                          }
+                          @if (run.status === 'WAITING_FOR_AI_REVIEW' && run.contentDraftId) {
+                            <a class="robots__muted" routerLink="/content">Review AI suggestion &rarr;</a>
                           }
                           @if (run.publishScheduleId) {
                             <span class="robots__muted">Schedule: {{ run.publishScheduleId.slice(0, 8) }}</span>

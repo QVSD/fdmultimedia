@@ -133,6 +133,34 @@ class ContentSuggestionServiceTest {
         assertThat(summary.provider()).isEqualTo("DETERMINISTIC_TEST");
         assertThat(summary.promptVersion()).isEqualTo(SocialCopyPromptBuilder.VERSION_V2);
         assertThat(summary.transcriptUsed()).isFalse();
+        // Phase 12C human-generation regression: manual generation is always MANUAL with no robotRunId,
+        // regardless of whether the Draft itself happens to carry its own Robot provenance.
+        assertThat(summary.origin()).isEqualTo(ContentSuggestionOrigin.MANUAL);
+        assertThat(summary.robotRunId()).isNull();
+    }
+
+    @Test
+    void createForRobotProducesRobotOriginWithTheGivenRunId() {
+        when(jobService.createForWorkspace(any(), any())).thenReturn(jobSummary(generationJob));
+        when(jobService.getJobEntityForWorkspace(workspace, generationJob.getId())).thenReturn(Optional.of(generationJob));
+        UUID robotRunId = UUID.randomUUID();
+
+        ContentSuggestionSummary summary = service.createForRobot(
+                workspace, draft, null, SuggestionLanguage.ENGLISH, SuggestionTone.CASUAL, robotRunId, owner);
+
+        assertThat(summary.origin()).isEqualTo(ContentSuggestionOrigin.ROBOT);
+        assertThat(summary.robotRunId()).isEqualTo(robotRunId);
+        assertThat(summary.status()).isEqualTo(ContentSuggestionStatus.PENDING);
+    }
+
+    @Test
+    void createForRobotRejectsWhenDraftNotReadyJustLikeHumanGeneration() {
+        ContentDraft notReady = draftInClipPending();
+
+        assertThatThrownBy(() -> service.createForRobot(workspace, notReady, null, null, null, UUID.randomUUID(), owner))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting("statusCode")
+                .isEqualTo(HttpStatus.CONFLICT);
     }
 
     @Test
