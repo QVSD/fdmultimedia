@@ -10,5 +10,6 @@ public record PublicationAttribution(
         UUID appliedContentSuggestionId, String suggestionOrigin,
         UUID personaId, String personaNameSnapshot, String aiProvider,
         String aiModel, String promptVersion, String aiPolicy,
-        String robotAutonomyMode, String sourceSelectionPolicy, Instant createdAt) {
+        String robotAutonomyMode, String sourceSelectionPolicy,
+        String contentSourceNameSnapshot, Instant createdAt) {
 }

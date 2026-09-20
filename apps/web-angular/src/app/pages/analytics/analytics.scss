@@ -27,12 +27,25 @@
 .analytics dd { margin: 3px 0 0; overflow-wrap: anywhere; font-weight: 600; }
 .analytics__metrics dd { font-size: 1.4rem; }
 .analytics__table-wrap { overflow-x: auto; }
+.analytics__section-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.analytics__filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(145px, 1fr)); gap: 10px 14px; margin: 16px 0; }
+.analytics__filters label, .analytics__section-heading label { display: grid; gap: 4px; font-size: .82rem; color: #59636d; }
+.analytics__filters input, .analytics__filters select, .analytics__section-heading select { width: 100%; min-width: 0; margin: 0; padding: 7px; font: inherit; color: #17212a; }
+.analytics__coverage { border-left: 3px solid #178267; padding: 8px 12px; background: #eef7f3; }
+.analytics__kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 16px; margin: 16px 0; }
+.analytics__kpis dd { font-size: 1.3rem; }
+.analytics__kpis small, .analytics td small { color: #59636d; display: block; }
+.analytics__trend { display: grid; gap: 7px; max-height: 310px; overflow-y: auto; }
+.analytics__trend-row { display: grid; grid-template-columns: 94px minmax(70px, 1fr) 120px; align-items: center; gap: 12px; font-size: .86rem; }
+.analytics__bar-track { height: 10px; background: #e4e9eb; }
+.analytics__bar { display: block; height: 100%; background: #178267; }
 .analytics table { width: 100%; border-collapse: collapse; min-width: 640px; }
 .analytics th, .analytics td { text-align: left; padding: 9px 12px; border-bottom: 1px solid #e0e4e8; }
 .analytics th { color: #59636d; font-size: .82rem; }
-.analytics select { display: block; max-width: 100%; min-width: min(100%, 360px); padding: 7px; margin: 8px 0 24px; }
+.analytics #publication-select { display: block; max-width: 100%; min-width: min(100%, 360px); padding: 7px; margin: 8px 0 24px; }
 
 @media (max-width: 600px) {
   .analytics { padding: 16px; }
   .analytics__header { flex-wrap: wrap; }
+  .analytics__trend-row { grid-template-columns: 80px minmax(50px, 1fr) 92px; gap: 6px; font-size: .76rem; }
 }

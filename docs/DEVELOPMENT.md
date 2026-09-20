@@ -127,7 +127,8 @@ snapshotting. The one deliberate exception to the usual one-directional
 package convention: `personas` imports `SuggestionLanguage`/
 `SuggestionTone` from `contentsuggestions` to reuse them rather than fork a
 parallel enum — see `personas/package-info.java` for the full rationale.
-`analytics` now contains Phase 13A publication collection and attribution;
+`analytics` now contains Phase 13A publication collection/attribution and the
+Phase 13B read-only dashboard aggregation over that same data;
 `revenue` remains a placeholder. The package layout under
 `com.fdmultimedia.api` (`auth`, `users`, `workspaces`, `accounts`, `robots`,
 `contentsources`, `assets`, `jobs`, `workers`, `publishing`,
@@ -630,3 +631,29 @@ as a dash), distinct from an observed zero. TEST is a deterministic simulation.
 Instagram insights are not silently attempted with publishing-only scopes;
 the existing account requires separately verified analytics permission before
 real collection can be enabled. Disabling analytics never disables publishing.
+
+## Publication analytics dashboard (Phase 13B)
+
+The Analytics page's "Published content" band (`GET /api/analytics/dashboard/summary`,
+`/trend`, `/breakdown`, `/filters`) reads the same Phase 13A snapshots/attribution
+rows with no new write path. All four share `dateFrom`/`dateTo` (ISO dates,
+defaulting to the last 30 UTC days, capped at 365 days and never past today),
+`window` (`LATEST`/`H24`/`H72`/`D7`), and optional `provider`/`robotId`/
+`personaId`/`contentSourceId`/`origin` (`MANUAL`/`ROBOT`)/`aiUsage`
+(`AI_APPLIED`/`NO_APPLIED_AI`) filters — an unrecognized enum value or
+malformed date/UUID is a plain `400`, never silently ignored. `trend` additionally
+takes `metric` (one of the seven normalized metrics) and `breakdown` takes
+`dimension` (`ROBOT`/`PERSONA`/`CONTENT_SOURCE`/`PROVIDER`/`ORIGIN`/`AI_USAGE`).
+The Angular page keeps all of these as query params, so a filtered/grouped view
+is a shareable URL.
+
+To see a non-trivial dashboard locally without waiting on the real cadence,
+publish a few TEST items (manually and through a Robot, with and without a
+Persona/ContentSource) and use the manual Refresh action (or an accelerated
+`PUBLICATION_ANALYTICS_CADENCE_MINUTES` override, see above) to populate
+snapshots — the `LATEST` window shows immediately, while `H24`/`H72`/`D7`
+only populate once a snapshot actually falls in that age band (the coverage
+line above the KPIs reports "too young" vs. "missing snapshot" separately, so
+an empty aggregate is distinguishable from a real collection gap). Renaming
+a Robot/Persona/ContentSource after publishing and reloading the breakdown
+confirms grouping still uses the frozen snapshot name, not the live one.

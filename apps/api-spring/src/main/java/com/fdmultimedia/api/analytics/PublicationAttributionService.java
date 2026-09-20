@@ -5,6 +5,7 @@ import com.fdmultimedia.api.contentdrafts.ContentDraftRepository;
 import com.fdmultimedia.api.contentsuggestions.ContentSuggestion;
 import com.fdmultimedia.api.contentsuggestions.ContentSuggestionRepository;
 import com.fdmultimedia.api.contentsuggestions.ContentSuggestionStatus;
+import com.fdmultimedia.api.contentsources.ContentSourceRepository;
 import com.fdmultimedia.api.publishing.Publication;
 import com.fdmultimedia.api.robots.RobotRun;
 import com.fdmultimedia.api.robots.RobotRunRepository;
@@ -23,13 +24,16 @@ public class PublicationAttributionService {
     private final ContentDraftRepository drafts;
     private final ContentSuggestionRepository suggestions;
     private final RobotRunRepository runs;
+    private final ContentSourceRepository sources;
 
     public PublicationAttributionService(JdbcTemplate jdbc, ContentDraftRepository drafts,
-            ContentSuggestionRepository suggestions, RobotRunRepository runs) {
+            ContentSuggestionRepository suggestions, RobotRunRepository runs,
+            ContentSourceRepository sources) {
         this.jdbc = jdbc;
         this.drafts = drafts;
         this.suggestions = suggestions;
         this.runs = runs;
+        this.sources = sources;
     }
 
     public void capture(Publication publication, UUID scheduleId, UUID scheduledSuggestionId, Instant now) {
@@ -49,14 +53,18 @@ public class PublicationAttributionService {
         if (scheduleId == null && draft != null && !java.util.Objects.equals(draft.getCaption(), publication.getCaption())) {
             suggestion = null;
         }
+        String sourceName = run == null || run.getContentSourceId() == null ? null
+                : sources.findByWorkspaceAndId(publication.getWorkspace(), run.getContentSourceId())
+                        .map(source -> source.getName()).orElse(null);
         jdbc.update("""
                 INSERT INTO publication_attributions (
                     publication_id, workspace_id, content_draft_id, publish_schedule_id,
                     robot_run_id, robot_id, robot_name_snapshot, content_source_id,
                     source_media_asset_id, final_media_asset_id, applied_content_suggestion_id,
                     suggestion_origin, persona_id, persona_name_snapshot, ai_provider, ai_model,
-                    prompt_version, ai_policy, robot_autonomy_mode, source_selection_policy, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    prompt_version, ai_policy, robot_autonomy_mode, source_selection_policy,
+                    content_source_name_snapshot, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 publication.getId(), publication.getWorkspace().getId(), draft == null ? null : draft.getId(), scheduleId,
                 run == null ? null : run.getId(), run == null ? null : run.getRobot().getId(),
@@ -72,6 +80,7 @@ public class PublicationAttributionService {
                 run == null ? null : run.getAiPolicySnapshot().name(),
                 run == null ? null : run.getRobot().getAutonomyMode().name(),
                 run == null || run.getSelectionPolicy() == null ? null : run.getSelectionPolicy().name(),
+                sourceName,
                 java.sql.Timestamp.from(now));
     }
 
@@ -91,6 +100,7 @@ public class PublicationAttributionService {
                 rs.getString("suggestion_origin"), rs.getObject("persona_id", UUID.class),
                 rs.getString("persona_name_snapshot"), rs.getString("ai_provider"), rs.getString("ai_model"),
                 rs.getString("prompt_version"), rs.getString("ai_policy"), rs.getString("robot_autonomy_mode"),
-                rs.getString("source_selection_policy"), rs.getTimestamp("created_at").toInstant());
+                rs.getString("source_selection_policy"), rs.getString("content_source_name_snapshot"),
+                rs.getTimestamp("created_at").toInstant());
     }
 }

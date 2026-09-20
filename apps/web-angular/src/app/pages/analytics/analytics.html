@@ -1,12 +1,128 @@
 <section class="analytics">
   <header class="analytics__header">
-    <div><h1>Publication analytics</h1><a routerLink="/content">Content</a></div>
+    <div><h1>Analytics</h1><a routerLink="/content">Content</a></div>
     @if (selectedId()) {
       <button type="button" (click)="refresh()" [disabled]="refreshing() || loading()">
         {{ refreshing() ? 'Refreshing…' : 'Refresh analytics' }}
       </button>
     }
   </header>
+
+  <section class="analytics__band" aria-labelledby="dashboard-heading">
+    <div class="analytics__section-heading"><h2 id="dashboard-heading">Published content</h2><button type="button" (click)="reloadDashboard()" [disabled]="dashboardLoading()">Reload</button></div>
+    <div class="analytics__filters">
+      <label>From <input type="date" [value]="filters().dateFrom || ''" (change)="filter('dateFrom', $any($event.target).value)"></label>
+      <label>To <input type="date" [value]="filters().dateTo || ''" (change)="filter('dateTo', $any($event.target).value)"></label>
+      <label>Observation
+        <select [value]="filters().window || 'LATEST'" (change)="filter('window', $any($event.target).value)">
+          <option value="LATEST">Latest</option><option value="H24">24 hours</option><option value="H72">72 hours</option><option value="D7">7 days</option>
+        </select>
+      </label>
+      <label>Provider
+        <select [value]="filters().provider || ''" (change)="filter('provider', $any($event.target).value)">
+          <option value="">All providers</option>
+          @for (provider of options()?.providers || []; track provider) { <option [value]="provider">{{ provider }}</option> }
+        </select>
+      </label>
+      <label>Robot
+        <select [value]="filters().robotId || ''" (change)="filter('robotId', $any($event.target).value)">
+          <option value="">All Robots</option>
+          @for (option of options()?.robots || []; track option.id) { <option [value]="option.id">{{ option.label }}</option> }
+        </select>
+      </label>
+      <label>Persona
+        <select [value]="filters().personaId || ''" (change)="filter('personaId', $any($event.target).value)">
+          <option value="">All Personas</option>
+          @for (option of options()?.personas || []; track option.id) { <option [value]="option.id">{{ option.label }}</option> }
+        </select>
+      </label>
+      <label>ContentSource
+        <select [value]="filters().contentSourceId || ''" (change)="filter('contentSourceId', $any($event.target).value)">
+          <option value="">All sources</option>
+          @for (option of options()?.contentSources || []; track option.id) { <option [value]="option.id">{{ option.label }}</option> }
+        </select>
+      </label>
+      <label>Origin
+        <select [value]="filters().origin || ''" (change)="filter('origin', $any($event.target).value)">
+          <option value="">All origins</option><option value="MANUAL">Manual</option><option value="ROBOT">Robot</option>
+        </select>
+      </label>
+      <label>AI copy
+        <select [value]="filters().aiUsage || ''" (change)="filter('aiUsage', $any($event.target).value)">
+          <option value="">All copy</option><option value="AI_APPLIED">Applied AI suggestion</option><option value="NO_APPLIED_AI">No applied AI suggestion</option>
+        </select>
+      </label>
+    </div>
+    @if (dashboardLoading()) { <p role="status">Loading dashboard…</p> }
+    @if (dashboardError()) { <p role="alert">{{ dashboardError() }}</p> }
+    @if (!dashboardLoading() && !dashboardError() && summary(); as dashboard) {
+      @if (dashboard.coverage.publicationCount === 0) { <p>No published content in this date range.</p> }
+      @else {
+        <p class="analytics__coverage" role="status">
+          {{ dashboard.coverage.analyticsPublicationCount }} / {{ dashboard.coverage.publicationCount }} publications have a {{ filters().window || 'LATEST' }} observation.
+          @if (dashboard.coverage.tooYoungCount) { {{ dashboard.coverage.tooYoungCount }} have not reached this observation age. }
+          @if (dashboard.coverage.missingSnapshotCount) { {{ dashboard.coverage.missingSnapshotCount }} lack a snapshot in this window. }
+        </p>
+        <dl class="analytics__kpis">
+          <div><dt>Publications</dt><dd>{{ dashboard.coverage.publicationCount }}</dd></div>
+          <div><dt>Total views</dt><dd>{{ metric(dashboard.metrics.VIEWS.total) }}</dd><small>n={{ dashboard.metrics.VIEWS.sampleCount }}</small></div>
+          <div><dt>Average views / observed publication</dt><dd>{{ decimal(dashboard.metrics.VIEWS.average) }}</dd><small>n={{ dashboard.metrics.VIEWS.sampleCount }}</small></div>
+          <div><dt>Total interactions</dt><dd>{{ metric(dashboard.metrics.TOTAL_INTERACTIONS.total) }}</dd><small>n={{ dashboard.metrics.TOTAL_INTERACTIONS.sampleCount }}</small></div>
+          <div><dt>Average interactions / observed publication</dt><dd>{{ decimal(dashboard.metrics.TOTAL_INTERACTIONS.average) }}</dd><small>n={{ dashboard.metrics.TOTAL_INTERACTIONS.sampleCount }}</small></div>
+        </dl>
+      }
+    }
+  </section>
+
+  <section class="analytics__band" aria-labelledby="trend-heading">
+    <div class="analytics__section-heading"><h2 id="trend-heading">Publication cohort trend</h2>
+      <label>Metric <select [value]="trendMetric()" (change)="chooseMetric($any($event.target).value)">
+        @for (item of trendMetrics; track item) { <option [value]="item">{{ item.replace('_', ' ') }}</option> }
+      </select></label>
+    </div>
+    @if (!dashboardLoading() && trend(); as series) {
+      @if (series.points.length === 0) { <p>No publication cohorts in this range.</p> }
+      @else {
+        <div class="analytics__trend" role="list" aria-label="Average observed metric by UTC publication date">
+          @for (point of series.points; track point.date) {
+            <div class="analytics__trend-row" role="listitem">
+              <time>{{ point.date }}</time>
+              <span class="analytics__bar-track"><span class="analytics__bar" [style.width.%]="bar(point.metric.average, trendMax())"></span></span>
+              <span>{{ decimal(point.metric.average) }} · n={{ point.metric.sampleCount }}</span>
+            </div>
+          }
+        </div>
+      }
+    }
+  </section>
+
+  <section class="analytics__band" aria-labelledby="breakdown-heading">
+    <div class="analytics__section-heading"><h2 id="breakdown-heading">Descriptive comparison</h2>
+      <label>Group by <select [value]="dimension()" (change)="chooseDimension($any($event.target).value)">
+        @for (item of dimensions; track item) { <option [value]="item">{{ item.replace('_', ' ') }}</option> }
+      </select></label>
+    </div>
+    @if (!dashboardLoading() && breakdown(); as grouped) {
+      @if (grouped.rows.length === 0) { <p>No segments in this range.</p> }
+      @else {
+        <div class="analytics__table-wrap"><table>
+          <thead><tr><th scope="col">Segment</th><th scope="col">Publications</th><th scope="col">Coverage</th><th scope="col">Avg views</th><th scope="col">Median views</th><th scope="col">Avg reach</th><th scope="col">Avg interactions</th><th scope="col">Avg shares</th></tr></thead>
+          <tbody>@for (row of grouped.rows; track row.key + row.label) {
+            <tr><th scope="row">{{ row.label }}</th><td>{{ row.coverage.publicationCount }}</td>
+              <td>{{ row.coverage.analyticsPublicationCount }} / {{ row.coverage.publicationCount }}</td>
+              <td>{{ decimal(row.metrics.VIEWS.average) }} <small>n={{ row.metrics.VIEWS.sampleCount }}</small></td>
+              <td>{{ decimal(row.metrics.VIEWS.median) }}</td>
+              <td>{{ decimal(row.metrics.REACH.average) }} <small>n={{ row.metrics.REACH.sampleCount }}</small></td>
+              <td>{{ decimal(row.metrics.TOTAL_INTERACTIONS.average) }} <small>n={{ row.metrics.TOTAL_INTERACTIONS.sampleCount }}</small></td>
+              <td>{{ decimal(row.metrics.SHARES.average) }} <small>n={{ row.metrics.SHARES.sampleCount }}</small></td></tr>
+          }</tbody>
+        </table></div>
+        @if (grouped.truncated) { <p>Showing the first 100 segments. Narrow the filters to see more.</p> }
+      }
+    }
+  </section>
+
+  <section class="analytics__band" aria-labelledby="publication-heading"><h2 id="publication-heading">Publication detail</h2>
 
   @if (publications().length > 0) {
     <label for="publication-select">Publication</label>
@@ -75,7 +191,7 @@
         <h2>Attribution</h2>
         <dl class="analytics__origin">
           <div><dt>Robot</dt><dd>{{ origin.robotNameSnapshot || (origin.robotRunId ? 'Robot (historical name unavailable)' : 'Manual') }}</dd></div>
-          <div><dt>Source</dt><dd>{{ origin.contentSourceId || origin.sourceMediaAssetId || '—' }}</dd></div>
+          <div><dt>Source</dt><dd>{{ origin.contentSourceId ? (origin.contentSourceNameSnapshot || 'ContentSource name unavailable') : (origin.sourceMediaAssetId || '—') }}</dd></div>
           <div><dt>Final media</dt><dd>{{ origin.finalMediaAssetId }}</dd></div>
           <div><dt>AI copy</dt><dd>{{ origin.appliedContentSuggestionId ? (origin.personaNameSnapshot || 'Applied suggestion') : 'No applied AI suggestion' }}</dd></div>
           @if (origin.appliedContentSuggestionId) {
@@ -87,4 +203,5 @@
       </section>
     }
   }
+  </section>
 </section>

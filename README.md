@@ -5,13 +5,18 @@ social-media content workflows, video processing workers running across
 multiple laptops/cloud machines, scheduling, AI-assisted content creation,
 publishing, analytics, and revenue tracking.
 
-## Phase 13A scope
+## Phase 13B scope
 
-This repository is currently implementing **Phase 13A: Publication Analytics & Attribution Foundation**.
-Published TEST content has deterministic, historical analytics snapshots and a
-publication-time provenance snapshot. Analytics observes publications; it never
-changes Robots, Personas, captions, schedules, or AI policies. Instagram
-analytics remains permission-gated pending verified insights scopes.
+This repository is currently at **Phase 13B: Publication Analytics Dashboard**.
+Phase 13A gave published TEST content deterministic, historical analytics
+snapshots and a publication-time provenance snapshot; analytics observes
+publications and never changes Robots, Personas, captions, schedules, or AI
+policies. Instagram analytics remains permission-gated pending verified
+insights scopes. Phase 13B adds read-only comparison, trend, and breakdown
+views over that same data — date-range/window/provider/Robot/Persona/
+ContentSource/origin/AI-usage filtering, explicit coverage reporting so a low
+sample count is never hidden inside an average, and bounded breakdowns — with
+no ranking, scoring, or automatic optimization.
 
 ## Earlier phases
 Phase 9A introduced current Worker telemetry and per-attempt execution metrics;

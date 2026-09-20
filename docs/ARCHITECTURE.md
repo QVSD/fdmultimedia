@@ -2430,4 +2430,109 @@ historical names or suggestions remain null rather than invented.
 Human APIs are workspace-scoped and bounded: attribution, collection state,
 latest/history, manual refresh, and a publication analytics list. The Angular
 page presents detail, history, provenance, and collection status only. Phase
-13B may add comparison dashboards; Phase 13A never edits content or strategy.
+13A never edits content or strategy.
+
+## Publication analytics dashboard (Phase 13B)
+
+Phase 13B adds comparison and trend views over the immutable snapshots and
+attribution rows Phase 13A already collects. It is read-only aggregation: no
+new mutable state, no ranking, no "best Robot/Persona" recommendation — the
+explicitly out-of-scope list from Phase 13A (optimization, A/B testing,
+follower/commenter-level data) still applies unchanged.
+
+### Query surface: `PublicationDashboardStore`
+
+Four endpoints under `/api/analytics/dashboard` (`summary`, `trend`,
+`breakdown`, `filters`) share one `DashboardQuery` (workspace, date range,
+observation `Window`, and optional provider/Robot/Persona/ContentSource/
+origin/AI-usage filters) and one hand-written parameterized SQL builder
+(`PublicationDashboardStore`) rather than a generic reporting framework —
+proportionate to four bounded, known shapes. All four queries start from the
+same `cohort`/`observed` CTE: publications `JOIN`ed to their (nullable)
+`publication_attributions` row, filtered to `PUBLISHED` and the requested
+date range and attribution filters, then left-joined via `LATERAL` to at
+most one matching `publication_analytics_snapshots` row per publication.
+Every SQL fragment (dimension key/label expressions, metric columns) is
+selected from a fixed `switch`/array in Java, never interpolated from
+request input — the one blank-vs-enum-driven exception (`DashboardQuery.Metric`/
+`Dimension`/`Window`/`Origin`/`AiUsage`) is parsed with `Enum.valueOf`,
+which throws (mapped to `400`) rather than silently coercing an unrecognized
+value, so an attempted `?window=DROP TABLE publications` is a plain
+enum-parse rejection, not a query-shape decision.
+
+### Observation windows: latest vs. age-targeted
+
+`Window.LATEST` takes each publication's single newest snapshot regardless
+of age. `H24`/`H72`/`D7` instead target a specific publication-age bucket
+(24h/72h/7d) with an explicit, non-overlapping tolerance band
+(`minimumSeconds`/`maximumSeconds` — e.g. `H24` accepts 18–36 hours old) and
+pick the snapshot whose age is closest to the target within that band,
+falling back to nothing (not the newest snapshot) outside it. This is what
+makes cohort comparison meaningful: comparing "24-hour performance" across
+publications that were observed at slightly different real ages (15-minute
+collection jitter, a delayed manual refresh) uses the same nominal
+checkpoint for all of them rather than silently mixing a 2-hour-old
+observation with a 30-hour-old one under the same label.
+
+### Coverage before aggregates
+
+Every summary/trend/breakdown row carries a `Coverage` tuple — total
+publications, how many have a matching snapshot in this window, how many
+are chronologically too young to be eligible yet, and how many are eligible
+but still missing a snapshot (a real collection gap, e.g. a paused/failed
+collection) — computed in the same query as the metric aggregates, not
+derived separately. `MetricAggregate` (`total`/`average`/`median`/
+`sampleCount`) is computed with SQL `SUM`/`AVG`/`percentile_cont`/`COUNT`
+over only the rows that actually have that metric, so a provider that never
+returns `saves` correctly produces `sampleCount: 0` there without dragging
+down `views`' own sample count — the same null-vs-zero discipline Phase 13A
+established for a single snapshot now holds across an aggregate too. The
+Angular page surfaces coverage as prose ("`N / M` publications have a
+`window` observation... `K` have not reached this observation age") right
+above the KPIs, so a low sample count is never silently invisible inside an
+average.
+
+### Trend and breakdown
+
+`trend` groups the same `observed` CTE by the publication's UTC calendar
+date (`published_at`'s date, not the snapshot's collection date) for one
+selected metric, giving a per-day cohort average with its own coverage —
+this is a publish-date cohort trend, not a time-series of any single
+publication's metric over its own lifetime (that remains the existing
+per-publication History table). `breakdown` groups by one of six controlled
+dimensions (`ROBOT`, `PERSONA`, `CONTENT_SOURCE`, `PROVIDER`, `ORIGIN`,
+`AI_USAGE`), each with its own fixed key/label SQL pair — `NULL` groups
+render as an explicit label ("Manual / No Robot", "No applied Persona", "No
+ContentSource") rather than being silently dropped, and a present ID with no
+name snapshot renders as "`<Thing>` name unavailable" rather than a bare
+UUID or a fabricated name. Both `breakdown` and the `filters` endpoint's
+option lists are capped (100 groups, 5000 candidate rows) with a `truncated`
+flag the UI surfaces ("Narrow the filters to see more") instead of an
+unbounded scan or an unbounded response.
+
+### ContentSource name snapshot
+
+Phase 13A's `publication_attributions` row already froze `robotNameSnapshot`
+and `personaNameSnapshot` at publication time, but not a ContentSource name
+— V24 adds `content_source_name_snapshot`, captured going forward exactly
+like the other two (a live `ContentSourceRepository` lookup at attribution-
+capture time, never re-read later). Historical rows created before V24
+existed cannot retroactively prove what the name was at publication time,
+so the migration backfills them from the *current* `content_sources.name` —
+explicitly weaker than a true snapshot, and the migration comment says so.
+Both the "Attribution" detail panel and the `CONTENT_SOURCE` breakdown
+dimension use this field, matching the existing Robot/Persona pattern rather
+than showing a bare ContentSource UUID.
+
+### Filter state lives in the URL
+
+The dashboard's filters (date range, window, provider, Robot/Persona/
+ContentSource, origin, AI usage), selected breakdown dimension, and trend
+metric are all Angular route query parameters, not component state — so the
+view is bookmarkable/shareable and survives a refresh. Every parameter is
+validated on read (a fixed ISO date pattern re-parsed and round-tripped, a
+UUID-shaped regex for the ID filters, an allow-list for the enum-valued
+ones) with an invalid value silently falling back to the default rather than
+being forwarded to the backend, which independently re-validates everything
+regardless — the frontend check exists to avoid a round-trip 400, not as the
+authority.

@@ -1,6 +1,6 @@
 # Roadmap
 
-The repository is currently implementing Phase 13A. Completed phases are marked below;
+The repository is currently at Phase 13B. Completed phases are marked below;
 later phases are planned high-level direction and intentionally do not go into
 implementation detail before they are started.
 
@@ -293,6 +293,16 @@ implementation detail before they are started.
    TEST publication metrics, bounded restart-safe collection, and immutable
    publication-time attribution. Instagram insights require verified account
    permissions; no unsupported metrics are fabricated. No strategy optimization.
-30. **Analytics dashboard (Phase 13B, future)** — comparison and visualization
-   of the observed snapshots; not implemented in Phase 13A. Revenue tracking
-   and automatic optimization remain separate future work.
+   *(complete)*
+30. **Publication analytics dashboard (Phase 13B)** — read-only comparison,
+   trend, and breakdown views over the Phase 13A snapshots and attribution
+   rows: a workspace-scoped summary/trend/breakdown/filter-options query
+   surface with date-range, observation-window (latest/24h/72h/7d),
+   provider/Robot/Persona/ContentSource/origin/AI-usage filtering, explicit
+   coverage reporting (eligible vs. too-young vs. missing-snapshot) alongside
+   every aggregate, and bounded (100-group) breakdowns. Adds a
+   publication-time ContentSource name snapshot alongside the existing
+   Robot/Persona ones. No ranking, scoring, or optimization — purely
+   descriptive aggregation of already-immutable data. *(complete)*
+31. **Revenue tracking / automatic optimization** — separate future work, not
+   started.

@@ -35,6 +35,7 @@ export interface PublicationAttribution {
   robotId: string | null;
   robotNameSnapshot: string | null;
   contentSourceId: string | null;
+  contentSourceNameSnapshot: string | null;
   sourceMediaAssetId: string | null;
   finalMediaAssetId: string;
   appliedContentSuggestionId: string | null;

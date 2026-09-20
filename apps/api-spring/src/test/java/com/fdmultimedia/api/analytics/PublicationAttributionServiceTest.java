@@ -12,6 +12,8 @@ import com.fdmultimedia.api.contentsuggestions.ContentSuggestion;
 import com.fdmultimedia.api.contentsuggestions.ContentSuggestionOrigin;
 import com.fdmultimedia.api.contentsuggestions.ContentSuggestionRepository;
 import com.fdmultimedia.api.contentsuggestions.ContentSuggestionStatus;
+import com.fdmultimedia.api.contentsources.ContentSource;
+import com.fdmultimedia.api.contentsources.ContentSourceRepository;
 import com.fdmultimedia.api.publishing.Publication;
 import com.fdmultimedia.api.robots.Robot;
 import com.fdmultimedia.api.robots.RobotAiPolicy;
@@ -33,7 +35,9 @@ class PublicationAttributionServiceTest {
     private final ContentDraftRepository drafts = mock(ContentDraftRepository.class);
     private final ContentSuggestionRepository suggestions = mock(ContentSuggestionRepository.class);
     private final RobotRunRepository runs = mock(RobotRunRepository.class);
-    private final PublicationAttributionService service = new PublicationAttributionService(jdbc, drafts, suggestions, runs);
+    private final ContentSourceRepository sources = mock(ContentSourceRepository.class);
+    private final PublicationAttributionService service = new PublicationAttributionService(
+            jdbc, drafts, suggestions, runs, sources);
     private final Workspace workspace = new Workspace("Media", "media");
     private final MediaAsset media = mock(MediaAsset.class);
 
@@ -71,6 +75,9 @@ class PublicationAttributionServiceTest {
         when(run.getId()).thenReturn(runId);
         when(run.getRobot()).thenReturn(robot);
         when(run.getContentSourceId()).thenReturn(contentSourceId);
+        ContentSource source = mock(ContentSource.class);
+        when(source.getName()).thenReturn("Historical source");
+        when(sources.findByWorkspaceAndId(workspace, contentSourceId)).thenReturn(Optional.of(source));
         when(run.getAiPolicySnapshot()).thenReturn(RobotAiPolicy.GENERATE_AND_APPLY);
         when(run.getSelectionPolicy()).thenReturn(RobotSelectionPolicy.OLDEST_UNPROCESSED);
         when(robot.getId()).thenReturn(robotId);
@@ -106,6 +113,7 @@ class PublicationAttributionServiceTest {
         assertThat(jdbc.args[16]).isEqualTo("SOCIAL_COPY_V2");
         assertThat(jdbc.args[17]).isEqualTo("GENERATE_AND_APPLY");
         assertThat(jdbc.args[19]).isEqualTo("OLDEST_UNPROCESSED");
+        assertThat(jdbc.args[20]).isEqualTo("Historical source");
     }
 
     private static final class RecordingJdbc extends JdbcTemplate {
