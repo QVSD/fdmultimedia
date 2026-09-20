@@ -3,6 +3,9 @@ package com.fdmultimedia.api.robots;
 import com.fdmultimedia.api.assets.MediaAsset;
 import com.fdmultimedia.api.contentsuggestions.SuggestionLanguage;
 import com.fdmultimedia.api.contentsuggestions.SuggestionTone;
+import com.fdmultimedia.api.experiments.ExperimentAssignment;
+import com.fdmultimedia.api.experiments.ExperimentFactor;
+import com.fdmultimedia.api.experiments.ExperimentVariantKey;
 import com.fdmultimedia.api.workspaces.Workspace;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -104,6 +107,32 @@ public class RobotRun {
     @Column(name = "content_suggestion_id")
     private UUID contentSuggestionId;
 
+    /**
+     * Phase 14A: this run's controlled-experiment assignment, set exactly
+     * once at run creation (see RobotAutomationDispatchService.startRun),
+     * always before the treatment is ever consumed. The
+     * {@code experiment_assignments} row is the source of truth; these are
+     * audit-convenience columns, exactly like the AI policy snapshot above.
+     * Robot config edits or Experiment pause/resume after this point never
+     * change these fields.
+     */
+    @Column(name = "experiment_id")
+    private UUID experimentId;
+
+    @Column(name = "experiment_assignment_id")
+    private UUID experimentAssignmentId;
+
+    @Column(name = "experiment_variant_id")
+    private UUID experimentVariantId;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "experiment_variant_key")
+    private ExperimentVariantKey experimentVariantKey;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "experiment_factor")
+    private ExperimentFactor experimentFactor;
+
     @Column(name = "publish_schedule_id")
     private UUID publishScheduleId;
 
@@ -186,6 +215,15 @@ public class RobotRun {
         this.contentSuggestionId = contentSuggestionId;
     }
 
+    /** Called at most once, by {@code RobotAutomationDispatchService.startRun}, immediately after {@link ExperimentAssignment} is durably created. */
+    public void applyExperimentAssignment(ExperimentAssignment assignment) {
+        this.experimentId = assignment.getExperiment().getId();
+        this.experimentAssignmentId = assignment.getId();
+        this.experimentVariantId = assignment.getExperimentVariant().getId();
+        this.experimentVariantKey = assignment.getExperimentVariant().getVariantKey();
+        this.experimentFactor = assignment.getFactor();
+    }
+
     public void markWaitingForAi(Instant now) {
         this.status = RobotRunStatus.WAITING_FOR_AI;
     }
@@ -240,6 +278,11 @@ public class RobotRun {
     public SuggestionLanguage getAiLanguageOverrideSnapshot() { return aiLanguageOverrideSnapshot; }
     public SuggestionTone getAiToneOverrideSnapshot() { return aiToneOverrideSnapshot; }
     public UUID getContentSuggestionId() { return contentSuggestionId; }
+    public UUID getExperimentId() { return experimentId; }
+    public UUID getExperimentAssignmentId() { return experimentAssignmentId; }
+    public UUID getExperimentVariantId() { return experimentVariantId; }
+    public ExperimentVariantKey getExperimentVariantKey() { return experimentVariantKey; }
+    public ExperimentFactor getExperimentFactor() { return experimentFactor; }
     public UUID getPublishScheduleId() { return publishScheduleId; }
     public String getFailureCode() { return failureCode; }
     public String getFailureMessage() { return failureMessage; }

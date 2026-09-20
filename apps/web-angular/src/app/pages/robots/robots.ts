@@ -25,6 +25,8 @@ import { ContentSourceSummary } from '../../core/content-sources/content-source.
 import { PersonasService } from '../../core/personas/personas.service';
 import { PersonaSummary } from '../../core/personas/persona.models';
 import { SuggestionLanguage, SuggestionTone } from '../../core/content-suggestions/content-suggestion.models';
+import { ExperimentsService } from '../../core/experiments/experiments.service';
+import { ExperimentSummary } from '../../core/experiments/experiment.models';
 
 type LoadState = 'loading' | 'ready' | 'error';
 
@@ -47,6 +49,7 @@ export class Robots implements OnInit, OnDestroy {
   protected readonly socialAccounts = signal<SocialAccountSummary[]>([]);
   protected readonly contentSources = signal<ContentSourceSummary[]>([]);
   protected readonly personas = signal<PersonaSummary[]>([]);
+  protected readonly experiments = signal<ExperimentSummary[]>([]);
 
   protected readonly expandedRobots = signal<Record<string, boolean>>({});
   protected readonly runNowBusy = signal<Record<string, boolean>>({});
@@ -70,6 +73,7 @@ export class Robots implements OnInit, OnDestroy {
   protected readonly createPersonaId = signal('');
   protected readonly createAiLanguageOverride = signal<SuggestionLanguage | ''>('');
   protected readonly createAiToneOverride = signal<SuggestionTone | ''>('');
+  protected readonly createExperimentId = signal('');
   protected readonly createBusy = signal(false);
   protected readonly createError = signal<string | null>(null);
 
@@ -88,6 +92,7 @@ export class Robots implements OnInit, OnDestroy {
     private readonly socialAccountsService: SocialAccountsService,
     private readonly contentSourcesService: ContentSourcesService,
     private readonly personasService: PersonasService,
+    private readonly experimentsService: ExperimentsService,
   ) {}
 
   ngOnInit(): void {
@@ -110,6 +115,11 @@ export class Robots implements OnInit, OnDestroy {
       .list()
       .pipe(catchError(() => EMPTY))
       .subscribe((personas) => this.personas.set(personas));
+
+    this.experimentsService
+      .list()
+      .pipe(catchError(() => EMPTY))
+      .subscribe((experiments) => this.experiments.set(experiments));
 
     this.robotsSubscription = interval(5000)
       .pipe(
@@ -249,6 +259,20 @@ export class Robots implements OnInit, OnDestroy {
     return policy !== 'NO_AI';
   }
 
+  // ---- Phase 14A: controlled experiments ----
+
+  /** Item 55: a Robot may reference a DRAFT/ACTIVE/PAUSED Experiment (flexible setup order) but never a terminal one. */
+  protected attachableExperiments(): ExperimentSummary[] {
+    return this.experiments().filter((experiment) => experiment.status !== 'COMPLETED' && experiment.status !== 'CANCELLED');
+  }
+
+  protected experimentNameFor(experimentId: string | null): string | null {
+    if (!experimentId) {
+      return null;
+    }
+    return this.experiments().find((experiment) => experiment.id === experimentId)?.name ?? experimentId.slice(0, 8);
+  }
+
   protected createRobot(): void {
     this.createError.set(null);
     const name = this.createName().trim();
@@ -290,6 +314,7 @@ export class Robots implements OnInit, OnDestroy {
         personaId: this.requiresAiConfig(aiPolicy) && this.createPersonaId() ? this.createPersonaId() : null,
         aiLanguageOverride: this.requiresAiConfig(aiPolicy) && this.createAiLanguageOverride() ? this.createAiLanguageOverride() as SuggestionLanguage : null,
         aiToneOverride: this.requiresAiConfig(aiPolicy) && this.createAiToneOverride() ? this.createAiToneOverride() as SuggestionTone : null,
+        experimentId: this.requiresAiConfig(aiPolicy) && this.createExperimentId() ? this.createExperimentId() : null,
       })
       .pipe(finalize(() => this.createBusy.set(false)))
       .subscribe({
@@ -298,6 +323,7 @@ export class Robots implements OnInit, OnDestroy {
           this.showCreateForm.set(false);
           this.createName.set('');
           this.createDescription.set('');
+          this.createExperimentId.set('');
         },
         error: () => this.createError.set('Robot could not be created.'),
       });

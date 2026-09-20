@@ -61,6 +61,24 @@ public class ContentSuggestion {
     @Column(name = "robot_run_id")
     private UUID robotRunId;
 
+    /**
+     * Phase 14A provenance (item 29): set only when this suggestion was
+     * generated under a frozen experiment treatment (see
+     * RobotRunOrchestrator.beginAiGeneration / ExperimentTreatment) — plain
+     * UUIDs, no relationship, so this package never depends on
+     * {@code com.fdmultimedia.api.experiments}. Used by
+     * PublicationAttributionService to detect a protocol deviation when the
+     * Publication's final applied suggestion is not this one.
+     */
+    @Column(name = "experiment_id")
+    private UUID experimentId;
+
+    @Column(name = "experiment_assignment_id")
+    private UUID experimentAssignmentId;
+
+    @Column(name = "experiment_variant_id")
+    private UUID experimentVariantId;
+
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "generation_job_id", nullable = false)
     private Job generationJob;
@@ -278,12 +296,18 @@ public class ContentSuggestion {
             PersonaSnapshot personaSnapshot,
             UUID robotRunId,
             AppUser createdByUser,
-            Instant now) {
+            Instant now,
+            UUID experimentId,
+            UUID experimentAssignmentId,
+            UUID experimentVariantId) {
         ContentSuggestion suggestion = new ContentSuggestion(
                 workspace, contentDraft, generationJob, provider, model, promptVersion, language, tone, promptText,
                 inputFingerprint, transcriptUsed, transcriptId, personaSnapshot, createdByUser, now);
         suggestion.origin = ContentSuggestionOrigin.ROBOT;
         suggestion.robotRunId = robotRunId;
+        suggestion.experimentId = experimentId;
+        suggestion.experimentAssignmentId = experimentAssignmentId;
+        suggestion.experimentVariantId = experimentVariantId;
         return suggestion;
     }
 
@@ -377,6 +401,9 @@ public class ContentSuggestion {
     public ContentDraft getContentDraft() { return contentDraft; }
     public ContentSuggestionOrigin getOrigin() { return origin; }
     public UUID getRobotRunId() { return robotRunId; }
+    public UUID getExperimentId() { return experimentId; }
+    public UUID getExperimentAssignmentId() { return experimentAssignmentId; }
+    public UUID getExperimentVariantId() { return experimentVariantId; }
     public Job getGenerationJob() { return generationJob; }
     public ContentSuggestionType getType() { return type; }
     public ContentSuggestionStatus getStatus() { return status; }

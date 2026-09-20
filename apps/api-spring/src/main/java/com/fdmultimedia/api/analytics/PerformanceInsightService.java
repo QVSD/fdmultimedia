@@ -97,6 +97,11 @@ public class PerformanceInsightService {
     public ComparisonResult compare(AuthenticatedUser user, CompareRequest request) {
         DashboardQuery query = dashboardService.query(user, toDashboardRequest(request));
         Dimension dimension = parseEnum(Dimension.class, request.dimension(), "dimension");
+        if (dimension == Dimension.EXPERIMENT_VARIANT) {
+            // Item 101: experiment variant comparisons are deliberately kept out of the
+            // general insights engine in this phase — see ExperimentOutcomeService instead.
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Experiment variant comparisons are not available through this endpoint");
+        }
         Metric metric = parseEnum(Metric.class, request.metric(), "metric");
         Statistic statistic = request.statistic() == null || request.statistic().isBlank()
                 ? Statistic.MEDIAN : parseEnum(Statistic.class, request.statistic(), "statistic");
@@ -165,7 +170,7 @@ public class PerformanceInsightService {
             case ROBOT -> key.equals("NONE") ? "Manual / No Robot" : key;
             case PERSONA -> key.equals("NONE") ? "No applied Persona" : key;
             case CONTENT_SOURCE -> key.equals("NONE") ? "No ContentSource" : key;
-            case PROVIDER, ORIGIN, AI_USAGE -> key;
+            case PROVIDER, ORIGIN, AI_USAGE, EXPERIMENT_VARIANT -> key;
         };
     }
 
@@ -357,6 +362,8 @@ public class PerformanceInsightService {
                     throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid AI usage segment");
                 }
             }
+            // Unreachable in practice: compare() rejects EXPERIMENT_VARIANT before this is ever called (item 101).
+            case EXPERIMENT_VARIANT -> throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unsupported dimension");
         }
         return value;
     }

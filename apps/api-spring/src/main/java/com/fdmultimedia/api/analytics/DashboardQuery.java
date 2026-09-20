@@ -5,7 +5,14 @@ import java.util.UUID;
 
 public record DashboardQuery(UUID workspaceId, LocalDate from, LocalDate to, Window window,
         String provider, UUID robotId, UUID personaId, UUID contentSourceId,
-        Origin origin, AiUsage aiUsage) {
+        Origin origin, AiUsage aiUsage, UUID experimentId) {
+
+    /** Backward-compatible overload (no experiment filter) — every pre-Phase-14A call site keeps working unchanged. */
+    public DashboardQuery(UUID workspaceId, LocalDate from, LocalDate to, Window window,
+            String provider, UUID robotId, UUID personaId, UUID contentSourceId,
+            Origin origin, AiUsage aiUsage) {
+        this(workspaceId, from, to, window, provider, robotId, personaId, contentSourceId, origin, aiUsage, null);
+    }
 
     public enum Window {
         LATEST(0, 0, Long.MAX_VALUE),
@@ -30,7 +37,15 @@ public record DashboardQuery(UUID workspaceId, LocalDate from, LocalDate to, Win
 
     public enum Origin { MANUAL, ROBOT }
     public enum AiUsage { AI_APPLIED, NO_APPLIED_AI }
-    public enum Dimension { ROBOT, PERSONA, CONTENT_SOURCE, PROVIDER, ORIGIN, AI_USAGE }
+    /**
+     * EXPERIMENT_VARIANT (Phase 14A): keyed by {@code experiment_variant_id},
+     * used exclusively by {@code ExperimentOutcomeService} via {@link
+     * com.fdmultimedia.api.analytics.PublicationDashboardStore#segments} —
+     * never surfaced through {@code PerformanceInsightService}'s automatic or
+     * explicit compare endpoints (see item 101: experiment variant
+     * comparisons stay out of the general insights engine in this phase).
+     */
+    public enum Dimension { ROBOT, PERSONA, CONTENT_SOURCE, PROVIDER, ORIGIN, AI_USAGE, EXPERIMENT_VARIANT }
 
     public enum Metric {
         VIEWS("views"), REACH("reach"), LIKES("likes"), COMMENTS("comments"),

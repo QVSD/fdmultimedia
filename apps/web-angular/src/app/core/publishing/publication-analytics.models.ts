@@ -48,5 +48,16 @@ export interface PublicationAttribution {
   aiPolicy: string | null;
   robotAutonomyMode: string | null;
   sourceSelectionPolicy: string | null;
+  experimentId: string | null;
+  experimentNameSnapshot: string | null;
+  experimentFactor: string | null;
+  experimentVariantId: string | null;
+  experimentVariantKey: string | null;
+  experimentVariantLabelSnapshot: string | null;
+  experimentFactorValueId: string | null;
+  experimentFactorValueNameSnapshot: string | null;
+  experimentAssignmentId: string | null;
+  protocolDeviation: boolean | null;
+  protocolDeviationReason: string | null;
   createdAt: string;
 }

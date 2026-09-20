@@ -151,6 +151,20 @@
               <option value="ENERGETIC">Energetic</option>
             </select>
           </label>
+          <label>
+            <span>Experiment (optional)</span>
+            <select [ngModel]="createExperimentId()" (ngModelChange)="createExperimentId.set($event)" name="experimentId">
+              <option value="">No experiment</option>
+              @for (experiment of attachableExperiments(); track experiment.id) {
+                <option [value]="experiment.id">{{ experiment.name }} ({{ experiment.status }})</option>
+              }
+            </select>
+            @if (createExperimentId()) {
+              <p class="robots__muted">
+                The experiment's frozen variant Persona overrides the Persona selected above for experimental runs.
+              </p>
+            }
+          </label>
         }
         <button type="submit" [disabled]="createBusy()">{{ createBusy() ? 'Creating...' : 'Create' }}</button>
         @if (createError()) {
@@ -197,6 +211,9 @@
                       @if (robot.aiToneOverride) {
                         <span>Tone: {{ robot.aiToneOverride }}</span>
                       }
+                      @if (robot.experimentId) {
+                        <span class="robots__badge">Experiment: {{ experimentNameFor(robot.experimentId) }}</span>
+                      }
                     }
                     <span>Latest run: {{ latestRunStatusFor(robot) }}</span>
                     @if (robot.nextRunAt) {
@@ -238,6 +255,9 @@
                           }
                           @if (run.aiPolicySnapshot !== 'NO_AI') {
                             <span class="robots__muted">{{ run.personaNameSnapshot || 'No Persona' }}</span>
+                          }
+                          @if (run.experimentId) {
+                            <span class="robots__muted">Experiment: {{ experimentNameFor(run.experimentId) }} · Variant {{ run.experimentVariantKey }}</span>
                           }
                           @if (run.status === 'WAITING_FOR_AI_REVIEW' && run.contentDraftId) {
                             <a class="robots__muted" routerLink="/content">Review AI suggestion &rarr;</a>

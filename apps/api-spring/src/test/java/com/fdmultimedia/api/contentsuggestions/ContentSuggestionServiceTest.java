@@ -146,7 +146,7 @@ class ContentSuggestionServiceTest {
         UUID robotRunId = UUID.randomUUID();
 
         ContentSuggestionSummary summary = service.createForRobot(
-                workspace, draft, null, SuggestionLanguage.ENGLISH, SuggestionTone.CASUAL, robotRunId, owner);
+                workspace, draft, null, SuggestionLanguage.ENGLISH, SuggestionTone.CASUAL, robotRunId, owner, null);
 
         assertThat(summary.origin()).isEqualTo(ContentSuggestionOrigin.ROBOT);
         assertThat(summary.robotRunId()).isEqualTo(robotRunId);
@@ -154,10 +154,38 @@ class ContentSuggestionServiceTest {
     }
 
     @Test
+    void createForRobotUsesTheFrozenExperimentTreatmentInsteadOfResolvingALivePersona() {
+        when(jobService.createForWorkspace(any(), any())).thenReturn(jobSummary(generationJob));
+        when(jobService.getJobEntityForWorkspace(workspace, generationJob.getId())).thenReturn(Optional.of(generationJob));
+        UUID robotRunId = UUID.randomUUID();
+        UUID experimentId = UUID.randomUUID();
+        UUID assignmentId = UUID.randomUUID();
+        UUID variantId = UUID.randomUUID();
+        UUID frozenPersonaId = UUID.randomUUID();
+        PersonaSnapshot frozenSnapshot = new PersonaSnapshot(frozenPersonaId, "Frozen Bold Voice", "Gen Z",
+                "Bold, energetic voice", "Short punchy sentences", "Never apologize", "#bold", "Example bold copy");
+        com.fdmultimedia.api.experiments.ExperimentTreatment treatment = new com.fdmultimedia.api.experiments.ExperimentTreatment(
+                experimentId, assignmentId, variantId, frozenSnapshot, SuggestionLanguage.ENGLISH, SuggestionTone.ENERGETIC);
+
+        ContentSuggestionSummary summary = service.createForRobot(
+                workspace, draft, UUID.randomUUID(), null, null, robotRunId, owner, treatment);
+
+        // The treatment's frozen Persona wins over resolving personaRepository at all.
+        verify(personaRepository, never()).findByWorkspaceAndId(any(), any());
+        assertThat(summary.personaId()).isEqualTo(frozenPersonaId);
+        assertThat(summary.personaName()).isEqualTo("Frozen Bold Voice");
+        assertThat(summary.language()).isEqualTo(SuggestionLanguage.ENGLISH);
+        assertThat(summary.tone()).isEqualTo(SuggestionTone.ENERGETIC);
+        assertThat(summary.experimentId()).isEqualTo(experimentId);
+        assertThat(summary.experimentAssignmentId()).isEqualTo(assignmentId);
+        assertThat(summary.experimentVariantId()).isEqualTo(variantId);
+    }
+
+    @Test
     void createForRobotRejectsWhenDraftNotReadyJustLikeHumanGeneration() {
         ContentDraft notReady = draftInClipPending();
 
-        assertThatThrownBy(() -> service.createForRobot(workspace, notReady, null, null, null, UUID.randomUUID(), owner))
+        assertThatThrownBy(() -> service.createForRobot(workspace, notReady, null, null, null, UUID.randomUUID(), owner, null))
                 .isInstanceOf(ResponseStatusException.class)
                 .extracting("statusCode")
                 .isEqualTo(HttpStatus.CONFLICT);

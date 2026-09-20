@@ -16,6 +16,8 @@ import com.fdmultimedia.api.contentsuggestions.ContentSuggestionRepository;
 import com.fdmultimedia.api.contentsuggestions.ContentSuggestionService;
 import com.fdmultimedia.api.contentsuggestions.ContentSuggestionStatus;
 import com.fdmultimedia.api.contentsuggestions.ContentSuggestionSummary;
+import com.fdmultimedia.api.experiments.ExperimentService;
+import com.fdmultimedia.api.experiments.ExperimentTreatment;
 import com.fdmultimedia.api.personas.PersonaRepository;
 import com.fdmultimedia.api.highlights.CreateHighlightAnalysisRequest;
 import com.fdmultimedia.api.highlights.HighlightAnalysis;
@@ -77,6 +79,7 @@ public class RobotRunOrchestrator {
     private final ContentSuggestionService contentSuggestionService;
     private final ContentSuggestionRepository contentSuggestions;
     private final PersonaRepository personas;
+    private final ExperimentService experiments;
     private final Clock clock;
 
     public RobotRunOrchestrator(
@@ -95,6 +98,7 @@ public class RobotRunOrchestrator {
             ContentSuggestionService contentSuggestionService,
             ContentSuggestionRepository contentSuggestions,
             PersonaRepository personas,
+            ExperimentService experiments,
             Clock clock) {
         this.authService = authService;
         this.robotRepository = robotRepository;
@@ -111,6 +115,7 @@ public class RobotRunOrchestrator {
         this.contentSuggestionService = contentSuggestionService;
         this.contentSuggestions = contentSuggestions;
         this.personas = personas;
+        this.experiments = experiments;
         this.clock = clock;
     }
 
@@ -306,10 +311,15 @@ public class RobotRunOrchestrator {
             return;
         }
         try {
+            // Item 28/86: when this run carries a frozen experiment assignment, its
+            // variant Persona treatment overrides the Robot's own personaIdSnapshot —
+            // resolved from the variant's own frozen columns, never a live Persona lookup.
+            ExperimentTreatment treatment = run.getExperimentVariantId() == null ? null
+                    : experiments.resolveTreatment(run.getExperimentId(), run.getExperimentAssignmentId(), run.getExperimentVariantId());
             ContentSuggestionSummary suggestion = contentSuggestionService.createForRobot(
                     run.getWorkspace(), draftEntity, run.getPersonaIdSnapshot(),
                     run.getAiLanguageOverrideSnapshot(), run.getAiToneOverrideSnapshot(),
-                    run.getId(), run.getRobot().getCreatedByUser());
+                    run.getId(), run.getRobot().getCreatedByUser(), treatment);
             run.setContentSuggestionId(suggestion.id());
             run.markWaitingForAi(now);
         } catch (ResponseStatusException ex) {
@@ -493,6 +503,9 @@ public class RobotRunOrchestrator {
                 run.getPersonaIdSnapshot(),
                 personaName,
                 run.getContentSuggestionId(),
+                run.getExperimentId(),
+                run.getExperimentVariantId(),
+                run.getExperimentVariantKey(),
                 run.getPublishScheduleId(),
                 run.getFailureCode(),
                 run.getFailureMessage(),

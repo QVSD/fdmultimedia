@@ -17,9 +17,10 @@ public record UpdateRobotRequest(
         RobotAiPolicy aiPolicy,
         UUID personaId,
         SuggestionLanguage aiLanguageOverride,
-        SuggestionTone aiToneOverride) {
+        SuggestionTone aiToneOverride,
+        UUID experimentId) {
 
-    /** Backward-compatible overload (NO_AI, no Persona) — Phase 11C/11D call sites keep working unchanged. */
+    /** Backward-compatible overload (NO_AI, no Persona, no Experiment) — Phase 11C/11D call sites keep working unchanged. */
     public UpdateRobotRequest(
             String name,
             String description,
@@ -30,6 +31,24 @@ public record UpdateRobotRequest(
             Integer scheduleDelayMinutes,
             Integer maxRunsPerDay) {
         this(name, description, autonomyMode, targetSocialAccountId, cadenceType, cadenceIntervalHours,
-                scheduleDelayMinutes, maxRunsPerDay, null, null, null, null);
+                scheduleDelayMinutes, maxRunsPerDay, null, null, null, null, null);
+    }
+
+    /** Backward-compatible overload (no Experiment) — Phase 12C call sites keep working unchanged. */
+    public UpdateRobotRequest(
+            String name,
+            String description,
+            RobotAutonomyMode autonomyMode,
+            UUID targetSocialAccountId,
+            RobotCadenceType cadenceType,
+            Integer cadenceIntervalHours,
+            Integer scheduleDelayMinutes,
+            Integer maxRunsPerDay,
+            RobotAiPolicy aiPolicy,
+            UUID personaId,
+            SuggestionLanguage aiLanguageOverride,
+            SuggestionTone aiToneOverride) {
+        this(name, description, autonomyMode, targetSocialAccountId, cadenceType, cadenceIntervalHours,
+                scheduleDelayMinutes, maxRunsPerDay, aiPolicy, personaId, aiLanguageOverride, aiToneOverride, null);
     }
 }

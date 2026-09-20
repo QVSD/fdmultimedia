@@ -13,6 +13,8 @@ import { ContentSourcesService } from '../../core/content-sources/content-source
 import { ContentSourceSummary } from '../../core/content-sources/content-source.models';
 import { PersonasService } from '../../core/personas/personas.service';
 import { PersonaSummary } from '../../core/personas/persona.models';
+import { ExperimentsService } from '../../core/experiments/experiments.service';
+import { ExperimentSummary } from '../../core/experiments/experiment.models';
 import { Robots } from './robots';
 
 describe('Robots', () => {
@@ -24,6 +26,7 @@ describe('Robots', () => {
   let socialAccountsService: Pick<SocialAccountsService, 'list'>;
   let contentSourcesService: Pick<ContentSourcesService, 'list'>;
   let personasService: Pick<PersonasService, 'list'>;
+  let experimentsService: Pick<ExperimentsService, 'list'>;
 
   beforeEach(async () => {
     robotsService = {
@@ -53,6 +56,9 @@ describe('Robots', () => {
     personasService = {
       list: vi.fn().mockReturnValue(of([activePersona(), archivedPersona()])),
     };
+    experimentsService = {
+      list: vi.fn().mockReturnValue(of([])),
+    };
 
     await TestBed.configureTestingModule({
       imports: [Robots],
@@ -64,6 +70,7 @@ describe('Robots', () => {
         { provide: SocialAccountsService, useValue: socialAccountsService },
         { provide: ContentSourcesService, useValue: contentSourcesService },
         { provide: PersonasService, useValue: personasService },
+        { provide: ExperimentsService, useValue: experimentsService },
       ],
     }).compileComponents();
 
@@ -475,6 +482,7 @@ describe('Robots', () => {
       personaName: null,
       aiLanguageOverride: null,
       aiToneOverride: null,
+      experimentId: null,
       createdAt: '2026-09-18T08:00:00Z',
       updatedAt: '2026-09-18T08:00:00Z',
     };
@@ -501,6 +509,9 @@ describe('Robots', () => {
       personaIdSnapshot: null,
       personaNameSnapshot: null,
       contentSuggestionId: null,
+      experimentId: null,
+      experimentVariantId: null,
+      experimentVariantKey: null,
       failureCode: status === 'FAILED' ? 'SOURCE_UNAVAILABLE' : null,
       failureMessage: status === 'FAILED' ? 'Source asset is not ready' : null,
       createdAt: '2026-09-18T08:05:00Z',

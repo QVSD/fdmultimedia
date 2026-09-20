@@ -1,0 +1,263 @@
+.experiments {
+  display: grid;
+  gap: 1.5rem;
+}
+
+.experiments__lead {
+  color: var(--color-text-muted);
+}
+
+.experiments__disclaimer {
+  color: var(--color-text-muted);
+  font-size: 0.85rem;
+  font-style: italic;
+}
+
+.experiments__error {
+  color: #991b1b;
+}
+
+.experiments__hint {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 0.82rem;
+}
+
+button {
+  min-height: 2.25rem;
+  border: 0;
+  border-radius: 6px;
+  padding: 0.4rem 0.9rem;
+  background: #111827;
+  color: #ffffff;
+  font-weight: 700;
+  cursor: pointer;
+
+  &:disabled {
+    cursor: wait;
+    opacity: 0.65;
+  }
+}
+
+.experiments__form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
+  gap: 0.75rem;
+  max-width: 900px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 1rem;
+
+  label {
+    display: grid;
+    gap: 0.35rem;
+    color: #374151;
+    font-weight: 600;
+    font-size: 0.88rem;
+  }
+
+  .experiments__field--wide {
+    grid-column: 1 / -1;
+  }
+
+  input,
+  select,
+  textarea {
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    padding: 0.4rem 0.6rem;
+    font: inherit;
+    resize: vertical;
+  }
+
+  input,
+  select {
+    min-height: 2.25rem;
+  }
+
+  button {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+}
+
+.experiments__variant {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
+  gap: 0.75rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 0.75rem;
+
+  legend {
+    font-weight: 700;
+    color: #111827;
+  }
+}
+
+.experiments__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 1rem;
+}
+
+.experiments__card {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 1rem;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.experiments__card-header {
+  cursor: pointer;
+  display: grid;
+  gap: 0.25rem;
+}
+
+.experiments__summary-line {
+  color: var(--color-text-muted);
+  font-size: 0.85rem;
+}
+
+// Deliberately neutral: no per-variant color-coding, no trophy/winner styling anywhere
+// in this file (item 71) — both variants always share the same chip/card appearance.
+.experiments__badge {
+  display: inline-block;
+  border-radius: 6px;
+  padding: 0.2rem 0.5rem;
+  margin-left: 0.5rem;
+  background: #e5e7eb;
+  color: #374151;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.experiments__variant-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.experiments__variant-chip {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 0.3rem 0.6rem;
+  font-size: 0.82rem;
+}
+
+.experiments__variant-key {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.4rem;
+  height: 1.4rem;
+  border-radius: 50%;
+  background: #e5e7eb;
+  color: #111827;
+  font-weight: 700;
+  font-size: 0.75rem;
+}
+
+.experiments__variant-count {
+  color: var(--color-text-muted);
+}
+
+.experiments__controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.experiments__readonly {
+  color: var(--color-text-muted);
+  font-size: 0.85rem;
+  align-self: center;
+}
+
+.experiments__detail {
+  border-top: 1px solid #e5e7eb;
+  padding-top: 0.75rem;
+  display: grid;
+  gap: 0.5rem;
+
+  h3 {
+    margin: 0.5rem 0 0;
+    font-size: 0.9rem;
+  }
+}
+
+.experiments__notice {
+  color: var(--color-text-muted);
+  font-size: 0.85rem;
+  font-style: italic;
+}
+
+.experiments__variant-detail-row,
+.experiments__outcome-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
+  gap: 0.75rem;
+}
+
+.experiments__variant-detail,
+.experiments__outcome-card {
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 0.6rem;
+  display: grid;
+  gap: 0.3rem;
+  font-size: 0.85rem;
+
+  dl {
+    margin: 0;
+    display: grid;
+    grid-template-columns: auto auto;
+    gap: 0.15rem 0.6rem;
+  }
+
+  dt {
+    color: var(--color-text-muted);
+  }
+
+  dd {
+    margin: 0;
+  }
+}
+
+.experiments__small-sample {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 0.78rem;
+  font-style: italic;
+}
+
+.experiments__assignments {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+
+  th,
+  td {
+    text-align: left;
+    padding: 0.35rem 0.5rem;
+    border-bottom: 1px solid #e5e7eb;
+  }
+}
+
+@media (max-width: 760px) {
+  .experiments__form,
+  .experiments__variant,
+  .experiments__variant-detail-row,
+  .experiments__outcome-row {
+    grid-template-columns: 1fr;
+  }
+}

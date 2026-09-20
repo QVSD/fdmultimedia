@@ -1,5 +1,6 @@
 package com.fdmultimedia.api.robots;
 
+import com.fdmultimedia.api.experiments.ExperimentVariantKey;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -22,6 +23,9 @@ public record RobotRunSummary(
         UUID personaIdSnapshot,
         String personaNameSnapshot,
         UUID contentSuggestionId,
+        UUID experimentId,
+        UUID experimentVariantId,
+        ExperimentVariantKey experimentVariantKey,
         UUID publishScheduleId,
         String failureCode,
         String failureMessage,

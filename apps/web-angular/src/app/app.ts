@@ -25,6 +25,7 @@ export class App {
     { path: '/content', label: 'Content' },
     { path: '/robots', label: 'Robots' },
     { path: '/personas', label: 'Personas' },
+    { path: '/experiments', label: 'Experiments' },
     { path: '/compute', label: 'Compute' },
     { path: '/jobs', label: 'Jobs' },
     { path: '/settings', label: 'Settings' },

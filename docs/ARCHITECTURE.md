@@ -2763,3 +2763,172 @@ changes, statistical significance/p-values/confidence intervals, A/B
 experiments, engagement/revenue prediction, alerts, anomaly detection,
 follower/commenter-level data, new Instagram OAuth scopes, TikTok/YouTube
 analytics, and any AI/LLM participation in insight generation.
+
+## Controlled experiments & A/B testing foundation (Phase 14A)
+
+An `Experiment` (new `com.fdmultimedia.api.experiments` package) is a
+controlled *assignment* mechanism, not an optimizer: it never decides which
+variant is "better," never runs significance testing, and never mutates a
+Robot/Persona/schedule on its own. It answers exactly the questions in the
+spec — what hypothesis, what single factor, what frozen variants, which
+RobotRun got which variant, when, and which Publication/analytics
+observation later belongs to that variant — and nothing more.
+
+### One factor, two variants, PERSONA only
+
+`ExperimentFactor` has exactly one member, `PERSONA`; `ExperimentVariantKey`
+has exactly two, `A`/`B`. AI_POLICY was considered and deliberately deferred:
+it would conflate the experimental factor with the pre-existing human-review
+gate (`GENERATE_FOR_REVIEW` vs. `GENERATE_AND_APPLY` already decides *when* a
+human reviews AI output, an orthogonal axis to *whether* a treatment
+changed), and `NO_AI` has no treatment to assign at all — forcing it in would
+have produced an ambiguous design rather than a clean one. Multivariate/3+
+variant designs are out of scope by construction (a fixed two-column
+`experiment_variants` shape, not a generic list).
+
+### Frozen Persona treatment: snapshot at activation, not at variant creation
+
+`ExperimentVariant` stores a plain `personaId` reference (mutable) while its
+owning `Experiment` is DRAFT — items can be re-pointed at a different Persona
+freely during setup. `ExperimentService.activate()` is the *one* moment the
+treatment freezes: for each variant it re-resolves the live Persona, requires
+ACTIVE status, and calls `ExperimentVariant.freeze(PersonaSnapshot,
+defaultLanguage, defaultTone)`, copying every editorial field into flat
+columns exactly like Phase 12B's own `PersonaSnapshot`/`ContentSuggestion`
+pattern — never storing a raw prompt, and no FK to `personas(id)` (the same
+"historical explanation must survive the source row changing" rule V21
+established). After activation, `Experiment`/`ExperimentVariant` never accept
+another edit through this API, so the frozen columns are permanently correct
+by construction; a live Persona edit or archive afterward is structurally
+incapable of altering them.
+
+### Assignment: RobotRun-scoped, database-locked, deterministic
+
+The assignment unit is `RobotRun`, and assignment happens **inside the same
+transaction** that creates and saves the run
+(`RobotAutomationDispatchService.startRun`) — before the treatment is ever
+consumed, and atomically with the run itself: a crash before commit leaves
+neither durable, a successful commit leaves both durable together, so there
+is no window where a run exists without its assignment or vice versa.
+`ExperimentAssignmentService.assign` locks the `Experiment` row
+(`findByWorkspaceAndIdForUpdate`, the same `PESSIMISTIC_WRITE` idiom
+`RobotRepository` already used), re-verifies ACTIVE under that lock (defense
+in depth beneath an earlier optimistic check in
+`RobotAutomationDispatchService.validateCanStartRun`), counts existing
+assignments per variant via one aggregate query, and picks the *strictly*
+least-assigned variant — ties always resolve to Variant A, a stable,
+auditable tie-break that keeps any prefix of assignments within a difference
+of at most one, verified live against real Postgres across 16 concurrent and
+sequential assignments landing exactly 8/8. The
+`experiment_assignments_robot_run_unique` constraint is the final backstop
+against a duplicate assignment for the same run; no `synchronized`, no
+in-memory counter, no retry-on-conflict loop — the codebase's existing
+"claim under a row lock" convention, not a new concurrency primitive.
+
+Item 85's outcome-blindness is structural, not merely tested: neither
+`ExperimentAssignmentService` nor its collaborators
+(`ExperimentRepository`/`ExperimentVariantRepository`/
+`ExperimentAssignmentRepository`) import anything from `analytics` —
+assignment cannot read a snapshot, a dashboard aggregate, or a provider
+metric even if it wanted to.
+
+### Treatment consumption: overriding, not merging, the Robot's own Persona
+
+`RobotRunOrchestrator.beginAiGeneration` resolves
+`ExperimentService.resolveTreatment(experimentId, assignmentId, variantId)`
+whenever the run carries a frozen assignment, and passes the resulting
+`ExperimentTreatment` into `ContentSuggestionService.createForRobot`/
+`generate`. When a treatment is present, `generate` skips `resolvePersona`
+entirely — the frozen `PersonaSnapshot`, `defaultLanguage`, and `defaultTone`
+on `ExperimentTreatment` are used exactly as-is, never merged with or
+overridden by the Robot's own configured `personaId`/language/tone override
+(the experiment treatment always wins for experimental runs, per item 14/15;
+the Robot's own Persona is preserved in storage, unused, and resumes working
+immediately if the Experiment is later detached — never silently erased,
+per item 66's UI/API contract). `ContentSuggestion` gains three plain
+provenance columns (`experiment_id`/`experiment_assignment_id`/
+`experiment_variant_id`, no FK, mirroring `robot_run_id`) so a later human
+regeneration/apply can be distinguished from the automatic treatment
+suggestion — see protocol deviation below.
+
+### Publication attribution and protocol deviation
+
+`PublicationAttributionService.capture` — the existing, single place a
+Publication's immutable provenance freezes — gains experiment columns
+resolved from the RobotRun's own frozen snapshot fields (never a live
+`Robot.experimentId` lookup, so a Robot later being detached from its
+Experiment cannot retroactively change history), plus a descriptive
+`protocol_deviation` boolean: `false` when the finally-applied suggestion is
+exactly the one this run's assignment generated, `true` (with a reason —
+`NO_EXPERIMENT_TREATMENT_SUGGESTION_APPLIED` or
+`DIFFERENT_SUGGESTION_APPLIED`) when a human's manual edit or a different
+applied suggestion means the published content didn't strictly follow the
+treatment. A deviation is never excluded from anything automatically — it is
+visible evidence, not a filter — matching item 32/97's "assignment
+attribution ≠ guaranteed final content compliance" principle. Verified live:
+publishing through `GENERATE_AND_APPLY`'s own automatic path produces
+`protocolDeviation: false`; the field survives a subsequent Persona archive
+unchanged.
+
+### Reused, not reimplemented: outcome evidence via Phase 13B's own machinery
+
+`ExperimentOutcomeService` never runs a second snapshot-selection algorithm.
+`DashboardQuery` gained one new optional field, `experimentId` (a
+backward-compatible auxiliary constructor keeps every pre-14A call site
+unchanged), threaded into `observed()`'s existing WHERE clause, plus a new
+`Dimension.EXPERIMENT_VARIANT` (`dimensionKeyExpr`/`dimensionLabelExpr`
+follow the exact ARRAY_AGG-most-recent-label pattern Phase 13C already
+established for renamed entities). `ExperimentOutcomeService` builds a
+`DashboardQuery` directly (bypassing `PublicationDashboardService.query()`,
+which is tuned for the public dashboard's own date-range/365-day-cap
+contract) scoped by the Experiment's own `targetObservationWindow`, then
+calls the *exact same* `PublicationDashboardStore.segments()` method
+`PerformanceInsightService` itself uses for two-segment comparisons. A small
+dedicated JDBC funnel query (`experiment_assignments` joined to
+`robot_runs`) supplies `assignedRuns`/`failedRuns`/`runsWithDraft`; published
+count and all metric evidence come from `segments()`'s own `Coverage`. The
+general `/api/analytics/dashboard/breakdown?dimension=EXPERIMENT_VARIANT`
+also works as a free byproduct of the same enum addition — additive,
+zero-risk, verified live — but `PerformanceInsightService` explicitly
+**rejects** `EXPERIMENT_VARIANT` on its own `/insights`/`/insights/compare`
+endpoints (item 101: experiment-variant comparisons stay out of the general
+insights engine in this phase, to avoid it functioning as an implicit
+experiment-winner declaration).
+
+### No winner, ever
+
+`ExperimentOutcome`/`ExperimentOutcomeVariant` have no `winner`, `score`, or
+`confidence` field — by omission, not by a runtime check. The Angular
+`/experiments` page mirrors Phase 13C's own neutral-styling discipline: no
+per-variant color, no trophy icon, no "winner"/"best" label anywhere in the
+template or SCSS, and a persistent disclaimer ("Experiment outcomes are
+descriptive in Phase 14A. No statistical winner or causal conclusion is
+calculated yet.") on every view of outcome evidence.
+
+### Lifecycle, workspace isolation, and robot opt-in
+
+`ExperimentStatus` (`DRAFT → ACTIVE ⇄ PAUSED → COMPLETED`/`CANCELLED`,
+terminal states never reactivated) follows the same
+entity-throws-`IllegalStateException`/service-catches-and-rethrows-
+`ResponseStatusException` convention as `Robot.pause()`/`resume()`. `Robot`
+gains one plain `experimentId` column (no JPA relationship, so the `robots`
+package has zero compile-time dependency on `experiments`) validated by
+`ExperimentService.assertRobotAttachable(workspace, experimentId,
+aiPolicyConsumesPersona)` — a Robot may reference a DRAFT/ACTIVE/PAUSED
+Experiment (flexible setup order) but never a terminal one, and only when
+its AI policy actually consumes a Persona (rejects `NO_AI`). Workspace
+isolation is structural, not a special case: every experiment query is
+scoped through the same `AuthService.currentMembershipFor(principal)` →
+`Workspace` idiom every other service uses, so a cross-workspace experiment
+or segment ID simply doesn't resolve.
+
+### Out of scope for this phase
+
+Automatic winner selection, statistical significance/p-values/confidence
+intervals/Bayesian probability, sequential testing or early stopping,
+multi-armed bandits/Thompson sampling, automatic traffic reallocation,
+automatic Robot/Persona/prompt/schedule changes triggered by an outcome,
+multi-factor or 3+-variant designs, AI_POLICY as an experimental factor
+(deferred, see above), audience/viewer/follower-level assignment or
+tracking, revenue/monetization experiments, and any AI/LLM participation in
+experiment analysis or conclusions.

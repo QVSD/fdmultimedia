@@ -48,11 +48,12 @@ describe('App', () => {
     await fixture.whenStable();
     const compiled = fixture.nativeElement as HTMLElement;
     expect(compiled.querySelector('.sidebar__brand')?.textContent).toContain('FD Multimedia');
-    expect(compiled.querySelectorAll('.sidebar__link').length).toBe(7);
+    expect(compiled.querySelectorAll('.sidebar__link').length).toBe(8);
     expect(compiled.textContent).toContain('Overview');
     expect(compiled.textContent).toContain('Content');
     expect(compiled.textContent).toContain('Robots');
     expect(compiled.textContent).toContain('Personas');
+    expect(compiled.textContent).toContain('Experiments');
     expect(compiled.textContent).toContain('Compute');
     expect(compiled.textContent).toContain('Jobs');
     expect(compiled.textContent).toContain('Settings');

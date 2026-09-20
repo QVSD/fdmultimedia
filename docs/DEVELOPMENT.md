@@ -131,11 +131,19 @@ parallel enum — see `personas/package-info.java` for the full rationale.
 Phase 13B read-only dashboard aggregation, and the Phase 13C deterministic
 insight engine over that same data — no new package, since insights are
 purely query/service/UI logic over already-immutable analytics;
-`revenue` remains a placeholder. The package layout under
-`com.fdmultimedia.api` (`auth`, `users`, `workspaces`, `accounts`, `robots`,
-`contentsources`, `assets`, `jobs`, `workers`, `publishing`,
-`contentdrafts`, `publishschedules`, `contentsuggestions`, `personas`,
-`analytics`, `revenue`, `shared`) is where new domain logic should land.
+`revenue` remains a placeholder. `experiments` (controlled A/B assignment —
+`Experiment`/`ExperimentVariant`/`ExperimentAssignment`) was added in Phase
+14A — it depends on `personas` (for `PersonaSnapshot`) and `analytics` (for
+the shared `DashboardQuery`/`PublicationDashboardStore` outcome machinery),
+but deliberately has **no** dependency on `robots`: assignment methods take
+plain `Workspace`/`UUID`/`boolean` parameters rather than `Robot`/`RobotRun`
+entities, so `robots` depends on `experiments` and not the reverse — the
+same one-directional discipline `contentsources`/`robots` already
+established. The package layout under `com.fdmultimedia.api` (`auth`,
+`users`, `workspaces`, `accounts`, `robots`, `contentsources`, `assets`,
+`jobs`, `workers`, `publishing`, `contentdrafts`, `publishschedules`,
+`contentsuggestions`, `personas`, `analytics`, `experiments`, `revenue`,
+`shared`) is where new domain logic should land.
 See [ARCHITECTURE.md](ARCHITECTURE.md)
 for what each package is for.
 
@@ -699,3 +707,53 @@ always populates all seven). Comparing a segment to itself, an unsupported
 reports as one segment (its most recently published name), not two — see
 `docs/ARCHITECTURE.md` for the query-level fix this phase made to
 `PublicationDashboardStore` to guarantee that.
+
+## Controlled experiments & A/B testing foundation (Phase 14A)
+
+`POST /api/experiments` creates a DRAFT PERSONA experiment in one call — name,
+hypothesis, `targetObservationWindow` (`H24`/`H72`/`D7`; `LATEST` is rejected),
+`primaryMetric` (one of the seven normalized metrics), and a distinct,
+ACTIVE Persona for each of `variantAPersonaId`/`variantBPersonaId`. While
+DRAFT, `PATCH /api/experiments/{id}` can still edit any of those fields
+(never the factor). `POST /api/experiments/{id}/activate` freezes both
+variants' Persona configuration (re-validates distinctness and ACTIVE status
+at that moment) and transitions to ACTIVE; `pause`/`resume`/`complete`/
+`cancel` follow from there, and a terminal experiment (`COMPLETED`/
+`CANCELLED`) accepts no further transition.
+
+To attach a Robot, set `experimentId` on `POST`/`PATCH /api/robots` — the
+Robot's own `aiPolicy` must be `GENERATE_FOR_REVIEW` or `GENERATE_AND_APPLY`
+(never `NO_AI`), and the Experiment must not be terminal. Once attached,
+every new `RobotRun` (manual "Run Now" or the scheduler) is assigned a
+variant **at run creation**, before any AI generation begins — the response
+already carries `experimentVariantKey`. Assignment fails with
+`ROBOT_EXPERIMENT_NOT_ACTIVE` (a manual run: a `409`; a scheduled run: logged
+and skipped, exactly like `DAILY_LIMIT_REACHED`) whenever the Experiment is
+DRAFT/PAUSED/terminal — pausing never contaminates the population, it only
+blocks *new* assignments; an already-assigned run keeps going and may still
+finish, publish, and reach `PublicationAttribution`.
+
+To prove the frozen-treatment guarantee locally: activate an experiment,
+`PATCH` one of its variant's live Personas to a different language/tone/voice,
+then run an experimental Robot until it lands on that variant (repeat "Run
+Now" against fresh EXISTING_ASSET Robots if needed — assignment is balanced,
+not random, so it converges quickly) — the resulting `ContentSuggestion`'s
+`language`/`tone`/caption still reflect the **pre-edit** frozen snapshot, not
+the live edit. Archiving that Persona afterward doesn't affect it either.
+
+`GET /api/experiments/{id}/assignments` (bounded, most-recent-first) and
+`GET /api/experiments/{id}/outcomes` are both read-only. Outcomes reuse Phase
+13B's exact snapshot-selection semantics at the Experiment's own fixed
+`targetObservationWindow`/`primaryMetric` — per-variant `assignedRuns`/
+`failedRuns`/`runsWithDraft`/`publishedCount`/`eligibleByAgeCount`/
+`analyticsPublicationCount`/`metricSampleCount`/`coverage`/`average`/`median`,
+plus plain-language maturity notices — and never a `winner`/`score`/
+`confidence` field. There is no accelerated-time trick for maturity in this
+phase; to see non-zero `eligibleByAgeCount`, either wait past the
+Experiment's own window or (for local iteration) create the experiment
+against already-old TEST publications reused from an earlier phase's
+dataset. Concurrent assignment safety can be exercised locally by firing
+several `POST /api/robots/{id}/run` requests in parallel against distinct
+Robots on the same Experiment and confirming `GET
+.../assignments` shows one row per run, no duplicates, and a
+balanced A/B split (difference at most one).

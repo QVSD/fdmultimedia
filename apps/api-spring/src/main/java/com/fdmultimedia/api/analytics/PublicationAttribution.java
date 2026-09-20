@@ -11,5 +11,10 @@ public record PublicationAttribution(
         UUID personaId, String personaNameSnapshot, String aiProvider,
         String aiModel, String promptVersion, String aiPolicy,
         String robotAutonomyMode, String sourceSelectionPolicy,
-        String contentSourceNameSnapshot, Instant createdAt) {
+        String contentSourceNameSnapshot,
+        UUID experimentId, String experimentNameSnapshot, String experimentFactor,
+        UUID experimentVariantId, String experimentVariantKey, String experimentVariantLabelSnapshot,
+        UUID experimentFactorValueId, String experimentFactorValueNameSnapshot, UUID experimentAssignmentId,
+        Boolean protocolDeviation, String protocolDeviationReason,
+        Instant createdAt) {
 }

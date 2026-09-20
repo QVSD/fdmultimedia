@@ -106,6 +106,18 @@ public class Robot {
     @Column(name = "ai_tone_override")
     private SuggestionTone aiToneOverride;
 
+    /**
+     * Phase 14A opt-in: a plain reference, never a JPA relationship, so this
+     * package stays free of a compile-time dependency on
+     * {@code com.fdmultimedia.api.experiments}. When set, an experiment
+     * variant's frozen Persona treatment overrides {@link #persona} for
+     * experimental runs (see RobotRunOrchestrator) — {@link #persona} itself
+     * is never erased, so it is used again unchanged if the Experiment is
+     * later detached.
+     */
+    @Column(name = "experiment_id")
+    private UUID experimentId;
+
     @Column(name = "next_run_at")
     private Instant nextRunAt;
 
@@ -186,6 +198,33 @@ public class Robot {
             SuggestionTone aiToneOverride,
             AppUser createdByUser,
             Instant now) {
+        this(workspace, name, description, autonomyMode, sourcePolicy, sourceAsset, contentSource, selectionPolicy,
+                targetSocialAccount, cadenceType, cadenceIntervalHours, scheduleDelayMinutes, maxRunsPerDay,
+                aiPolicy, persona, aiLanguageOverride, aiToneOverride, null, createdByUser, now);
+    }
+
+    /** Phase 14A: adds the optional Experiment opt-in (item 13) as its own trailing axis. */
+    public Robot(
+            Workspace workspace,
+            String name,
+            String description,
+            RobotAutonomyMode autonomyMode,
+            RobotSourcePolicy sourcePolicy,
+            MediaAsset sourceAsset,
+            ContentSource contentSource,
+            RobotSelectionPolicy selectionPolicy,
+            SocialAccount targetSocialAccount,
+            RobotCadenceType cadenceType,
+            Integer cadenceIntervalHours,
+            Integer scheduleDelayMinutes,
+            int maxRunsPerDay,
+            RobotAiPolicy aiPolicy,
+            Persona persona,
+            SuggestionLanguage aiLanguageOverride,
+            SuggestionTone aiToneOverride,
+            UUID experimentId,
+            AppUser createdByUser,
+            Instant now) {
         this.id = UUID.randomUUID();
         this.workspace = workspace;
         this.name = name;
@@ -206,6 +245,7 @@ public class Robot {
         this.persona = persona;
         this.aiLanguageOverride = aiLanguageOverride;
         this.aiToneOverride = aiToneOverride;
+        this.experimentId = experimentId;
         this.createdByUser = createdByUser;
         this.createdAt = now;
         this.updatedAt = now;
@@ -241,6 +281,7 @@ public class Robot {
             Persona persona,
             SuggestionLanguage aiLanguageOverride,
             SuggestionTone aiToneOverride,
+            UUID experimentId,
             Instant now) {
         this.name = name;
         this.description = description;
@@ -252,6 +293,7 @@ public class Robot {
         this.persona = persona;
         this.aiLanguageOverride = aiLanguageOverride;
         this.aiToneOverride = aiToneOverride;
+        this.experimentId = experimentId;
         boolean cadenceChanged = this.cadenceType != cadenceType
                 || !java.util.Objects.equals(this.cadenceIntervalHours, cadenceIntervalHours);
         this.cadenceType = cadenceType;
@@ -318,6 +360,7 @@ public class Robot {
     public Persona getPersona() { return persona; }
     public SuggestionLanguage getAiLanguageOverride() { return aiLanguageOverride; }
     public SuggestionTone getAiToneOverride() { return aiToneOverride; }
+    public UUID getExperimentId() { return experimentId; }
     public Instant getNextRunAt() { return nextRunAt; }
     public Instant getLastRunAt() { return lastRunAt; }
     public AppUser getCreatedByUser() { return createdByUser; }

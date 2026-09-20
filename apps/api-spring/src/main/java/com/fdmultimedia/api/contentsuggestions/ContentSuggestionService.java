@@ -5,6 +5,7 @@ import com.fdmultimedia.api.auth.security.AuthenticatedUser;
 import com.fdmultimedia.api.contentdrafts.ContentDraft;
 import com.fdmultimedia.api.contentdrafts.ContentDraftRepository;
 import com.fdmultimedia.api.contentdrafts.ContentDraftStatus;
+import com.fdmultimedia.api.experiments.ExperimentTreatment;
 import com.fdmultimedia.api.jobs.Job;
 import com.fdmultimedia.api.jobs.JobCreateRequest;
 import com.fdmultimedia.api.jobs.JobService;
@@ -79,7 +80,7 @@ public class ContentSuggestionService {
         Workspace workspace = membership.getWorkspace();
         ContentDraft draft = drafts.findByWorkspaceAndId(workspace, draftId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Content draft not found"));
-        return generate(workspace, draft, request.personaId(), request.language(), request.tone(), null, membership.getUser());
+        return generate(workspace, draft, request.personaId(), request.language(), request.tone(), null, membership.getUser(), null);
     }
 
     /**
@@ -113,25 +114,38 @@ public class ContentSuggestionService {
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public ContentSuggestionSummary createForRobot(
             Workspace workspace, ContentDraft draft, UUID personaId,
-            SuggestionLanguage languageOverride, SuggestionTone toneOverride, UUID robotRunId, AppUser initiatingUser) {
-        return generate(workspace, draft, personaId, languageOverride, toneOverride, robotRunId, initiatingUser);
+            SuggestionLanguage languageOverride, SuggestionTone toneOverride, UUID robotRunId, AppUser initiatingUser,
+            ExperimentTreatment treatment) {
+        return generate(workspace, draft, personaId, languageOverride, toneOverride, robotRunId, initiatingUser, treatment);
     }
 
     private ContentSuggestionSummary generate(
             Workspace workspace, ContentDraft draft, UUID personaId,
-            SuggestionLanguage languageOverride, SuggestionTone toneOverride, UUID robotRunId, AppUser initiatingUser) {
+            SuggestionLanguage languageOverride, SuggestionTone toneOverride, UUID robotRunId, AppUser initiatingUser,
+            ExperimentTreatment treatment) {
         if (!properties.isEnabled()) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "AI_DISABLED");
         }
         if (draft.getStatus() != ContentDraftStatus.READY) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Draft must be READY to generate a suggestion");
         }
-        Persona persona = resolvePersona(workspace, personaId);
-        SuggestionLanguage language = languageOverride != null ? languageOverride
-                : (persona != null ? persona.getDefaultLanguage() : SuggestionLanguage.AUTO);
-        SuggestionTone tone = toneOverride != null ? toneOverride
-                : (persona != null ? persona.getDefaultTone() : SuggestionTone.NEUTRAL);
-        PersonaSnapshot personaSnapshot = persona == null ? null : persona.toSnapshot();
+        SuggestionLanguage language;
+        SuggestionTone tone;
+        PersonaSnapshot personaSnapshot;
+        if (treatment != null) {
+            // Item 28/86: the experiment variant's frozen treatment overrides Persona
+            // resolution entirely — never resolves or re-validates the live Persona.
+            language = languageOverride != null ? languageOverride : treatment.defaultLanguage();
+            tone = toneOverride != null ? toneOverride : treatment.defaultTone();
+            personaSnapshot = treatment.personaSnapshot();
+        } else {
+            Persona persona = resolvePersona(workspace, personaId);
+            language = languageOverride != null ? languageOverride
+                    : (persona != null ? persona.getDefaultLanguage() : SuggestionLanguage.AUTO);
+            tone = toneOverride != null ? toneOverride
+                    : (persona != null ? persona.getDefaultTone() : SuggestionTone.NEUTRAL);
+            personaSnapshot = persona == null ? null : persona.toSnapshot();
+        }
 
         String provider = properties.getProvider();
         String model = properties.getModel();
@@ -157,7 +171,10 @@ public class ContentSuggestionService {
                 : ContentSuggestion.forRobot(
                         workspace, draft, job, provider, model, SocialCopyPromptBuilder.VERSION_V2,
                         language, tone, prompt, fingerprint,
-                        context.transcriptUsed(), context.transcriptId(), personaSnapshot, robotRunId, initiatingUser, now);
+                        context.transcriptUsed(), context.transcriptId(), personaSnapshot, robotRunId, initiatingUser, now,
+                        treatment == null ? null : treatment.experimentId(),
+                        treatment == null ? null : treatment.experimentAssignmentId(),
+                        treatment == null ? null : treatment.experimentVariantId());
         return toSummary(suggestions.save(suggestion), draft);
     }
 
@@ -544,6 +561,9 @@ public class ContentSuggestionService {
                 suggestion.getContentDraft().getId(),
                 suggestion.getOrigin(),
                 suggestion.getRobotRunId(),
+                suggestion.getExperimentId(),
+                suggestion.getExperimentAssignmentId(),
+                suggestion.getExperimentVariantId(),
                 suggestion.getType(),
                 suggestion.getStatus(),
                 suggestion.getProvider(),

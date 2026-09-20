@@ -1,0 +1,229 @@
+<section class="experiments">
+  <header>
+    <h1>Experiments</h1>
+    <p class="experiments__lead">
+      A controlled A/B assignment mechanism for one factor at a time. Assignment happens before any performance
+      outcome exists, is frozen for the life of the Robot run, and is never influenced by analytics.
+    </p>
+    <p class="experiments__disclaimer">
+      Experiment outcomes are descriptive in Phase 14A. No statistical winner or causal conclusion is calculated yet.
+    </p>
+  </header>
+
+  <button type="button" (click)="toggleCreateForm()">
+    {{ showCreateForm() ? 'Cancel' : 'Create Experiment' }}
+  </button>
+
+  @if (showCreateForm()) {
+    <form class="experiments__form" (ngSubmit)="createExperiment()">
+      <label class="experiments__field--wide">
+        <span>Name</span>
+        <input type="text" [ngModel]="createForm().name" (ngModelChange)="updateCreateField('name', $event)" name="create-name" required />
+      </label>
+      <label class="experiments__field--wide">
+        <span>Description</span>
+        <input type="text" [ngModel]="createForm().description" (ngModelChange)="updateCreateField('description', $event)" name="create-description" />
+      </label>
+      <label class="experiments__field--wide">
+        <span>Hypothesis</span>
+        <textarea rows="2" [ngModel]="createForm().hypothesis" (ngModelChange)="updateCreateField('hypothesis', $event)" name="create-hypothesis" required></textarea>
+      </label>
+      <label>
+        <span>Target observation window</span>
+        <select [ngModel]="createForm().targetObservationWindow" (ngModelChange)="updateCreateField('targetObservationWindow', $event)" name="create-window">
+          @for (window of windows; track window) {
+            <option [value]="window">{{ windowLabel(window) }}</option>
+          }
+        </select>
+      </label>
+      <label>
+        <span>Primary metric</span>
+        <select [ngModel]="createForm().primaryMetric" (ngModelChange)="updateCreateField('primaryMetric', $event)" name="create-metric">
+          @for (metric of metrics; track metric) {
+            <option [value]="metric">{{ metric }}</option>
+          }
+        </select>
+      </label>
+
+      <fieldset class="experiments__variant">
+        <legend>Variant A</legend>
+        <label>
+          <span>Persona</span>
+          <select [ngModel]="createForm().variantAPersonaId" (ngModelChange)="updateCreateField('variantAPersonaId', $event)" name="create-variant-a-persona" required>
+            <option value="" disabled>Choose a Persona</option>
+            @for (persona of activePersonas(); track persona.id) {
+              <option [value]="persona.id">{{ persona.name }}</option>
+            }
+          </select>
+        </label>
+        <label>
+          <span>Label (optional)</span>
+          <input type="text" [ngModel]="createForm().variantALabel" (ngModelChange)="updateCreateField('variantALabel', $event)" name="create-variant-a-label" />
+        </label>
+      </fieldset>
+
+      <fieldset class="experiments__variant">
+        <legend>Variant B</legend>
+        <label>
+          <span>Persona</span>
+          <select [ngModel]="createForm().variantBPersonaId" (ngModelChange)="updateCreateField('variantBPersonaId', $event)" name="create-variant-b-persona" required>
+            <option value="" disabled>Choose a Persona</option>
+            @for (persona of activePersonas(); track persona.id) {
+              <option [value]="persona.id">{{ persona.name }}</option>
+            }
+          </select>
+        </label>
+        <label>
+          <span>Label (optional)</span>
+          <input type="text" [ngModel]="createForm().variantBLabel" (ngModelChange)="updateCreateField('variantBLabel', $event)" name="create-variant-b-label" />
+        </label>
+      </fieldset>
+
+      <p class="experiments__hint">Variant configuration is frozen when the experiment is activated.</p>
+
+      @if (createError()) {
+        <p class="experiments__error" role="alert">{{ createError() }}</p>
+      }
+      <button type="submit" [disabled]="createBusy()">{{ createBusy() ? 'Creating…' : 'Create Experiment' }}</button>
+    </form>
+  }
+
+  @switch (loadState()) {
+    @case ('loading') {
+      <p>Loading experiments…</p>
+    }
+    @case ('error') {
+      <p role="alert">Experiments could not be loaded.</p>
+    }
+    @case ('ready') {
+      @if (experiments().length === 0) {
+        <p>No experiments yet.</p>
+      } @else {
+        <ul class="experiments__list">
+          @for (experiment of experiments(); track experiment.id) {
+            <li class="experiments__card">
+              <div class="experiments__card-header" (click)="toggleDetail(experiment)">
+                <div>
+                  <strong>{{ experiment.name }}</strong>
+                  <span class="experiments__badge">{{ statusLabel(experiment.status) }}</span>
+                </div>
+                <div class="experiments__summary-line">
+                  {{ experiment.factor }} &middot; {{ windowLabel(experiment.targetObservationWindow) }} &middot; {{ experiment.primaryMetric }}
+                </div>
+              </div>
+
+              <div class="experiments__variant-row">
+                @for (variant of experiment.variants; track variant.id) {
+                  <div class="experiments__variant-chip">
+                    <span class="experiments__variant-key">{{ variant.variantKey }}</span>
+                    <span>{{ variant.label }}</span>
+                    <span class="experiments__variant-count">n={{ variant.assignedCount }}</span>
+                  </div>
+                }
+              </div>
+
+              <div class="experiments__controls">
+                @if (experiment.status === 'DRAFT') {
+                  <button type="button" (click)="activate(experiment)" [disabled]="lifecycleBusy()[experiment.id]">Activate</button>
+                  <button type="button" (click)="cancel(experiment)" [disabled]="lifecycleBusy()[experiment.id]">Cancel</button>
+                }
+                @if (experiment.status === 'ACTIVE') {
+                  <button type="button" (click)="pause(experiment)" [disabled]="lifecycleBusy()[experiment.id]">Pause</button>
+                  <button type="button" (click)="complete(experiment)" [disabled]="lifecycleBusy()[experiment.id]">Complete</button>
+                  <button type="button" (click)="cancel(experiment)" [disabled]="lifecycleBusy()[experiment.id]">Cancel</button>
+                }
+                @if (experiment.status === 'PAUSED') {
+                  <button type="button" (click)="resume(experiment)" [disabled]="lifecycleBusy()[experiment.id]">Resume</button>
+                  <button type="button" (click)="complete(experiment)" [disabled]="lifecycleBusy()[experiment.id]">Complete</button>
+                  <button type="button" (click)="cancel(experiment)" [disabled]="lifecycleBusy()[experiment.id]">Cancel</button>
+                }
+                @if (experiment.status === 'COMPLETED' || experiment.status === 'CANCELLED') {
+                  <span class="experiments__readonly">Read-only (terminal)</span>
+                }
+                <button type="button" (click)="toggleDetail(experiment)">
+                  {{ isExpanded(experiment) ? 'Hide details' : 'Show details' }}
+                </button>
+              </div>
+              @if (lifecycleError()[experiment.id]) {
+                <p class="experiments__error" role="alert">{{ lifecycleError()[experiment.id] }}</p>
+              }
+
+              @if (isExpanded(experiment)) {
+                <div class="experiments__detail">
+                  <h3>Hypothesis</h3>
+                  <p>{{ experiment.hypothesis }}</p>
+                  @if (experiment.description) {
+                    <p class="experiments__description">{{ experiment.description }}</p>
+                  }
+
+                  <h3>Frozen treatment</h3>
+                  <div class="experiments__variant-detail-row">
+                    @for (variant of experiment.variants; track variant.id) {
+                      <div class="experiments__variant-detail">
+                        <strong>Variant {{ variant.variantKey }}</strong>
+                        <span>{{ variant.label }}</span>
+                        <span>{{ variant.frozen ? ('Frozen: ' + variant.personaNameSnapshot) : 'Not yet frozen (activates on Experiment activation)' }}</span>
+                      </div>
+                    }
+                  </div>
+
+                  <h3>Outcome evidence</h3>
+                  @if (outcomeFor(experiment.id); as outcome) {
+                    @for (notice of outcome.notices; track notice) {
+                      <p class="experiments__notice">{{ notice }}</p>
+                    }
+                    <div class="experiments__outcome-row">
+                      @for (variant of outcome.variants; track variant.variantId) {
+                        <div class="experiments__outcome-card">
+                          <strong>Variant {{ variant.variantKey }}</strong>
+                          <span>{{ variant.label }}</span>
+                          <dl>
+                            <dt>Assigned</dt><dd>{{ variant.assignedRuns }}</dd>
+                            <dt>Failed</dt><dd>{{ variant.failedRuns }}</dd>
+                            <dt>With draft</dt><dd>{{ variant.runsWithDraft }}</dd>
+                            <dt>Published</dt><dd>{{ variant.publishedCount }}</dd>
+                            <dt>Eligible by age</dt><dd>{{ variant.eligibleByAgeCount }}</dd>
+                            <dt>Metric sample (n)</dt><dd>{{ variant.metricSampleCount }}</dd>
+                            <dt>Average</dt><dd>{{ variant.average ?? '—' }}</dd>
+                            <dt>Median</dt><dd>{{ variant.median ?? '—' }}</dd>
+                          </dl>
+                          @if (variant.metricSampleCount > 0 && variant.metricSampleCount < 5) {
+                            <p class="experiments__small-sample">Descriptive only; sample is small.</p>
+                          }
+                        </div>
+                      }
+                    </div>
+                    <p class="experiments__disclaimer">{{ outcome.disclaimer }}</p>
+                  } @else {
+                    <p>Loading outcome…</p>
+                  }
+
+                  <h3>Assignment history</h3>
+                  @if (assignmentsFor(experiment.id).length === 0) {
+                    <p>No assignments yet.</p>
+                  } @else {
+                    <table class="experiments__assignments">
+                      <thead>
+                        <tr><th>Assigned at</th><th>Variant</th><th>Treatment</th><th>Robot run</th></tr>
+                      </thead>
+                      <tbody>
+                        @for (assignment of assignmentsFor(experiment.id); track assignment.id) {
+                          <tr>
+                            <td>{{ assignment.assignedAt | date: 'short' }}</td>
+                            <td>{{ assignment.variantKey }}</td>
+                            <td>{{ assignment.factorValueNameSnapshot }}</td>
+                            <td>{{ assignment.robotRunId }}</td>
+                          </tr>
+                        }
+                      </tbody>
+                    </table>
+                  }
+                </div>
+              }
+            </li>
+          }
+        </ul>
+      }
+    }
+  }
+</section>

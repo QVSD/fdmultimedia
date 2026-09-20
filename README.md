@@ -5,9 +5,33 @@ social-media content workflows, video processing workers running across
 multiple laptops/cloud machines, scheduling, AI-assisted content creation,
 publishing, analytics, and revenue tracking.
 
+## Phase 14A scope
+
+This repository is currently at **Phase 14A: Controlled Experiments & A/B Testing Foundation**.
+An `Experiment` is a controlled assignment mechanism, not an optimizer: it
+compares exactly two frozen variants (A/B) of one factor — PERSONA in this
+phase — and assigns a `RobotRun` to a variant deterministically, before any
+performance outcome exists, using a balanced least-assigned algorithm under a
+database row lock (never a random draw, never outcome-dependent). The
+assigned variant's Persona configuration is frozen at Experiment activation
+and never re-reads the live Persona again, so editing or archiving that
+Persona afterward can never change what an in-flight or historical
+experimental run means. A Robot opts in explicitly; the experiment's frozen
+treatment then overrides that Robot's own configured Persona for
+experimental runs only, and the assignment reaches `ContentSuggestion` and
+the existing immutable `PublicationAttribution` snapshot as durable
+provenance, including a descriptive "protocol deviation" flag when a human's
+final applied content differs from the automatic treatment. Phase 14A never
+decides a winner: its outcome endpoint reuses Phase 13B's exact
+snapshot-selection semantics to report descriptive per-variant evidence
+(funnel counts, coverage, average/median) at the experiment's own fixed
+observation window and metric — no significance testing, no automatic
+optimization, no Robot/Persona/schedule mutation ever triggered by an
+outcome.
+
 ## Phase 13C scope
 
-This repository is currently at **Phase 13C: Deterministic Performance Insights**.
+Phase 13C (Deterministic Performance Insights) preceded this phase.
 Phase 13A gave published TEST content deterministic, historical analytics
 snapshots and a publication-time provenance snapshot; Phase 13B added
 read-only comparison, trend, and breakdown views over that data —

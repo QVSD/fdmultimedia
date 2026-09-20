@@ -3,6 +3,7 @@ package com.fdmultimedia.api.robots;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -13,7 +14,15 @@ import com.fdmultimedia.api.assets.MediaImportMetadata;
 import com.fdmultimedia.api.assets.MediaInspectionMetadata;
 import com.fdmultimedia.api.auth.AuthService;
 import com.fdmultimedia.api.auth.security.AuthenticatedUser;
+import com.fdmultimedia.api.analytics.DashboardQuery;
 import com.fdmultimedia.api.contentsources.ContentSource;
+import com.fdmultimedia.api.experiments.Experiment;
+import com.fdmultimedia.api.experiments.ExperimentAssignment;
+import com.fdmultimedia.api.experiments.ExperimentAssignmentService;
+import com.fdmultimedia.api.experiments.ExperimentFactor;
+import com.fdmultimedia.api.experiments.ExperimentService;
+import com.fdmultimedia.api.experiments.ExperimentVariant;
+import com.fdmultimedia.api.experiments.ExperimentVariantKey;
 import com.fdmultimedia.api.users.AppUser;
 import com.fdmultimedia.api.workspaces.Workspace;
 import com.fdmultimedia.api.workspaces.WorkspaceMembership;
@@ -26,6 +35,7 @@ import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -38,8 +48,11 @@ class RobotAutomationDispatchServiceTest {
     private final RobotRunRepository runs = mock(RobotRunRepository.class);
     private final RobotProperties properties = new RobotProperties();
     private final RobotSourceSelectionService selectionService = mock(RobotSourceSelectionService.class);
+    private final ExperimentService experiments = mock(ExperimentService.class);
+    private final ExperimentAssignmentService experimentAssignmentService = mock(ExperimentAssignmentService.class);
     private final RobotAutomationDispatchService service = new RobotAutomationDispatchService(
-            authService, robots, runs, properties, selectionService, Clock.fixed(NOW, ZoneOffset.UTC));
+            authService, robots, runs, properties, selectionService, experiments, experimentAssignmentService,
+            Clock.fixed(NOW, ZoneOffset.UTC));
 
     private Workspace workspace;
     private AppUser owner;
@@ -137,6 +150,72 @@ class RobotAutomationDispatchServiceTest {
                 .isInstanceOf(ResponseStatusException.class)
                 .extracting("reason")
                 .isEqualTo("WORKSPACE_LIMIT_REACHED");
+    }
+
+    @Test
+    void createManualRunAssignsExperimentTreatmentInTheSameTransactionAsTheRun() {
+        Experiment experiment = fakeExperiment();
+        Robot robot = experimentalRobot(experiment.getId());
+        when(robots.findByWorkspaceAndIdForUpdate(workspace, robot.getId())).thenReturn(Optional.of(robot));
+        ExperimentAssignment assignment = fakeAssignment(experiment);
+        when(experimentAssignmentService.assign(eq(workspace), eq(experiment.getId()), any(UUID.class), eq(NOW))).thenReturn(assignment);
+
+        service.createManualRun(user, robot.getId());
+
+        ArgumentCaptor<RobotRun> captor = ArgumentCaptor.forClass(RobotRun.class);
+        verify(runs).save(captor.capture());
+        assertThat(captor.getValue().getExperimentId()).isEqualTo(experiment.getId());
+        assertThat(captor.getValue().getExperimentVariantKey()).isEqualTo(ExperimentVariantKey.A);
+        verify(experimentAssignmentService).assign(eq(workspace), eq(experiment.getId()), eq(captor.getValue().getId()), eq(NOW));
+    }
+
+    @Test
+    void createManualRunPropagatesExperimentNotActiveRejection() {
+        UUID experimentId = UUID.randomUUID();
+        Robot robot = experimentalRobot(experimentId);
+        when(robots.findByWorkspaceAndIdForUpdate(workspace, robot.getId())).thenReturn(Optional.of(robot));
+        org.mockito.Mockito.doThrow(new ResponseStatusException(HttpStatus.CONFLICT, "ROBOT_EXPERIMENT_NOT_ACTIVE"))
+                .when(experiments).assertActiveForAssignment(workspace, experimentId);
+
+        assertThatThrownBy(() -> service.createManualRun(user, robot.getId()))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting("reason").isEqualTo("ROBOT_EXPERIMENT_NOT_ACTIVE");
+        verify(runs, never()).save(any());
+        verify(experimentAssignmentService, never()).assign(any(), any(), any(), any());
+    }
+
+    @Test
+    void dispatchOneSkipsAnExperimentalRobotWhenTheExperimentIsNotActive() {
+        UUID experimentId = UUID.randomUUID();
+        MediaAsset asset = readyInspectedVideoAsset();
+        Robot robot = new Robot(workspace, "Experimental Robot", null, RobotAutonomyMode.DRAFT_ONLY, RobotSourcePolicy.EXISTING_ASSET,
+                asset, null, null, null, RobotCadenceType.INTERVAL, 6, null, 1,
+                RobotAiPolicy.GENERATE_AND_APPLY, null, null, null, experimentId, owner, NOW);
+        when(robots.findNextDueForUpdate(NOW)).thenReturn(Optional.of(robot));
+        org.mockito.Mockito.doThrow(new ResponseStatusException(HttpStatus.CONFLICT, "ROBOT_EXPERIMENT_NOT_ACTIVE"))
+                .when(experiments).assertActiveForAssignment(workspace, experimentId);
+
+        boolean didWork = service.dispatchOne();
+
+        assertThat(didWork).isTrue();
+        verify(runs, never()).save(any());
+    }
+
+    private Robot experimentalRobot(UUID experimentId) {
+        MediaAsset asset = readyInspectedVideoAsset();
+        return new Robot(workspace, "Experimental Robot", null, RobotAutonomyMode.DRAFT_ONLY, RobotSourcePolicy.EXISTING_ASSET,
+                asset, null, null, null, RobotCadenceType.MANUAL_ONLY, null, null, 1,
+                RobotAiPolicy.GENERATE_AND_APPLY, null, null, null, experimentId, owner, NOW);
+    }
+
+    private Experiment fakeExperiment() {
+        return new Experiment(workspace, "Persona test", null, "hypothesis", ExperimentFactor.PERSONA,
+                DashboardQuery.Window.H72, DashboardQuery.Metric.VIEWS, owner, NOW);
+    }
+
+    private ExperimentAssignment fakeAssignment(Experiment experiment) {
+        ExperimentVariant variant = new ExperimentVariant(experiment, ExperimentVariantKey.A, "Variant A", UUID.randomUUID(), NOW);
+        return new ExperimentAssignment(workspace, experiment, variant, UUID.randomUUID(), NOW);
     }
 
     @Test

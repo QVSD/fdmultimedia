@@ -32,6 +32,7 @@ import com.fdmultimedia.api.contentsuggestions.ContentSuggestionType;
 import com.fdmultimedia.api.contentsuggestions.ContentSuggestionOrigin;
 import com.fdmultimedia.api.contentsuggestions.SuggestionLanguage;
 import com.fdmultimedia.api.contentsuggestions.SuggestionTone;
+import com.fdmultimedia.api.experiments.ExperimentService;
 import com.fdmultimedia.api.highlights.HighlightAnalysis;
 import com.fdmultimedia.api.highlights.HighlightAnalysisRepository;
 import com.fdmultimedia.api.highlights.HighlightAnalysisStatus;
@@ -83,10 +84,11 @@ class RobotRunOrchestratorTest {
     private final ContentSuggestionService contentSuggestionService = mock(ContentSuggestionService.class);
     private final ContentSuggestionRepository contentSuggestions = mock(ContentSuggestionRepository.class);
     private final PersonaRepository personaRepository = mock(PersonaRepository.class);
+    private final ExperimentService experiments = mock(ExperimentService.class);
     private final RobotRunOrchestrator orchestrator = new RobotRunOrchestrator(
             authService, robotRepository, runs, analyses, candidates, highlightService, highlightProperties,
             contentDraftService, contentDrafts, approvals, publishScheduleService, contentSources,
-            contentSuggestionService, contentSuggestions, personaRepository, Clock.fixed(NOW, ZoneOffset.UTC));
+            contentSuggestionService, contentSuggestions, personaRepository, experiments, Clock.fixed(NOW, ZoneOffset.UTC));
 
     private Workspace workspace;
     private AppUser owner;
@@ -420,7 +422,7 @@ class RobotRunOrchestratorTest {
                 .thenReturn(draftSummary(run.getContentDraftId(), ContentDraftStatus.READY, ContentDraftWorkflowStage.READY));
         when(contentDrafts.findByWorkspaceAndId(workspace, run.getContentDraftId())).thenReturn(Optional.of(draftEntity));
         UUID suggestionId = UUID.randomUUID();
-        when(contentSuggestionService.createForRobot(any(), any(), any(), any(), any(), any(), any()))
+        when(contentSuggestionService.createForRobot(any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(suggestionSummary(suggestionId, ContentSuggestionStatus.PENDING));
         ContentSuggestion pending = pendingRobotSuggestion(run.getId());
         when(contentSuggestions.findById(suggestionId)).thenReturn(Optional.of(pending));
@@ -429,7 +431,7 @@ class RobotRunOrchestratorTest {
         orchestrator.reconcileOne(run.getId());
         orchestrator.reconcileOne(run.getId());
 
-        verify(contentSuggestionService, times(1)).createForRobot(any(), any(), any(), any(), any(), any(), any());
+        verify(contentSuggestionService, times(1)).createForRobot(any(), any(), any(), any(), any(), any(), any(), any());
         assertThat(run.getContentSuggestionId()).isEqualTo(suggestionId);
         assertThat(run.getStatus()).isEqualTo(RobotRunStatus.WAITING_FOR_AI);
     }
@@ -606,7 +608,7 @@ class RobotRunOrchestratorTest {
 
         assertThat(run.getStatus()).isEqualTo(RobotRunStatus.FAILED);
         assertThat(run.getFailureCode()).isEqualTo("ROBOT_AI_SUGGESTION_DISCARDED");
-        verify(contentSuggestionService, never()).createForRobot(any(), any(), any(), any(), any(), any(), any());
+        verify(contentSuggestionService, never()).createForRobot(any(), any(), any(), any(), any(), any(), any(), any());
     }
 
     @Test
@@ -618,7 +620,7 @@ class RobotRunOrchestratorTest {
         when(contentDraftService.getFor(any(), eq(run.getContentDraftId())))
                 .thenReturn(draftSummary(run.getContentDraftId(), ContentDraftStatus.READY, ContentDraftWorkflowStage.READY));
         when(contentDrafts.findByWorkspaceAndId(workspace, run.getContentDraftId())).thenReturn(Optional.of(draftEntity));
-        when(contentSuggestionService.createForRobot(any(), any(), any(), any(), any(), any(), any()))
+        when(contentSuggestionService.createForRobot(any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenThrow(new ResponseStatusException(HttpStatus.CONFLICT, "PERSONA_ARCHIVED"));
 
         orchestrator.reconcileOne(run.getId());
@@ -636,7 +638,7 @@ class RobotRunOrchestratorTest {
         when(contentDraftService.getFor(any(), eq(run.getContentDraftId())))
                 .thenReturn(draftSummary(run.getContentDraftId(), ContentDraftStatus.READY, ContentDraftWorkflowStage.READY));
         when(contentDrafts.findByWorkspaceAndId(workspace, run.getContentDraftId())).thenReturn(Optional.of(draftEntity));
-        when(contentSuggestionService.createForRobot(any(), any(), any(), any(), any(), any(), any()))
+        when(contentSuggestionService.createForRobot(any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenThrow(new ResponseStatusException(HttpStatus.CONFLICT, "AI_DISABLED"));
 
         orchestrator.reconcileOne(run.getId());
@@ -734,7 +736,7 @@ class RobotRunOrchestratorTest {
         orchestrator.reconcileOne(run.getId());
 
         assertThat(run.getStatus()).isEqualTo(RobotRunStatus.SUCCEEDED);
-        verify(contentSuggestionService, never()).createForRobot(any(), any(), any(), any(), any(), any(), any());
+        verify(contentSuggestionService, never()).createForRobot(any(), any(), any(), any(), any(), any(), any(), any());
     }
 
     @Test
@@ -747,7 +749,7 @@ class RobotRunOrchestratorTest {
         // Editing the live Robot afterward must never change this already-created run's snapshot.
         robot.update(robot.getName(), robot.getDescription(), robot.getAutonomyMode(), robot.getTargetSocialAccount(),
                 robot.getCadenceType(), robot.getCadenceIntervalHours(), robot.getScheduleDelayMinutes(), robot.getMaxRunsPerDay(),
-                RobotAiPolicy.NO_AI, null, null, null, NOW);
+                RobotAiPolicy.NO_AI, null, null, null, null, NOW);
 
         assertThat(run.getAiPolicySnapshot()).isEqualTo(RobotAiPolicy.GENERATE_AND_APPLY);
         assertThat(robot.getAiPolicy()).isEqualTo(RobotAiPolicy.NO_AI);
@@ -770,7 +772,8 @@ class RobotRunOrchestratorTest {
 
     private ContentSuggestionSummary suggestionSummary(UUID id, ContentSuggestionStatus status) {
         return new ContentSuggestionSummary(
-                id, UUID.randomUUID(), ContentSuggestionOrigin.ROBOT, UUID.randomUUID(), ContentSuggestionType.SOCIAL_COPY, status,
+                id, UUID.randomUUID(), ContentSuggestionOrigin.ROBOT, UUID.randomUUID(), null, null, null,
+                ContentSuggestionType.SOCIAL_COPY, status,
                 "DETERMINISTIC_TEST", "deterministic-v1", "SOCIAL_COPY_V2", SuggestionLanguage.AUTO, SuggestionTone.NEUTRAL,
                 null, null, "hook", "caption", List.of("tag"), null, false, null, null, null, null, null,
                 null, null, false, NOW, NOW, NOW, owner.getId());
@@ -781,7 +784,8 @@ class RobotRunOrchestratorTest {
         Job job = new Job(workspace, JobType.GENERATE_SOCIAL_COPY, Map.of("draftId", UUID.randomUUID().toString()), 3, NOW);
         return ContentSuggestion.forRobot(
                 workspace, draftEntity, job, "DETERMINISTIC_TEST", "deterministic-v1", "SOCIAL_COPY_V2",
-                SuggestionLanguage.AUTO, SuggestionTone.NEUTRAL, "prompt", "fingerprint", false, null, null, robotRunId, owner, NOW);
+                SuggestionLanguage.AUTO, SuggestionTone.NEUTRAL, "prompt", "fingerprint", false, null, null, robotRunId, owner, NOW,
+                null, null, null);
     }
 
     private ContentSuggestion readyRobotSuggestion(UUID robotRunId) {

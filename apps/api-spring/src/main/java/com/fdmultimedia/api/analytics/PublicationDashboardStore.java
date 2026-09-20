@@ -89,6 +89,7 @@ public class PublicationDashboardStore {
             case PROVIDER -> "provider";
             case ORIGIN -> "CASE WHEN robot_run_id IS NULL THEN 'MANUAL' ELSE 'ROBOT' END";
             case AI_USAGE -> "CASE WHEN applied_content_suggestion_id IS NULL THEN 'NO_APPLIED_AI' ELSE 'AI_APPLIED' END";
+            case EXPERIMENT_VARIANT -> "COALESCE(experiment_variant_id::text, 'NONE')";
         };
     }
 
@@ -110,6 +111,7 @@ public class PublicationDashboardStore {
             case ROBOT -> "CASE WHEN robot_id IS NULL THEN 'Manual / No Robot' ELSE COALESCE(robot_name_snapshot, 'Robot name unavailable') END";
             case PERSONA -> "CASE WHEN persona_id IS NULL THEN 'No applied Persona' ELSE COALESCE(persona_name_snapshot, 'Persona name unavailable') END";
             case CONTENT_SOURCE -> "CASE WHEN content_source_id IS NULL THEN 'No ContentSource' ELSE COALESCE(content_source_name_snapshot, 'ContentSource name unavailable') END";
+            case EXPERIMENT_VARIANT -> "CASE WHEN experiment_variant_id IS NULL THEN 'No experiment variant' ELSE COALESCE(experiment_variant_label_snapshot, 'Experiment variant unavailable') END";
             case PROVIDER, ORIGIN, AI_USAGE -> null;
         };
         return perPublicationLabel == null ? dimensionKeyExpr(dimension)
@@ -165,7 +167,8 @@ public class PublicationDashboardStore {
                 WITH cohort AS (
                     SELECT p.id, p.published_at, sa.platform AS provider, a.robot_id, a.robot_name_snapshot,
                            a.persona_id, a.persona_name_snapshot, a.content_source_id,
-                           a.content_source_name_snapshot, a.robot_run_id, a.applied_content_suggestion_id
+                           a.content_source_name_snapshot, a.robot_run_id, a.applied_content_suggestion_id,
+                           a.experiment_variant_id, a.experiment_variant_label_snapshot
                     FROM publications p
                     JOIN social_accounts sa ON sa.id = p.social_account_id
                     LEFT JOIN publication_attributions a ON a.publication_id = p.id AND a.workspace_id = p.workspace_id
@@ -181,6 +184,7 @@ public class PublicationDashboardStore {
                       AND (CAST(:aiUsage AS text) IS NULL OR
                            (:aiUsage = 'AI_APPLIED' AND a.applied_content_suggestion_id IS NOT NULL) OR
                            (:aiUsage = 'NO_APPLIED_AI' AND a.applied_content_suggestion_id IS NULL))
+                      AND (CAST(:experimentId AS uuid) IS NULL OR a.experiment_id = :experimentId)
                 ), observed AS (
                     SELECT c.*, (c.published_at <= :matureBefore) AS eligible, s.id AS snapshot_id,
                            s.views, s.reach, s.likes, s.comments, s.shares, s.saves, s.total_interactions
@@ -242,6 +246,7 @@ public class PublicationDashboardStore {
                 .addValue("contentSourceId", query.contentSourceId())
                 .addValue("origin", query.origin() == null ? null : query.origin().name())
                 .addValue("aiUsage", query.aiUsage() == null ? null : query.aiUsage().name())
+                .addValue("experimentId", query.experimentId())
                 .addValue("targetAge", query.window().targetSeconds())
                 .addValue("minimumAge", query.window().minimumSeconds())
                 .addValue("maximumAge", query.window().maximumSeconds());

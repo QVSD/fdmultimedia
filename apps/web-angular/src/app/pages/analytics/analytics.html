@@ -323,6 +323,22 @@
             <div><dt>Provider / model</dt><dd>{{ origin.aiProvider }} / {{ origin.aiModel }}</dd></div>
             <div><dt>Prompt version</dt><dd>{{ origin.promptVersion }}</dd></div>
           }
+          @if (origin.experimentId) {
+            <div><dt>Experiment</dt><dd>{{ origin.experimentNameSnapshot }} ({{ origin.experimentFactor }})</dd></div>
+            <div><dt>Variant</dt><dd>{{ origin.experimentVariantKey }} &middot; {{ origin.experimentVariantLabelSnapshot }}</dd></div>
+            <div><dt>Treatment</dt><dd>{{ origin.experimentFactorValueNameSnapshot }}</dd></div>
+            @if (origin.protocolDeviation !== null) {
+              <div>
+                <dt>Protocol</dt>
+                <dd>
+                  {{ origin.protocolDeviation ? 'Deviated from assigned treatment' : 'Applied as assigned' }}
+                  @if (origin.protocolDeviationReason) {
+                    <span class="analytics__muted"> ({{ origin.protocolDeviationReason }})</span>
+                  }
+                </dd>
+              </div>
+            }
+          }
         </dl>
       </section>
     }

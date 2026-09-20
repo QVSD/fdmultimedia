@@ -19,6 +19,7 @@ export type RobotRunStatus =
   | 'FAILED'
   | 'CANCELLED';
 export type RobotApprovalStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
+export type ExperimentVariantKey = 'A' | 'B';
 
 export interface RobotSummary {
   id: string;
@@ -44,6 +45,7 @@ export interface RobotSummary {
   personaName: string | null;
   aiLanguageOverride: SuggestionLanguage | null;
   aiToneOverride: SuggestionTone | null;
+  experimentId: string | null;
   nextRunAt: string | null;
   lastRunAt: string | null;
   createdAt: string;
@@ -69,6 +71,9 @@ export interface RobotRunSummary {
   personaIdSnapshot: string | null;
   personaNameSnapshot: string | null;
   contentSuggestionId: string | null;
+  experimentId: string | null;
+  experimentVariantId: string | null;
+  experimentVariantKey: ExperimentVariantKey | null;
   publishScheduleId: string | null;
   failureCode: string | null;
   failureMessage: string | null;
@@ -110,6 +115,8 @@ export interface CreateRobotRequest {
   personaId: string | null;
   aiLanguageOverride: SuggestionLanguage | null;
   aiToneOverride: SuggestionTone | null;
+  /** Phase 14A: when set, the Experiment's frozen variant Persona overrides personaId for experimental runs. */
+  experimentId: string | null;
 }
 
 export type UpdateRobotRequest = Omit<CreateRobotRequest, 'sourcePolicy' | 'sourceAssetId' | 'contentSourceId' | 'selectionPolicy'>;

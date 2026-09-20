@@ -29,6 +29,7 @@ public record RobotSummary(
         String personaName,
         SuggestionLanguage aiLanguageOverride,
         SuggestionTone aiToneOverride,
+        UUID experimentId,
         Instant nextRunAt,
         Instant lastRunAt,
         Instant createdAt,

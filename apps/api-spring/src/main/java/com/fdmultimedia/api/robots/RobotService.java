@@ -14,6 +14,7 @@ import com.fdmultimedia.api.contentsources.ContentSource;
 import com.fdmultimedia.api.contentsources.ContentSourceRepository;
 import com.fdmultimedia.api.contentsuggestions.SuggestionLanguage;
 import com.fdmultimedia.api.contentsuggestions.SuggestionTone;
+import com.fdmultimedia.api.experiments.ExperimentService;
 import com.fdmultimedia.api.personas.Persona;
 import com.fdmultimedia.api.personas.PersonaRepository;
 import com.fdmultimedia.api.personas.PersonaStatus;
@@ -46,6 +47,7 @@ public class RobotService {
     private final PublishScheduleProperties publishScheduleProperties;
     private final RobotAutomationDispatchService dispatchService;
     private final RobotRunOrchestrator orchestrator;
+    private final ExperimentService experiments;
     private final Clock clock;
 
     public RobotService(
@@ -59,6 +61,7 @@ public class RobotService {
             PublishScheduleProperties publishScheduleProperties,
             RobotAutomationDispatchService dispatchService,
             RobotRunOrchestrator orchestrator,
+            ExperimentService experiments,
             Clock clock) {
         this.authService = authService;
         this.robots = robots;
@@ -70,6 +73,7 @@ public class RobotService {
         this.publishScheduleProperties = publishScheduleProperties;
         this.dispatchService = dispatchService;
         this.orchestrator = orchestrator;
+        this.experiments = experiments;
         this.clock = clock;
     }
 
@@ -85,13 +89,17 @@ public class RobotService {
         Integer delayMinutes = validateScheduleDelay(request.autonomyMode(), request.scheduleDelayMinutes());
         int maxRunsPerDay = validateMaxRunsPerDay(request.maxRunsPerDay());
         AiConfig aiConfig = resolveAiConfig(workspace, request.aiPolicy(), request.personaId(), request.aiLanguageOverride(), request.aiToneOverride());
+        if (request.experimentId() != null) {
+            experiments.assertRobotAttachable(workspace, request.experimentId(), aiConfig.policy() != RobotAiPolicy.NO_AI);
+        }
 
         Instant now = Instant.now(clock);
         Robot robot = new Robot(
                 workspace, name, description, request.autonomyMode(),
                 sourceConfig.sourcePolicy(), sourceConfig.sourceAsset(), sourceConfig.contentSource(), sourceConfig.selectionPolicy(),
                 account, request.cadenceType(), cadenceHours, delayMinutes, maxRunsPerDay,
-                aiConfig.policy(), aiConfig.persona(), aiConfig.languageOverride(), aiConfig.toneOverride(), membership.getUser(), now);
+                aiConfig.policy(), aiConfig.persona(), aiConfig.languageOverride(), aiConfig.toneOverride(),
+                request.experimentId(), membership.getUser(), now);
         return toSummary(robots.save(robot));
     }
 
@@ -190,9 +198,12 @@ public class RobotService {
         Integer delayMinutes = validateScheduleDelay(request.autonomyMode(), request.scheduleDelayMinutes());
         int maxRunsPerDay = validateMaxRunsPerDay(request.maxRunsPerDay());
         AiConfig aiConfig = resolveAiConfig(workspace, request.aiPolicy(), request.personaId(), request.aiLanguageOverride(), request.aiToneOverride());
+        if (request.experimentId() != null) {
+            experiments.assertRobotAttachable(workspace, request.experimentId(), aiConfig.policy() != RobotAiPolicy.NO_AI);
+        }
         Instant now = Instant.now(clock);
         robot.update(name, description, request.autonomyMode(), account, request.cadenceType(), cadenceHours, delayMinutes, maxRunsPerDay,
-                aiConfig.policy(), aiConfig.persona(), aiConfig.languageOverride(), aiConfig.toneOverride(), now);
+                aiConfig.policy(), aiConfig.persona(), aiConfig.languageOverride(), aiConfig.toneOverride(), request.experimentId(), now);
         return toSummary(robot);
     }
 
@@ -358,6 +369,7 @@ public class RobotService {
                 persona == null ? null : persona.getName(),
                 robot.getAiLanguageOverride(),
                 robot.getAiToneOverride(),
+                robot.getExperimentId(),
                 robot.getNextRunAt(),
                 robot.getLastRunAt(),
                 robot.getCreatedAt(),

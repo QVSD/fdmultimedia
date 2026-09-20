@@ -1,6 +1,7 @@
 package com.fdmultimedia.api.analytics;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -14,6 +15,10 @@ import com.fdmultimedia.api.contentsuggestions.ContentSuggestionRepository;
 import com.fdmultimedia.api.contentsuggestions.ContentSuggestionStatus;
 import com.fdmultimedia.api.contentsources.ContentSource;
 import com.fdmultimedia.api.contentsources.ContentSourceRepository;
+import com.fdmultimedia.api.experiments.Experiment;
+import com.fdmultimedia.api.experiments.ExperimentRepository;
+import com.fdmultimedia.api.experiments.ExperimentVariant;
+import com.fdmultimedia.api.experiments.ExperimentVariantRepository;
 import com.fdmultimedia.api.publishing.Publication;
 import com.fdmultimedia.api.robots.Robot;
 import com.fdmultimedia.api.robots.RobotAiPolicy;
@@ -36,8 +41,10 @@ class PublicationAttributionServiceTest {
     private final ContentSuggestionRepository suggestions = mock(ContentSuggestionRepository.class);
     private final RobotRunRepository runs = mock(RobotRunRepository.class);
     private final ContentSourceRepository sources = mock(ContentSourceRepository.class);
+    private final ExperimentRepository experiments = mock(ExperimentRepository.class);
+    private final ExperimentVariantRepository experimentVariants = mock(ExperimentVariantRepository.class);
     private final PublicationAttributionService service = new PublicationAttributionService(
-            jdbc, drafts, suggestions, runs, sources);
+            jdbc, drafts, suggestions, runs, sources, experiments, experimentVariants);
     private final Workspace workspace = new Workspace("Media", "media");
     private final MediaAsset media = mock(MediaAsset.class);
 
@@ -114,6 +121,87 @@ class PublicationAttributionServiceTest {
         assertThat(jdbc.args[17]).isEqualTo("GENERATE_AND_APPLY");
         assertThat(jdbc.args[19]).isEqualTo("OLDEST_UNPROCESSED");
         assertThat(jdbc.args[20]).isEqualTo("Historical source");
+    }
+
+    @Test
+    void protocolDeviationIsFalseWhenTheAppliedSuggestionMatchesTheFrozenAssignment() {
+        UUID experimentId = UUID.randomUUID();
+        UUID variantId = UUID.randomUUID();
+        UUID assignmentId = UUID.randomUUID();
+        RobotRun run = experimentalRun(experimentId, variantId, assignmentId);
+        ContentSuggestion suggestion = mock(ContentSuggestion.class);
+        UUID suggestionId = UUID.randomUUID();
+        ContentDraft draft = draftWithAppliedSuggestion(run, suggestionId);
+        when(suggestion.getId()).thenReturn(suggestionId);
+        when(suggestion.getStatus()).thenReturn(ContentSuggestionStatus.APPLIED);
+        when(suggestion.getContentDraft()).thenReturn(draft);
+        when(suggestion.getOrigin()).thenReturn(ContentSuggestionOrigin.ROBOT);
+        when(suggestion.getExperimentAssignmentId()).thenReturn(assignmentId);
+        when(suggestions.findByWorkspaceAndId(workspace, suggestionId)).thenReturn(Optional.of(suggestion));
+        ExperimentVariant variant = mock(ExperimentVariant.class);
+        when(variant.getLabel()).thenReturn("Bold");
+        when(experimentVariants.findById(variantId)).thenReturn(Optional.of(variant));
+        when(experiments.findByWorkspaceAndId(any(), any())).thenReturn(Optional.of(mock(Experiment.class)));
+        Publication publication = new Publication(workspace, media, mock(SocialAccount.class),
+                draft.getCaption(), mock(AppUser.class), draft.getId(), NOW);
+
+        service.capture(publication, null, null, NOW);
+
+        assertThat(jdbc.args[21]).isEqualTo(experimentId);
+        assertThat(jdbc.args[30]).isEqualTo(false);
+        assertThat(jdbc.args[31]).isNull();
+    }
+
+    @Test
+    void protocolDeviationIsTrueWhenADifferentSuggestionWasAppliedThanTheOneTheAssignmentGenerated() {
+        UUID experimentId = UUID.randomUUID();
+        UUID variantId = UUID.randomUUID();
+        UUID assignmentId = UUID.randomUUID();
+        RobotRun run = experimentalRun(experimentId, variantId, assignmentId);
+        ContentSuggestion suggestion = mock(ContentSuggestion.class);
+        UUID suggestionId = UUID.randomUUID();
+        ContentDraft draft = draftWithAppliedSuggestion(run, suggestionId);
+        when(suggestion.getId()).thenReturn(suggestionId);
+        when(suggestion.getStatus()).thenReturn(ContentSuggestionStatus.APPLIED);
+        when(suggestion.getContentDraft()).thenReturn(draft);
+        when(suggestion.getOrigin()).thenReturn(ContentSuggestionOrigin.MANUAL);
+        // A manually-applied suggestion never carries this run's own experiment assignment id.
+        when(suggestion.getExperimentAssignmentId()).thenReturn(UUID.randomUUID());
+        when(suggestions.findByWorkspaceAndId(workspace, suggestionId)).thenReturn(Optional.of(suggestion));
+        when(experimentVariants.findById(variantId)).thenReturn(Optional.empty());
+        when(experiments.findByWorkspaceAndId(any(), any())).thenReturn(Optional.of(mock(Experiment.class)));
+        Publication publication = new Publication(workspace, media, mock(SocialAccount.class),
+                draft.getCaption(), mock(AppUser.class), draft.getId(), NOW);
+
+        service.capture(publication, null, null, NOW);
+
+        assertThat(jdbc.args[30]).isEqualTo(true);
+        assertThat(jdbc.args[31]).isEqualTo("DIFFERENT_SUGGESTION_APPLIED");
+    }
+
+    private RobotRun experimentalRun(UUID experimentId, UUID variantId, UUID assignmentId) {
+        RobotRun run = mock(RobotRun.class);
+        UUID runId = UUID.randomUUID();
+        Robot robot = mock(Robot.class);
+        when(run.getId()).thenReturn(runId);
+        when(run.getRobot()).thenReturn(robot);
+        when(run.getAiPolicySnapshot()).thenReturn(RobotAiPolicy.GENERATE_AND_APPLY);
+        when(robot.getAutonomyMode()).thenReturn(RobotAutonomyMode.AUTO_SCHEDULE);
+        when(run.getExperimentId()).thenReturn(experimentId);
+        when(run.getExperimentAssignmentId()).thenReturn(assignmentId);
+        when(run.getExperimentVariantId()).thenReturn(variantId);
+        when(run.getExperimentVariantKey()).thenReturn(com.fdmultimedia.api.experiments.ExperimentVariantKey.A);
+        when(run.getExperimentFactor()).thenReturn(com.fdmultimedia.api.experiments.ExperimentFactor.PERSONA);
+        when(runs.findByWorkspaceAndId(workspace, runId)).thenReturn(Optional.of(run));
+        return run;
+    }
+
+    private ContentDraft draftWithAppliedSuggestion(RobotRun run, UUID suggestionId) {
+        ContentDraft draft = ContentDraft.fromExistingAsset(workspace, media, "Title", "Applied caption", mock(AppUser.class), NOW);
+        draft.attachRobotRun(run.getId());
+        draft.recordAppliedSuggestion(suggestionId);
+        when(drafts.findByWorkspaceAndId(workspace, draft.getId())).thenReturn(Optional.of(draft));
+        return draft;
     }
 
     private static final class RecordingJdbc extends JdbcTemplate {

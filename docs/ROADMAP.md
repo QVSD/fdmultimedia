@@ -1,6 +1,6 @@
 # Roadmap
 
-The repository is currently at Phase 13C. Completed phases are marked below;
+The repository is currently at Phase 14A. Completed phases are marked below;
 later phases are planned high-level direction and intentionally do not go into
 implementation detail before they are started.
 
@@ -321,5 +321,21 @@ implementation detail before they are started.
    ContentSource, schedule, or AI policy — recommendations are limited to
    asking a human to collect more data, wait for maturity, or review content
    manually. *(complete)*
-32. **Revenue tracking / automatic optimization** — separate future work, not
+32. **Controlled experiments & A/B testing foundation (Phase 14A)** — a
+   first-class `Experiment` compares exactly two frozen variants (A/B) of one
+   factor at a time — PERSONA only in this phase, AI_POLICY deliberately
+   deferred to avoid ambiguity with the human-review gate. Assignment is a
+   `RobotRun`-scoped, database-locked, deterministic least-assigned balance
+   algorithm, always durable before the treatment is ever consumed and never
+   dependent on any performance outcome. The Persona treatment freezes at
+   Experiment activation and never re-reads the live Persona again, so an
+   edit or archive afterward cannot change an in-flight or historical
+   run's meaning. Provenance reaches `ContentSuggestion` and the existing
+   immutable `PublicationAttribution` snapshot, including a descriptive
+   protocol-deviation flag for a human-edited final publication. A
+   descriptive-only outcome endpoint reuses Phase 13B's exact
+   snapshot-selection semantics at the experiment's own fixed observation
+   window/metric — no winner, no significance testing, no automatic
+   Robot/Persona/schedule mutation. *(complete)*
+33. **Revenue tracking / automatic optimization** — separate future work, not
    started.

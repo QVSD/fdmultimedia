@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fdmultimedia.api.accounts.SocialAccount;
@@ -20,6 +21,7 @@ import com.fdmultimedia.api.contentsources.ContentSource;
 import com.fdmultimedia.api.contentsources.ContentSourceRepository;
 import com.fdmultimedia.api.contentsuggestions.SuggestionLanguage;
 import com.fdmultimedia.api.contentsuggestions.SuggestionTone;
+import com.fdmultimedia.api.experiments.ExperimentService;
 import com.fdmultimedia.api.jobs.Job;
 import com.fdmultimedia.api.jobs.JobType;
 import com.fdmultimedia.api.personas.Persona;
@@ -55,9 +57,10 @@ class RobotServiceTest {
     private final PublishScheduleProperties publishScheduleProperties = new PublishScheduleProperties();
     private final RobotAutomationDispatchService dispatchService = mock(RobotAutomationDispatchService.class);
     private final RobotRunOrchestrator orchestrator = mock(RobotRunOrchestrator.class);
+    private final ExperimentService experiments = mock(ExperimentService.class);
     private final RobotService service = new RobotService(
             authService, robots, assets, socialAccounts, contentSources, personas, properties, publishScheduleProperties,
-            dispatchService, orchestrator, Clock.fixed(NOW, ZoneOffset.UTC));
+            dispatchService, orchestrator, experiments, Clock.fixed(NOW, ZoneOffset.UTC));
 
     private Workspace workspace;
     private AppUser owner;
@@ -204,6 +207,56 @@ class RobotServiceTest {
 
         assertThat(summary.aiPolicy()).isEqualTo(RobotAiPolicy.GENERATE_FOR_REVIEW);
         assertThat(summary.personaId()).isEqualTo(persona.getId());
+    }
+
+    @Test
+    void createChecksExperimentCompatibilityWithTheCorrectAiPolicyFlag() {
+        MediaAsset asset = readyInspectedVideoAsset();
+        when(assets.findByWorkspaceAndId(workspace, asset.getId())).thenReturn(Optional.of(asset));
+        Persona persona = activePersona();
+        when(personas.findByWorkspaceAndId(workspace, persona.getId())).thenReturn(Optional.of(persona));
+        UUID experimentId = UUID.randomUUID();
+
+        RobotSummary summary = service.create(user, new CreateRobotRequest(
+                "Experimental Robot", null, RobotAutonomyMode.DRAFT_ONLY, RobotSourcePolicy.EXISTING_ASSET, asset.getId(), null, null, null,
+                RobotCadenceType.MANUAL_ONLY, null, null, null,
+                RobotAiPolicy.GENERATE_AND_APPLY, persona.getId(), null, null, experimentId));
+
+        verify(experiments).assertRobotAttachable(workspace, experimentId, true);
+        assertThat(summary.experimentId()).isEqualTo(experimentId);
+    }
+
+    @Test
+    void createRejectsAnExperimentIncompatibleWithNoAi() {
+        MediaAsset asset = readyInspectedVideoAsset();
+        when(assets.findByWorkspaceAndId(workspace, asset.getId())).thenReturn(Optional.of(asset));
+        UUID experimentId = UUID.randomUUID();
+        org.mockito.Mockito.doThrow(new ResponseStatusException(HttpStatus.BAD_REQUEST, "ROBOT_AI_POLICY_INCOMPATIBLE_WITH_EXPERIMENT"))
+                .when(experiments).assertRobotAttachable(workspace, experimentId, false);
+
+        assertThatThrownBy(() -> service.create(user, new CreateRobotRequest(
+                "NO_AI Robot", null, RobotAutonomyMode.DRAFT_ONLY, RobotSourcePolicy.EXISTING_ASSET, asset.getId(), null, null, null,
+                RobotCadenceType.MANUAL_ONLY, null, null, null,
+                RobotAiPolicy.NO_AI, null, null, null, experimentId)))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting("statusCode").isEqualTo(HttpStatus.BAD_REQUEST);
+    }
+
+    @Test
+    void updatePropagatesRejectionOfATerminalExperiment() {
+        Robot robot = draftOnlyRobot();
+        when(robots.findByWorkspaceAndIdForUpdate(workspace, robot.getId())).thenReturn(Optional.of(robot));
+        Persona persona = activePersona();
+        when(personas.findByWorkspaceAndId(workspace, persona.getId())).thenReturn(Optional.of(persona));
+        UUID experimentId = UUID.randomUUID();
+        org.mockito.Mockito.doThrow(new ResponseStatusException(HttpStatus.CONFLICT, "EXPERIMENT_TERMINAL_CANNOT_ATTACH"))
+                .when(experiments).assertRobotAttachable(workspace, experimentId, true);
+
+        assertThatThrownBy(() -> service.update(user, robot.getId(), new UpdateRobotRequest(
+                "Renamed", null, RobotAutonomyMode.DRAFT_ONLY, null, RobotCadenceType.MANUAL_ONLY, null, null, 1,
+                RobotAiPolicy.GENERATE_FOR_REVIEW, persona.getId(), null, null, experimentId)))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting("statusCode").isEqualTo(HttpStatus.CONFLICT);
     }
 
     @Test
