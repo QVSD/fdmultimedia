@@ -215,7 +215,9 @@ public class ContentSuggestionService {
         ContentSuggestion suggestion = suggestions.findByWorkspaceAndIdForUpdate(workspace, suggestionId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Content suggestion not found"));
         if (suggestion.getStatus() == ContentSuggestionStatus.APPLIED) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "SUGGESTION_ALREADY_APPLIED");
+            ContentDraft alreadyAppliedDraft = drafts.findByWorkspaceAndIdForUpdate(workspace, suggestion.getContentDraft().getId())
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Content draft not found"));
+            return toSummary(suggestion, alreadyAppliedDraft);
         }
         if (suggestion.getStatus() != ContentSuggestionStatus.READY) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Suggestion is not ready to apply");
@@ -232,6 +234,7 @@ public class ContentSuggestionService {
         Instant now = Instant.now(clock);
         String composedCaption = composeCaption(suggestion);
         draft.updateEditableFields(draft.getTitle(), composedCaption, now);
+        draft.recordAppliedSuggestion(suggestion.getId());
         suggestion.markApplied(membership.getUser().getId(), now);
         return toSummary(suggestion, draft);
     }

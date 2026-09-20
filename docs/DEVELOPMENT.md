@@ -127,7 +127,8 @@ snapshotting. The one deliberate exception to the usual one-directional
 package convention: `personas` imports `SuggestionLanguage`/
 `SuggestionTone` from `contentsuggestions` to reuse them rather than fork a
 parallel enum — see `personas/package-info.java` for the full rationale.
-`analytics` and `revenue` remain placeholders. The package layout under
+`analytics` now contains Phase 13A publication collection and attribution;
+`revenue` remains a placeholder. The package layout under
 `com.fdmultimedia.api` (`auth`, `users`, `workspaces`, `accounts`, `robots`,
 `contentsources`, `assets`, `jobs`, `workers`, `publishing`,
 `contentdrafts`, `publishschedules`, `contentsuggestions`, `personas`,
@@ -606,3 +607,26 @@ row locking: the API locks a bounded FIFO window of compatible jobs with
 claims one inside the same transaction. Missing telemetry or insufficient
 history falls back to FIFO; failure-rate scoring, predictive placement, and
 autoscaling remain deferred.
+
+## Publication analytics (Phase 13A)
+
+Publish to a TEST SocialAccount, then open Analytics from the published item.
+The API schedules collection without a browser: 15, 60, 360, 1440, 4320,
+and 10080 minutes after publication. For local acceptance, override
+`PUBLICATION_ANALYTICS_CADENCE_MINUTES` with six increasing positive minute
+values or use the bounded manual Refresh action. Other settings are
+`PUBLICATION_ANALYTICS_ENABLED`, `PUBLICATION_ANALYTICS_POLL_MS`,
+`PUBLICATION_ANALYTICS_BATCH_SIZE`, `PUBLICATION_ANALYTICS_CLAIM_LEASE`, and
+`PUBLICATION_ANALYTICS_MANUAL_REFRESH_MINIMUM`. Defaults are enabled, 60 s,
+20, 2 min, and 5 min. Do not set a tight cadence in production.
+
+`GET /api/publications/{id}/analytics` returns at most 100 immutable snapshots;
+`/latest`, `/state`, and `/attribution` expose current observation and frozen
+provenance. `POST /api/publications/{id}/analytics/refresh` obeys the same
+CSRF/session rules as other human writes and is rate-limited. Workspace list
+`GET /api/analytics/publications?from=...&to=...&limit=...` requires a bounded
+one-year interval and at most 100 results. A missing metric is null (rendered
+as a dash), distinct from an observed zero. TEST is a deterministic simulation.
+Instagram insights are not silently attempted with publishing-only scopes;
+the existing account requires separately verified analytics permission before
+real collection can be enabled. Disabling analytics never disables publishing.

@@ -52,6 +52,9 @@ public class PublishSchedule {
     @Column(name = "caption_snapshot")
     private String captionSnapshot;
 
+    @Column(name = "applied_content_suggestion_id_snapshot")
+    private UUID appliedContentSuggestionIdSnapshot;
+
     @Column(name = "scheduled_for", nullable = false)
     private Instant scheduledFor;
 
@@ -102,6 +105,8 @@ public class PublishSchedule {
         this.mediaAsset = mediaAsset;
         this.socialAccount = socialAccount;
         this.captionSnapshot = captionSnapshot;
+        this.appliedContentSuggestionIdSnapshot = java.util.Objects.equals(captionSnapshot, contentDraft.getCaption())
+                ? contentDraft.getAppliedContentSuggestionId() : null;
         this.scheduledFor = scheduledFor;
         this.status = PublishScheduleStatus.SCHEDULED;
         this.createdByUser = createdByUser;
@@ -170,6 +175,7 @@ public class PublishSchedule {
     public MediaAsset getMediaAsset() { return mediaAsset; }
     public SocialAccount getSocialAccount() { return socialAccount; }
     public String getCaptionSnapshot() { return captionSnapshot; }
+    public UUID getAppliedContentSuggestionIdSnapshot() { return appliedContentSuggestionIdSnapshot; }
     public Instant getScheduledFor() { return scheduledFor; }
     public PublishScheduleStatus getStatus() { return status; }
     public UUID getPublicationId() { return publicationId; }

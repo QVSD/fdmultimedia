@@ -5,9 +5,15 @@ social-media content workflows, video processing workers running across
 multiple laptops/cloud machines, scheduling, AI-assisted content creation,
 publishing, analytics, and revenue tracking.
 
-## Phase 12C scope
+## Phase 13A scope
 
-This repository is currently at **Phase 12C: Robot AI Enrichment Policies**.
+This repository is currently implementing **Phase 13A: Publication Analytics & Attribution Foundation**.
+Published TEST content has deterministic, historical analytics snapshots and a
+publication-time provenance snapshot. Analytics observes publications; it never
+changes Robots, Personas, captions, schedules, or AI policies. Instagram
+analytics remains permission-gated pending verified insights scopes.
+
+## Earlier phases
 Phase 9A introduced current Worker telemetry and per-attempt execution metrics;
 Phase 9B introduced deterministic `TELEMETRY_AWARE_V1` selection; Phase 9C
 persisted successful claim decisions and exposed bounded workspace-scoped
@@ -242,8 +248,8 @@ That means:
   Content page gained a Sources tab and an "Add to Source" action on
   original assets.
 
-No thumbnails, TikTok/YouTube/other platform integrations, AI content
-generation, analytics, or billing are implemented yet — see
+No thumbnails, TikTok/YouTube/other platform integrations, analytics-driven
+optimization, or billing are implemented yet — see
 [docs/ROADMAP.md](docs/ROADMAP.md) for what comes next and
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how the pieces fit
 together.

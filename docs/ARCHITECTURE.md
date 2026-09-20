@@ -305,7 +305,8 @@ com.fdmultimedia.api
 
 As of Phase 10A, `accounts` and `publishing` are implemented (see
 [Social accounts and publishing (Phase 10A)](#social-accounts-and-publishing-phase-10a)
-below). `robots`, `analytics`, and `revenue` remain placeholders; the intent is
+below). `robots` and `analytics` have since been implemented; `revenue` remains
+a placeholder. The intent is
 that as each capability is built, its code lands in the matching package with
 a clear boundary.
 
@@ -2386,3 +2387,47 @@ TTS, voice cloning, reaction videos, NotebookLM, arbitrary prompts or
 provider URLs, browser automation, scraping, CAPTCHA/anti-bot bypass, proxy
 rotation, a generic workflow engine, any RabbitMQ redesign, any Worker
 scheduler redesign, and cloud autoscaling.
+
+## Publication analytics and attribution (Phase 13A)
+
+Analytics runs centrally: SocialAccount credentials and provider publishing
+logic already live in the API, so no Worker job or credential distribution is
+needed. `PublicationAnalyticsProvider` separates TEST and Instagram from the
+domain. TEST is deterministic by publication ID and collection age bucket;
+`TEST_ANALYTICS_V1` is a simulation, not a platform performance claim.
+Instagram collection remains permission-blocked because existing Instagram
+Login authorization grants publishing but not a verified insights scope.
+
+V23 stores immutable `publication_analytics_snapshots` keyed by publication and
+logical collection bucket. Nullable counters mean unavailable; an observed zero
+is stored as zero. Provider-specific metric versions preserve interpretation;
+real provider corrections may produce decreasing values. No viewer identities,
+commenter data, raw provider bodies, tokens, or full transcripts are stored.
+Snapshots are deliberately retained without downsampling in this phase.
+
+`publication_analytics_states` holds the next due time, age bucket, last
+attempt/success, safe failure, and a short claim lease. The bounded scheduler
+atomically claims due PUBLISHED rows using PostgreSQL `FOR UPDATE SKIP LOCKED`,
+commits, calls the provider without a DB lock, then commits the snapshot and
+next state. Expired claims are reclaimable after API restart. A database
+`UNIQUE(publication_id, bucket_key)` prevents duplicate logical snapshots.
+Successful collections are scheduled at 15 minutes, 1 hour, 6 hours, 24 hours,
+72 hours, and 7 days after publication, then stop. Transient errors back off
+for an hour; permission/auth failures pause automatic collection. Manual
+refresh is rate-limited separately. `PUBLICATION_ANALYTICS_ENABLED=false`
+disables collection and refresh without affecting publishing or reads.
+
+At publication creation, one immutable `publication_attributions` row freezes
+provable Draft, PublishSchedule, RobotRun/Robot, ContentSource, source/final
+asset, and applied ContentSuggestion/Persona/provider/model/prompt provenance.
+Robot and Persona names are snapshots, not live joins. Applying a suggestion
+records its ID on the Draft; a later manual caption change clears this ID.
+Non-caption edits do not. Schedule creation freezes the applied-suggestion ID
+alongside its caption, so later Draft edits do not rewrite scheduled provenance.
+Historical publications backfill only IDs provable from existing rows; absent
+historical names or suggestions remain null rather than invented.
+
+Human APIs are workspace-scoped and bounded: attribution, collection state,
+latest/history, manual refresh, and a publication analytics list. The Angular
+page presents detail, history, provenance, and collection status only. Phase
+13B may add comparison dashboards; Phase 13A never edits content or strategy.

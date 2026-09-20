@@ -1,4 +1,90 @@
-<section>
-  <h1>Analytics</h1>
-  <p>Performance analytics for published content will appear here.</p>
+<section class="analytics">
+  <header class="analytics__header">
+    <div><h1>Publication analytics</h1><a routerLink="/content">Content</a></div>
+    @if (selectedId()) {
+      <button type="button" (click)="refresh()" [disabled]="refreshing() || loading()">
+        {{ refreshing() ? 'Refreshing…' : 'Refresh analytics' }}
+      </button>
+    }
+  </header>
+
+  @if (publications().length > 0) {
+    <label for="publication-select">Publication</label>
+    <select id="publication-select" [value]="selectedId() ?? ''" (change)="select($any($event.target).value)">
+      <option value="" [selected]="!selectedId()">Select a publication</option>
+      @for (publication of publications(); track publication.id) {
+        <option [value]="publication.id" [selected]="publication.id === selectedId()">
+          {{ publication.socialAccountDisplayName }} · {{ publication.publishedAt | date:'mediumDate' }} · {{ publication.assetFilename || publication.id }}
+        </option>
+      }
+    </select>
+  } @else if (!error()) { <p>No published items yet.</p> }
+
+  @if (refreshMessage()) { <p role="status">{{ refreshMessage() }}</p> }
+  @if (loading()) { <p role="status">Loading analytics…</p> }
+  @if (error()) { <p role="alert">{{ error() }}</p> }
+
+  @if (!loading() && !error() && selectedId()) {
+    <section class="analytics__band">
+      <h2>Latest observation</h2>
+      @if (history().length > 0) {
+        <p class="analytics__muted">
+          {{ history()[0].provider }} · {{ history()[0].providerMetricVersion }} · {{ history()[0].collectedAt | date:'medium' }}
+        </p>
+        <dl class="analytics__metrics">
+          <div><dt>Views</dt><dd>{{ metric(history()[0].views) }}</dd></div>
+          <div><dt>Reach</dt><dd>{{ metric(history()[0].reach) }}</dd></div>
+          <div><dt>Likes</dt><dd>{{ metric(history()[0].likes) }}</dd></div>
+          <div><dt>Comments</dt><dd>{{ metric(history()[0].comments) }}</dd></div>
+          <div><dt>Shares</dt><dd>{{ metric(history()[0].shares) }}</dd></div>
+          <div><dt>Saves</dt><dd>{{ metric(history()[0].saves) }}</dd></div>
+        </dl>
+      } @else { <p>No observations yet.</p> }
+      @if (collectionState(); as state) {
+        <p class="analytics__muted">
+          @if (state.completedAt) { Collection complete · {{ state.completedAt | date:'medium' }} }
+          @else if (state.nextCollectionAt) { Next collection {{ state.nextCollectionAt | date:'medium' }} }
+          @if (state.lastSuccessAt) { · Last success {{ state.lastSuccessAt | date:'medium' }} }
+        </p>
+        @if (state.failureCode) { <p role="alert">{{ state.failureCode }}: {{ state.failureMessage }}</p> }
+      }
+    </section>
+
+    <section class="analytics__band">
+      <h2>History</h2>
+      @if (history().length > 0) {
+        <div class="analytics__table-wrap">
+          <table>
+            <thead><tr><th>Collected</th><th>Age</th><th>Views</th><th>Reach</th><th>Likes</th><th>Comments</th><th>Shares</th><th>Saves</th></tr></thead>
+            <tbody>
+              @for (row of history(); track row.id) {
+                <tr>
+                  <td>{{ row.collectedAt | date:'short' }}</td><td>{{ age(row.publicationAgeSeconds) }}</td>
+                  <td>{{ metric(row.views) }}</td><td>{{ metric(row.reach) }}</td><td>{{ metric(row.likes) }}</td>
+                  <td>{{ metric(row.comments) }}</td><td>{{ metric(row.shares) }}</td><td>{{ metric(row.saves) }}</td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      } @else { <p>No history yet.</p> }
+    </section>
+
+    @if (attribution(); as origin) {
+      <section class="analytics__band">
+        <h2>Attribution</h2>
+        <dl class="analytics__origin">
+          <div><dt>Robot</dt><dd>{{ origin.robotNameSnapshot || (origin.robotRunId ? 'Robot (historical name unavailable)' : 'Manual') }}</dd></div>
+          <div><dt>Source</dt><dd>{{ origin.contentSourceId || origin.sourceMediaAssetId || '—' }}</dd></div>
+          <div><dt>Final media</dt><dd>{{ origin.finalMediaAssetId }}</dd></div>
+          <div><dt>AI copy</dt><dd>{{ origin.appliedContentSuggestionId ? (origin.personaNameSnapshot || 'Applied suggestion') : 'No applied AI suggestion' }}</dd></div>
+          @if (origin.appliedContentSuggestionId) {
+            <div><dt>Origin</dt><dd>{{ origin.suggestionOrigin }}</dd></div>
+            <div><dt>Provider / model</dt><dd>{{ origin.aiProvider }} / {{ origin.aiModel }}</dd></div>
+            <div><dt>Prompt version</dt><dd>{{ origin.promptVersion }}</dd></div>
+          }
+        </dl>
+      </section>
+    }
+  }
 </section>

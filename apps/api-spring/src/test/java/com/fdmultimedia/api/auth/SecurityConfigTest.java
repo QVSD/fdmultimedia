@@ -68,6 +68,19 @@ class SecurityConfigTest {
     }
 
     @Test
+    void analyticsApiRejectsUnauthenticatedUsers() throws Exception {
+        mockMvc.perform(get("/api/analytics/publications"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void analyticsRefreshRequiresCsrfToken() throws Exception {
+        mockMvc.perform(post("/api/publications/" + java.util.UUID.randomUUID() + "/analytics/refresh")
+                        .with(user("owner@example.com")))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
     void contentDraftsApiRejectsUnauthenticatedUsers() throws Exception {
         mockMvc.perform(get("/api/content-drafts"))
                 .andExpect(status().isUnauthorized());

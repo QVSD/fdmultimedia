@@ -72,7 +72,7 @@ class PublishScheduleDispatchServiceTest {
         boolean result = service.dispatchOne();
 
         assertThat(result).isFalse();
-        verify(publishingService, never()).createPublicationForSchedule(any(), any(), any(), any(), any(), any());
+        verify(publishingService, never()).createPublicationForSchedule(any(), any(), any(), any(), any(), any(), any(), any());
     }
 
     @Test
@@ -81,7 +81,8 @@ class PublishScheduleDispatchServiceTest {
         when(schedules.findNextDueForUpdate(NOW)).thenReturn(Optional.of(schedule));
         UUID publicationId = UUID.randomUUID();
         when(publishingService.createPublicationForSchedule(
-                eq(workspace), eq(schedule.getMediaAsset()), eq(account), eq("Caption"), eq(schedule.getContentDraft().getId()), eq(owner)))
+                eq(workspace), eq(schedule.getMediaAsset()), eq(account), eq("Caption"), eq(schedule.getContentDraft().getId()),
+                eq(owner), eq(schedule.getId()), any()))
                 .thenReturn(publicationSummary(publicationId));
 
         boolean result = service.dispatchOne();
@@ -102,7 +103,7 @@ class PublishScheduleDispatchServiceTest {
 
         assertThat(schedule.getStatus()).isEqualTo(PublishScheduleStatus.FAILED);
         assertThat(schedule.getFailureCode()).isEqualTo("SOCIAL_ACCOUNT_UNAVAILABLE");
-        verify(publishingService, never()).createPublicationForSchedule(any(), any(), any(), any(), any(), any());
+        verify(publishingService, never()).createPublicationForSchedule(any(), any(), any(), any(), any(), any(), any(), any());
     }
 
     @Test
@@ -115,14 +116,14 @@ class PublishScheduleDispatchServiceTest {
 
         assertThat(schedule.getStatus()).isEqualTo(PublishScheduleStatus.FAILED);
         assertThat(schedule.getFailureCode()).isEqualTo("MEDIA_UNAVAILABLE");
-        verify(publishingService, never()).createPublicationForSchedule(any(), any(), any(), any(), any(), any());
+        verify(publishingService, never()).createPublicationForSchedule(any(), any(), any(), any(), any(), any(), any(), any());
     }
 
     @Test
     void dispatchOneFailsWhenPublishingServiceRejectsEligibility() {
         PublishSchedule schedule = dueSchedule();
         when(schedules.findNextDueForUpdate(NOW)).thenReturn(Optional.of(schedule));
-        when(publishingService.createPublicationForSchedule(any(), any(), any(), any(), any(), any()))
+        when(publishingService.createPublicationForSchedule(any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenThrow(new ResponseStatusException(HttpStatus.CONFLICT, "Instagram integration is not configured"));
 
         service.dispatchOne();
@@ -136,7 +137,7 @@ class PublishScheduleDispatchServiceTest {
     void dispatchOneMarksFailedOnUnexpectedExceptionWithoutPropagating() {
         PublishSchedule schedule = dueSchedule();
         when(schedules.findNextDueForUpdate(NOW)).thenReturn(Optional.of(schedule));
-        when(publishingService.createPublicationForSchedule(any(), any(), any(), any(), any(), any()))
+        when(publishingService.createPublicationForSchedule(any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenThrow(new RuntimeException("boom"));
 
         boolean result = service.dispatchOne();

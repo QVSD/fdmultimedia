@@ -77,7 +77,8 @@ public class PublishScheduleDispatchService {
         try {
             publication = publishingService.createPublicationForSchedule(
                     schedule.getWorkspace(), media, account, schedule.getCaptionSnapshot(),
-                    schedule.getContentDraft().getId(), schedule.getCreatedByUser());
+                    schedule.getContentDraft().getId(), schedule.getCreatedByUser(),
+                    schedule.getId(), schedule.getAppliedContentSuggestionIdSnapshot());
         } catch (ResponseStatusException ex) {
             fail(schedule, "PROVIDER_UNAVAILABLE", ex.getReason(), now);
             return;

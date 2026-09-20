@@ -384,16 +384,17 @@ class ContentSuggestionServiceTest {
     }
 
     @Test
-    void rejectsDoubleApply() {
+    void repeatedApplyIsIdempotent() {
         ContentSuggestion suggestion = readySuggestionWithOutput("Hook!", "Body.", List.of());
         when(suggestions.findByWorkspaceAndIdForUpdate(workspace, suggestion.getId())).thenReturn(Optional.of(suggestion));
         when(drafts.findByWorkspaceAndIdForUpdate(workspace, draft.getId())).thenReturn(Optional.of(draft));
         service.apply(user, suggestion.getId());
 
-        assertThatThrownBy(() -> service.apply(user, suggestion.getId()))
-                .isInstanceOf(ResponseStatusException.class)
-                .extracting("reason")
-                .isEqualTo("SUGGESTION_ALREADY_APPLIED");
+        String caption = draft.getCaption();
+        ContentSuggestionSummary repeated = service.apply(user, suggestion.getId());
+        assertThat(repeated.status()).isEqualTo(ContentSuggestionStatus.APPLIED);
+        assertThat(draft.getCaption()).isEqualTo(caption);
+        assertThat(draft.getAppliedContentSuggestionId()).isEqualTo(suggestion.getId());
     }
 
     @Test

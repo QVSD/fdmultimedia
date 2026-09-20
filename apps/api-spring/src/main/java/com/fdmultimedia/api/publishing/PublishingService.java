@@ -6,6 +6,8 @@ import com.fdmultimedia.api.accounts.SocialAccountStatus;
 import com.fdmultimedia.api.accounts.SocialCredentialMetadata;
 import com.fdmultimedia.api.accounts.SocialCredentialService;
 import com.fdmultimedia.api.accounts.SocialPlatform;
+import com.fdmultimedia.api.analytics.PublicationAnalyticsStore;
+import com.fdmultimedia.api.analytics.PublicationAttributionService;
 import com.fdmultimedia.api.assets.MediaAsset;
 import com.fdmultimedia.api.assets.MediaAssetRepository;
 import com.fdmultimedia.api.assets.ObjectStorageService;
@@ -56,6 +58,8 @@ public class PublishingService {
     private final InstagramPublishingService instagramPublishingService;
     private final InstagramProperties instagramProperties;
     private final Clock clock;
+    private final PublicationAttributionService attributionService;
+    private final PublicationAnalyticsStore analyticsStore;
 
     public PublishingService(
             AuthService authService,
@@ -70,7 +74,9 @@ public class PublishingService {
             SocialCredentialService credentialService,
             InstagramPublishingService instagramPublishingService,
             InstagramProperties instagramProperties,
-            Clock clock) {
+            Clock clock,
+            PublicationAttributionService attributionService,
+            PublicationAnalyticsStore analyticsStore) {
         this.authService = authService;
         this.assets = assets;
         this.socialAccounts = socialAccounts;
@@ -84,6 +90,8 @@ public class PublishingService {
         this.instagramPublishingService = instagramPublishingService;
         this.instagramProperties = instagramProperties;
         this.clock = clock;
+        this.attributionService = attributionService;
+        this.analyticsStore = analyticsStore;
     }
 
     @Transactional
@@ -94,7 +102,7 @@ public class PublishingService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Asset not found"));
         SocialAccount account = socialAccounts.findByWorkspaceAndId(workspace, request.socialAccountId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Social account not found"));
-        return createPublicationInternal(workspace, asset, account, request.caption(), membership.getUser(), null);
+        return createPublicationInternal(workspace, asset, account, request.caption(), membership.getUser(), null, null, null);
     }
 
     /**
@@ -110,7 +118,7 @@ public class PublishingService {
         Workspace workspace = membership.getWorkspace();
         SocialAccount account = socialAccounts.findByWorkspaceAndId(workspace, socialAccountId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Social account not found"));
-        return createPublicationInternal(workspace, asset, account, caption, membership.getUser(), contentDraftId);
+        return createPublicationInternal(workspace, asset, account, caption, membership.getUser(), contentDraftId, null, null);
     }
 
     /**
@@ -122,12 +130,15 @@ public class PublishingService {
      */
     @Transactional
     public PublicationSummary createPublicationForSchedule(
-            Workspace workspace, MediaAsset asset, SocialAccount account, String caption, UUID contentDraftId, AppUser createdByUser) {
-        return createPublicationInternal(workspace, asset, account, caption, createdByUser, contentDraftId);
+            Workspace workspace, MediaAsset asset, SocialAccount account, String caption, UUID contentDraftId,
+            AppUser createdByUser, UUID scheduleId, UUID appliedSuggestionId) {
+        return createPublicationInternal(workspace, asset, account, caption, createdByUser,
+                contentDraftId, scheduleId, appliedSuggestionId);
     }
 
     private PublicationSummary createPublicationInternal(
-            Workspace workspace, MediaAsset asset, SocialAccount account, String rawCaption, AppUser user, UUID contentDraftId) {
+            Workspace workspace, MediaAsset asset, SocialAccount account, String rawCaption, AppUser user,
+            UUID contentDraftId, UUID scheduleId, UUID appliedSuggestionId) {
         eligibilityService.validateAssetEligibility(asset, account.getPlatform());
         validateAccountEligibility(account);
         String caption = validateCaption(rawCaption);
@@ -145,6 +156,10 @@ public class PublishingService {
         Job job = jobService.getJobEntityForWorkspace(workspace, jobSummary.id())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Publish job was not created"));
         publication.attachJob(job, now);
+        // Attribution uses JDBC in the same transaction; flush JPA's insert so
+        // the publication FK is visible before that immutable row is written.
+        publications.flush();
+        attributionService.capture(publication, scheduleId, appliedSuggestionId, now);
         return toSummary(publication);
     }
 
@@ -274,6 +289,7 @@ public class PublishingService {
         int attemptNumber = job.getAttemptCount();
         Instant startedAt = job.getStartedAt();
         publication.markPublished(providerRequestId, providerPublicationId, publishedAt, now);
+        analyticsStore.schedulePublished(publication);
         jobService.completeOwnedJob(job, worker, Map.of(
                 "publicationId", publication.getId().toString(),
                 "providerPublicationId", providerPublicationId), now);
@@ -319,6 +335,7 @@ public class PublishingService {
         String safeRequestId = trimToNull(providerRequestId, MAX_PROVIDER_ID_LENGTH);
         String safePublicationId = trimToNull(providerPublicationId, MAX_PROVIDER_ID_LENGTH);
         publication.markPublished(safeRequestId, safePublicationId, now, now);
+        analyticsStore.schedulePublished(publication);
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("publicationId", publication.getId().toString());
         if (safePublicationId != null) {

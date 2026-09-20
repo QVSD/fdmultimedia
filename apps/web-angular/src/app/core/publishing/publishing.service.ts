@@ -23,4 +23,8 @@ export class PublishingService {
       withCredentials: true,
     });
   }
+
+  list(): Observable<PublicationSummary[]> {
+    return this.http.get<PublicationSummary[]>(`${environment.apiBaseUrl}/publications`, { withCredentials: true });
+  }
 }

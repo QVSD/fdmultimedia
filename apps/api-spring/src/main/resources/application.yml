@@ -93,6 +93,13 @@ app:
       calendar-max-days: ${PUBLISH_SCHEDULE_CALENDAR_MAX_DAYS:90}
       history-max-results: ${PUBLISH_SCHEDULE_HISTORY_MAX_RESULTS:100}
       poll-interval-ms: ${PUBLISH_SCHEDULER_POLL_MS:15000}
+  publication-analytics:
+    enabled: ${PUBLICATION_ANALYTICS_ENABLED:true}
+    poll-interval-ms: ${PUBLICATION_ANALYTICS_POLL_MS:60000}
+    batch-size: ${PUBLICATION_ANALYTICS_BATCH_SIZE:20}
+    claim-lease: ${PUBLICATION_ANALYTICS_CLAIM_LEASE:2m}
+    manual-refresh-minimum: ${PUBLICATION_ANALYTICS_MANUAL_REFRESH_MINIMUM:5m}
+    cadence-minutes: ${PUBLICATION_ANALYTICS_CADENCE_MINUTES:15,60,360,1440,4320,10080}
   robots:
     automation-enabled: ${ROBOT_AUTOMATION_ENABLED:true}
     min-cadence-interval-hours: ${ROBOT_MIN_CADENCE_INTERVAL_HOURS:1}

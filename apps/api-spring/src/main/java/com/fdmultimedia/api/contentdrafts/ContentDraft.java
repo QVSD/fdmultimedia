@@ -86,6 +86,9 @@ public class ContentDraft {
     @Column(name = "robot_run_id")
     private UUID robotRunId;
 
+    @Column(name = "applied_content_suggestion_id")
+    private UUID appliedContentSuggestionId;
+
     protected ContentDraft() {
     }
 
@@ -200,9 +203,16 @@ public class ContentDraft {
     }
 
     public void updateEditableFields(String title, String caption, Instant now) {
+        if (!java.util.Objects.equals(this.caption, caption)) {
+            this.appliedContentSuggestionId = null;
+        }
         this.title = title;
         this.caption = caption;
         this.updatedAt = now;
+    }
+
+    public void recordAppliedSuggestion(UUID suggestionId) {
+        this.appliedContentSuggestionId = java.util.Objects.requireNonNull(suggestionId);
     }
 
     /** Set once, immediately after creation, by the RobotRun that created this draft. */
@@ -242,4 +252,5 @@ public class ContentDraft {
     public Instant getUpdatedAt() { return updatedAt; }
     public Instant getPublishedAt() { return publishedAt; }
     public UUID getRobotRunId() { return robotRunId; }
+    public UUID getAppliedContentSuggestionId() { return appliedContentSuggestionId; }
 }

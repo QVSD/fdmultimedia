@@ -1,6 +1,6 @@
 # Roadmap
 
-The repository is currently at Phase 12C. Completed phases are marked below;
+The repository is currently implementing Phase 13A. Completed phases are marked below;
 later phases are planned high-level direction and intentionally do not go into
 implementation detail before they are started.
 
@@ -289,4 +289,10 @@ implementation detail before they are started.
    multiple Personas per run or Persona blending, and AI-generated
    Personas — all explicitly out of scope through Phase 12C, which covers
    only a single bounded automatic-or-reviewed generation per RobotRun.
-29. **Analytics / revenue** — performance analytics and revenue tracking.
+29. **Publication analytics foundation (Phase 13A)** — immutable normalized
+   TEST publication metrics, bounded restart-safe collection, and immutable
+   publication-time attribution. Instagram insights require verified account
+   permissions; no unsupported metrics are fabricated. No strategy optimization.
+30. **Analytics dashboard (Phase 13B, future)** — comparison and visualization
+   of the observed snapshots; not implemented in Phase 13A. Revenue tracking
+   and automatic optimization remain separate future work.

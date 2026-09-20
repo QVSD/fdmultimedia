@@ -491,6 +491,9 @@
                               @if (publication.failureMessage) {
                                 <p class="content__error">{{ publication.failureCode }}: {{ publication.failureMessage }}</p>
                               }
+                              @if (publication.status === 'PUBLISHED') {
+                                <a [routerLink]="['/analytics']" [queryParams]="{ publicationId: publication.id }">Analytics</a>
+                              }
                             </div>
                           }
                         </div>
@@ -900,6 +903,7 @@
                             }
                             @if (publication.status === 'PUBLISHED') {
                               <p class="content__muted">Provider id: {{ publication.providerPublicationId }}</p>
+                              <a [routerLink]="['/analytics']" [queryParams]="{ publicationId: publication.id }">Analytics</a>
                             }
                             @if (publication.failureMessage) {
                               <p class="content__error">{{ publication.failureCode }}: {{ publication.failureMessage }}</p>

@@ -14,6 +14,8 @@ import com.fdmultimedia.api.accounts.SocialAccountRepository;
 import com.fdmultimedia.api.accounts.SocialCredentialMetadata;
 import com.fdmultimedia.api.accounts.SocialCredentialService;
 import com.fdmultimedia.api.accounts.SocialPlatform;
+import com.fdmultimedia.api.analytics.PublicationAnalyticsStore;
+import com.fdmultimedia.api.analytics.PublicationAttributionService;
 import com.fdmultimedia.api.assets.MediaAsset;
 import com.fdmultimedia.api.assets.MediaAssetRepository;
 import com.fdmultimedia.api.assets.MediaImportMetadata;
@@ -68,10 +70,12 @@ class PublishingServiceTest {
     private final SocialCredentialService credentialService = mock(SocialCredentialService.class);
     private final InstagramPublishingService instagramPublishingService = mock(InstagramPublishingService.class);
     private final InstagramProperties instagramProperties = new InstagramProperties();
+    private final PublicationAttributionService attributionService = mock(PublicationAttributionService.class);
+    private final PublicationAnalyticsStore analyticsStore = mock(PublicationAnalyticsStore.class);
     private final PublishingService service = new PublishingService(
             authService, assets, socialAccounts, publications, attempts, jobService, storage, properties,
             eligibilityService, credentialService, instagramPublishingService, instagramProperties,
-            Clock.fixed(NOW, ZoneOffset.UTC));
+            Clock.fixed(NOW, ZoneOffset.UTC), attributionService, analyticsStore);
 
     private Workspace workspace;
     private AppUser owner;
