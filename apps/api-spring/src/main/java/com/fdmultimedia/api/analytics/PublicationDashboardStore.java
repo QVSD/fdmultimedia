@@ -43,7 +43,46 @@ public class PublicationDashboardStore {
     }
 
     public Breakdown breakdown(DashboardQuery query, Dimension dimension, Instant now) {
-        String key = switch (dimension) {
+        String key = dimensionKeyExpr(dimension);
+        String label = dimensionLabelExpr(dimension);
+        String sql = observed(query) + "SELECT " + key + " AS dimension_key, " + label + " AS dimension_label, "
+                + coverageSql() + ", " + metricSql() + " FROM observed "
+                + "GROUP BY " + key + " ORDER BY dimension_label, dimension_key LIMIT " + (MAX_GROUPS + 1);
+        List<BreakdownRow> rows = jdbc.query(sql, params(query, now), (rs, row) ->
+                new BreakdownRow(rs.getString("dimension_key"), rs.getString("dimension_label"), coverage(rs), metrics(rs)));
+        boolean truncated = rows.size() > MAX_GROUPS;
+        return new Breakdown(DashboardModels.filters(query), dimension,
+                truncated ? rows.subList(0, MAX_GROUPS) : rows, truncated);
+    }
+
+    /**
+     * Fetches exactly the requested dimension segments (by their {@code breakdown()}
+     * key value, e.g. a Robot UUID string, {@code "NONE"}, {@code "MANUAL"}/{@code "ROBOT"},
+     * or a provider name) in one query — used by Phase 13C explicit/automatic
+     * insight comparisons so a two-segment comparison never needs the {@link #breakdown}
+     * method's 100-group cap/truncation and never issues more than one query
+     * regardless of how many distinct segments exist for this dimension overall.
+     * A requested key with zero matching publications is simply absent from the
+     * result (the caller treats a missing key as a zero-sample segment) rather
+     * than a query error.
+     */
+    public List<BreakdownRow> segments(DashboardQuery query, Dimension dimension, List<String> keys, Instant now) {
+        if (keys.isEmpty()) {
+            return List.of();
+        }
+        String key = dimensionKeyExpr(dimension);
+        String label = dimensionLabelExpr(dimension);
+        String sql = observed(query) + "SELECT " + key + " AS dimension_key, " + label + " AS dimension_label, "
+                + coverageSql() + ", " + metricSql() + " FROM observed "
+                + "WHERE " + key + " IN (:segmentKeys) "
+                + "GROUP BY " + key;
+        MapSqlParameterSource params = params(query, now).addValue("segmentKeys", keys);
+        return jdbc.query(sql, params, (rs, row) ->
+                new BreakdownRow(rs.getString("dimension_key"), rs.getString("dimension_label"), coverage(rs), metrics(rs)));
+    }
+
+    private static String dimensionKeyExpr(Dimension dimension) {
+        return switch (dimension) {
             case ROBOT -> "COALESCE(robot_id::text, 'NONE')";
             case PERSONA -> "COALESCE(persona_id::text, 'NONE')";
             case CONTENT_SOURCE -> "COALESCE(content_source_id::text, 'NONE')";
@@ -51,20 +90,30 @@ public class PublicationDashboardStore {
             case ORIGIN -> "CASE WHEN robot_run_id IS NULL THEN 'MANUAL' ELSE 'ROBOT' END";
             case AI_USAGE -> "CASE WHEN applied_content_suggestion_id IS NULL THEN 'NO_APPLIED_AI' ELSE 'AI_APPLIED' END";
         };
-        String label = switch (dimension) {
+    }
+
+    /**
+     * Grouping is always by {@code dimensionKeyExpr} alone (never key+label —
+     * see the {@code GROUP BY} call sites), because a Robot/Persona/ContentSource
+     * can legitimately carry more than one historical name snapshot across
+     * publications that share the same underlying ID (it was renamed in
+     * between) — Phase 13B correctly preserves each publication's own
+     * snapshot, but a breakdown/segment row must still represent one entity,
+     * not silently split its aggregate across as many rows as it has ever had
+     * names. Every non-fixed-vocabulary label is therefore its own aggregate
+     * expression, deterministically taking the label from that key's most
+     * recently *published* row — the same "most recent wins" rule
+     * {@link #options} already uses for its own name/label maps.
+     */
+    private static String dimensionLabelExpr(Dimension dimension) {
+        String perPublicationLabel = switch (dimension) {
             case ROBOT -> "CASE WHEN robot_id IS NULL THEN 'Manual / No Robot' ELSE COALESCE(robot_name_snapshot, 'Robot name unavailable') END";
             case PERSONA -> "CASE WHEN persona_id IS NULL THEN 'No applied Persona' ELSE COALESCE(persona_name_snapshot, 'Persona name unavailable') END";
             case CONTENT_SOURCE -> "CASE WHEN content_source_id IS NULL THEN 'No ContentSource' ELSE COALESCE(content_source_name_snapshot, 'ContentSource name unavailable') END";
-            default -> key;
+            case PROVIDER, ORIGIN, AI_USAGE -> null;
         };
-        String sql = observed(query) + "SELECT " + key + " AS dimension_key, " + label + " AS dimension_label, "
-                + coverageSql() + ", " + metricSql() + " FROM observed "
-                + "GROUP BY dimension_key, dimension_label ORDER BY dimension_label, dimension_key LIMIT " + (MAX_GROUPS + 1);
-        List<BreakdownRow> rows = jdbc.query(sql, params(query, now), (rs, row) ->
-                new BreakdownRow(rs.getString("dimension_key"), rs.getString("dimension_label"), coverage(rs), metrics(rs)));
-        boolean truncated = rows.size() > MAX_GROUPS;
-        return new Breakdown(DashboardModels.filters(query), dimension,
-                truncated ? rows.subList(0, MAX_GROUPS) : rows, truncated);
+        return perPublicationLabel == null ? dimensionKeyExpr(dimension)
+                : "(ARRAY_AGG(" + perPublicationLabel + " ORDER BY published_at DESC))[1]";
     }
 
     public FilterOptions options(DashboardQuery query) {

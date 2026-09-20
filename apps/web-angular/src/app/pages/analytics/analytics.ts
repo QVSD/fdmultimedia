@@ -14,6 +14,11 @@ import {
   DashboardBreakdown, DashboardDimension, DashboardFilters, DashboardMetric,
   DashboardOptions, DashboardSummary, DashboardTrend, DashboardWindow,
 } from '../../core/publishing/publication-dashboard.models';
+import {
+  ComparisonResult, InsightsResponse, InsightStatistic,
+} from '../../core/publishing/publication-insights.models';
+
+type AnalyticsTab = 'dashboard' | 'insights';
 
 @Component({
   selector: 'app-analytics',
@@ -43,8 +48,21 @@ export class Analytics implements OnInit, OnDestroy {
   protected readonly windows: DashboardWindow[] = ['LATEST', 'H24', 'H72', 'D7'];
   protected readonly dimensions: DashboardDimension[] = ['ROBOT', 'PERSONA', 'CONTENT_SOURCE', 'PROVIDER', 'ORIGIN', 'AI_USAGE'];
   protected readonly trendMetrics: DashboardMetric[] = ['VIEWS', 'REACH', 'LIKES', 'COMMENTS', 'SHARES', 'SAVES', 'TOTAL_INTERACTIONS'];
+  protected readonly tab = signal<AnalyticsTab>('dashboard');
+  protected readonly insightsLoading = signal(true);
+  protected readonly insightsError = signal<string | null>(null);
+  protected readonly insights = signal<InsightsResponse | null>(null);
+  protected readonly compareDimension = signal<DashboardDimension>('ORIGIN');
+  protected readonly compareLeft = signal('');
+  protected readonly compareRight = signal('');
+  protected readonly compareMetric = signal<DashboardMetric>('VIEWS');
+  protected readonly compareStatistic = signal<InsightStatistic>('MEDIAN');
+  protected readonly compareResult = signal<ComparisonResult | null>(null);
+  protected readonly compareLoading = signal(false);
+  protected readonly compareError = signal<string | null>(null);
   private readonly subscriptions = new Subscription();
   private dashboardSubscription?: Subscription;
+  private insightsSubscription?: Subscription;
 
   constructor(
     private readonly route: ActivatedRoute,
@@ -94,10 +112,33 @@ export class Analytics implements OnInit, OnDestroy {
       this.dimension.set(dimension);
       this.trendMetric.set(metric);
       this.loadDashboard(next, dimension, metric);
+      this.loadInsights(next);
+
+      const tab = this.valid(['dashboard', 'insights'] as const, params.get('tab'), 'dashboard') ?? 'dashboard';
+      this.tab.set(tab);
+      const compareDimension = this.valid(this.dimensions, params.get('compareDimension'), 'ORIGIN') ?? 'ORIGIN';
+      const compareMetric = this.valid(this.trendMetrics, params.get('compareMetric'), 'VIEWS') ?? 'VIEWS';
+      const compareStatistic = this.valid(['AVERAGE', 'MEDIAN'] as const, params.get('compareStatistic'), 'MEDIAN') ?? 'MEDIAN';
+      const compareLeft = params.get('compareLeft') ?? '';
+      const compareRight = params.get('compareRight') ?? '';
+      this.compareDimension.set(compareDimension);
+      this.compareMetric.set(compareMetric);
+      this.compareStatistic.set(compareStatistic);
+      this.compareLeft.set(compareLeft);
+      this.compareRight.set(compareRight);
+      if (compareLeft && compareRight) {
+        this.runCompare(next);
+      } else {
+        this.compareResult.set(null);
+      }
     }));
   }
 
-  ngOnDestroy(): void { this.dashboardSubscription?.unsubscribe(); this.subscriptions.unsubscribe(); }
+  ngOnDestroy(): void {
+    this.dashboardSubscription?.unsubscribe();
+    this.insightsSubscription?.unsubscribe();
+    this.subscriptions.unsubscribe();
+  }
 
   protected select(id: string): void {
     this.router.navigate(['/analytics'], { queryParams: { publicationId: id || null }, queryParamsHandling: 'merge' });
@@ -113,6 +154,102 @@ export class Analytics implements OnInit, OnDestroy {
 
   protected chooseMetric(value: string): void {
     this.router.navigate(['/analytics'], { queryParams: { metric: value }, queryParamsHandling: 'merge' });
+  }
+
+  protected switchTab(tab: AnalyticsTab): void {
+    this.router.navigate(['/analytics'], { queryParams: { tab }, queryParamsHandling: 'merge' });
+  }
+
+  protected setCompareField(name: 'compareDimension' | 'compareMetric' | 'compareStatistic' | 'compareLeft' | 'compareRight', value: string): void {
+    const reset = name === 'compareDimension' ? { compareLeft: null, compareRight: null } : {};
+    this.router.navigate(['/analytics'], { queryParams: { [name]: value, ...reset }, queryParamsHandling: 'merge' });
+  }
+
+  protected runCompareFromForm(): void {
+    this.router.navigate(['/analytics'], {
+      queryParams: {
+        compareDimension: this.compareDimension(), compareMetric: this.compareMetric(),
+        compareStatistic: this.compareStatistic(), compareLeft: this.compareLeft(), compareRight: this.compareRight(),
+      },
+      queryParamsHandling: 'merge',
+    });
+  }
+
+  private runCompare(filters: DashboardFilters): void {
+    if (this.compareLeft() === this.compareRight()) {
+      this.compareError.set('Choose two different segments to compare.');
+      this.compareResult.set(null);
+      return;
+    }
+    this.compareLoading.set(true);
+    this.compareError.set(null);
+    this.subscriptions.add(this.analytics.compareSegments({
+      ...filters, dimension: this.compareDimension(), leftSegmentId: this.compareLeft(),
+      rightSegmentId: this.compareRight(), metric: this.compareMetric(), statistic: this.compareStatistic(),
+    }).subscribe({
+      next: (result) => {
+        this.compareResult.set(result);
+        this.compareLoading.set(false);
+      },
+      error: () => {
+        this.compareError.set('Comparison could not be loaded.');
+        this.compareResult.set(null);
+        this.compareLoading.set(false);
+      },
+    }));
+  }
+
+  private loadInsights(filters: DashboardFilters): void {
+    this.insightsSubscription?.unsubscribe();
+    this.insightsLoading.set(true);
+    this.insightsError.set(null);
+    this.insightsSubscription = this.analytics.insights(filters).subscribe({
+      next: (response) => {
+        this.insights.set(response);
+        this.insightsLoading.set(false);
+      },
+      error: () => {
+        this.insightsError.set('Insights could not be loaded.');
+        this.insightsLoading.set(false);
+      },
+    });
+  }
+
+  protected segmentOptions(dimension: DashboardDimension): { value: string; label: string }[] {
+    const opts = this.options();
+    switch (dimension) {
+      case 'ROBOT':
+        return [{ value: 'NONE', label: 'Manual / No Robot' }, ...(opts?.robots ?? []).map((o) => ({ value: o.id, label: o.label }))];
+      case 'PERSONA':
+        return [{ value: 'NONE', label: 'No applied Persona' }, ...(opts?.personas ?? []).map((o) => ({ value: o.id, label: o.label }))];
+      case 'CONTENT_SOURCE':
+        return [{ value: 'NONE', label: 'No ContentSource' }, ...(opts?.contentSources ?? []).map((o) => ({ value: o.id, label: o.label }))];
+      case 'PROVIDER':
+        return (opts?.providers ?? []).map((p) => ({ value: p, label: p }));
+      case 'ORIGIN':
+        return [{ value: 'MANUAL', label: 'Manual' }, { value: 'ROBOT', label: 'Robot' }];
+      case 'AI_USAGE':
+        return [{ value: 'AI_APPLIED', label: 'Applied AI suggestion' }, { value: 'NO_APPLIED_AI', label: 'No applied AI suggestion' }];
+    }
+  }
+
+  protected directionLabel(direction: string | null): string {
+    switch (direction) {
+      case 'HIGHER_OBSERVED': return 'Higher observed';
+      case 'LOWER_OBSERVED': return 'Lower observed';
+      case 'SIMILAR_OBSERVED': return 'Similar observed';
+      default: return '—';
+    }
+  }
+
+  protected resultTypeLabel(type: string): string {
+    switch (type) {
+      case 'INSUFFICIENT_SAMPLE': return 'Not enough observations yet';
+      case 'LOW_COVERAGE': return 'Analytics coverage too low';
+      case 'TOO_YOUNG': return 'Too young to observe';
+      case 'METRIC_UNAVAILABLE': return 'Metric unavailable';
+      default: return 'Observation';
+    }
   }
 
   private loadDashboard(filters: DashboardFilters, dimension: DashboardDimension, metric: DashboardMetric): void {

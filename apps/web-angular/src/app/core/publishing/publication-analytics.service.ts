@@ -5,6 +5,7 @@ import { Observable } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import { PublicationAnalyticsSnapshot, PublicationAnalyticsState, PublicationAttribution } from './publication-analytics.models';
 import { DashboardBreakdown, DashboardDimension, DashboardFilters, DashboardMetric, DashboardOptions, DashboardSummary, DashboardTrend } from './publication-dashboard.models';
+import { CompareRequest, ComparisonResult, InsightsResponse } from './publication-insights.models';
 
 @Injectable({ providedIn: 'root' })
 export class PublicationAnalyticsService {
@@ -52,5 +53,22 @@ export class PublicationAnalyticsService {
   refresh(id: string): Observable<PublicationAnalyticsSnapshot> {
     return this.http.post<PublicationAnalyticsSnapshot>(
       `${environment.apiBaseUrl}/publications/${id}/analytics/refresh`, {}, { withCredentials: true });
+  }
+
+  insights(filters: DashboardFilters): Observable<InsightsResponse> {
+    return this.http.get<InsightsResponse>(`${environment.apiBaseUrl}/analytics/insights`,
+      { params: this.dashboardParams(filters), withCredentials: true });
+  }
+
+  compareSegments(request: CompareRequest): Observable<ComparisonResult> {
+    const { dimension, leftSegmentId, rightSegmentId, metric, statistic, ...filters } = request;
+    const params: Record<string, string> = {
+      ...this.dashboardParams(filters), dimension, leftSegmentId, rightSegmentId, metric,
+    };
+    if (statistic) {
+      params['statistic'] = statistic;
+    }
+    return this.http.get<ComparisonResult>(`${environment.apiBaseUrl}/analytics/insights/compare`,
+      { params, withCredentials: true });
   }
 }

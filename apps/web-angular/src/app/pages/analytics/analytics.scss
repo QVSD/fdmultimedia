@@ -44,8 +44,25 @@
 .analytics th { color: #59636d; font-size: .82rem; }
 .analytics #publication-select { display: block; max-width: 100%; min-width: min(100%, 360px); padding: 7px; margin: 8px 0 24px; }
 
+.analytics__tabs { display: flex; gap: 8px; margin-bottom: 4px; }
+.analytics__tabs button { padding: 8px 16px; border: 1px solid #d6dce1; background: #fff; color: #17212a; border-radius: 6px 6px 0 0; }
+.analytics__tab--active { border-bottom-color: transparent !important; font-weight: 600; background: #f4f6f8 !important; }
+.analytics__notices { list-style: none; margin: 0 0 16px; padding: 0; display: grid; gap: 8px; }
+.analytics__notices li { border-left: 3px solid #8a94a6; padding: 8px 12px; background: #f4f6f8; }
+/* Deliberately neutral: no per-side color, no winner/loser styling (item 54). */
+.analytics__insight-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; margin: 16px 0; }
+.analytics__insight-card { border: 1px solid #d6dce1; border-radius: 8px; padding: 14px 16px; display: grid; gap: 10px; }
+.analytics__insight-card header { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.analytics__badge { display: inline-block; padding: 2px 8px; border-radius: 999px; background: #eef1f4; color: #40495a; font-size: .76rem; font-weight: 600; }
+.analytics__insight-sides { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.analytics__insight-sides > div { display: grid; gap: 2px; font-size: .86rem; background: #f9fafb; border-radius: 6px; padding: 8px 10px; }
+.analytics__recommendations { border-top: 1px dashed #d6dce1; padding-top: 8px; }
+.analytics__recommendations h3 { margin: 0 0 4px; font-size: .82rem; color: #59636d; text-transform: uppercase; letter-spacing: .02em; }
+.analytics__insight-card details summary { cursor: pointer; color: #59636d; font-size: .82rem; }
+
 @media (max-width: 600px) {
   .analytics { padding: 16px; }
   .analytics__header { flex-wrap: wrap; }
   .analytics__trend-row { grid-template-columns: 80px minmax(50px, 1fr) 92px; gap: 6px; font-size: .76rem; }
+  .analytics__insight-sides { grid-template-columns: 1fr; }
 }

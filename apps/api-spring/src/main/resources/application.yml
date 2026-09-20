@@ -124,6 +124,10 @@ app:
     max-transcript-context-segments: ${CONTENT_AI_MAX_TRANSCRIPT_CONTEXT_SEGMENTS:80}
     transcript-context-padding-ms: ${CONTENT_AI_TRANSCRIPT_CONTEXT_PADDING_MS:5000}
     max-prompt-characters: ${CONTENT_AI_MAX_PROMPT_CHARACTERS:20000}
+  performance-insights:
+    min-sample-size: ${PERFORMANCE_INSIGHTS_MIN_SAMPLE_SIZE:5}
+    min-coverage: ${PERFORMANCE_INSIGHTS_MIN_COVERAGE:0.60}
+    material-difference-percent: ${PERFORMANCE_INSIGHTS_MATERIAL_DIFFERENCE_PERCENT:10}
   storage:
     endpoint: ${STORAGE_ENDPOINT:http://localhost:9000}
     public-endpoint: ${STORAGE_PUBLIC_ENDPOINT:${STORAGE_ENDPOINT:http://localhost:9000}}

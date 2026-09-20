@@ -127,8 +127,10 @@ snapshotting. The one deliberate exception to the usual one-directional
 package convention: `personas` imports `SuggestionLanguage`/
 `SuggestionTone` from `contentsuggestions` to reuse them rather than fork a
 parallel enum — see `personas/package-info.java` for the full rationale.
-`analytics` now contains Phase 13A publication collection/attribution and the
-Phase 13B read-only dashboard aggregation over that same data;
+`analytics` now contains Phase 13A publication collection/attribution, the
+Phase 13B read-only dashboard aggregation, and the Phase 13C deterministic
+insight engine over that same data — no new package, since insights are
+purely query/service/UI logic over already-immutable analytics;
 `revenue` remains a placeholder. The package layout under
 `com.fdmultimedia.api` (`auth`, `users`, `workspaces`, `accounts`, `robots`,
 `contentsources`, `assets`, `jobs`, `workers`, `publishing`,
@@ -657,3 +659,43 @@ line above the KPIs reports "too young" vs. "missing snapshot" separately, so
 an empty aggregate is distinguishable from a real collection gap). Renaming
 a Robot/Persona/ContentSource after publishing and reloading the breakdown
 confirms grouping still uses the frozen snapshot name, not the live one.
+
+## Deterministic performance insights (Phase 13C)
+
+`GET /api/analytics/insights` (bounded, automatic) and `GET
+/api/analytics/insights/compare` (explicit) read the same Phase 13A/13B data
+with no new write path and no AI provider involved — `PERFORMANCE_INSIGHTS_V1`
+is plain deterministic Java. Both accept the same filters as the dashboard
+(`dateFrom`/`dateTo`/`window`/`provider`/`robotId`/`personaId`/
+`contentSourceId`/`origin`/`aiUsage`); `/compare` additionally requires
+`dimension` (`ROBOT`/`PERSONA`/`CONTENT_SOURCE`/`PROVIDER`/`ORIGIN`/
+`AI_USAGE`), `leftSegmentId`/`rightSegmentId` (a UUID or `NONE` for the three
+entity dimensions; `MANUAL`/`ROBOT`, `AI_APPLIED`/`NO_APPLIED_AI`, or
+`TEST`/`INSTAGRAM` for the other three), `metric` (one of the seven
+normalized metrics), and optional `statistic` (`MEDIAN`, the default, or
+`AVERAGE`).
+
+Three thresholds gate every comparison, `app.performance-insights.*`
+(`PERFORMANCE_INSIGHTS_MIN_SAMPLE_SIZE` default `5`,
+`PERFORMANCE_INSIGHTS_MIN_COVERAGE` default `0.60`,
+`PERFORMANCE_INSIGHTS_MATERIAL_DIFFERENCE_PERCENT` default `10`) — below
+either the sample or coverage threshold you get `INSUFFICIENT_SAMPLE`/
+`LOW_COVERAGE`, not a directional claim; below the material-difference
+threshold you get `SIMILAR_OBSERVED`, not a fabricated "no difference." For
+local acceptance with a small dataset, temporarily lower
+`PERFORMANCE_INSIGHTS_MIN_SAMPLE_SIZE` (e.g. to `2`) rather than trusting a
+demo built on the production default — and restore the default afterward,
+since a low threshold is not a defensible production setting.
+
+To see a genuine `TOO_YOUNG` result, compare any dimension under `window=H72`
+or `window=D7` shortly after publishing — the automatic `/insights` response's
+`notices` array reports the same maturity gap in plain language
+("N recent publication(s) have not yet reached the 72-hour observation
+window"). To see `METRIC_UNAVAILABLE`, compare a metric a provider never
+populates (only realistic for a real Instagram field once connected — TEST
+always populates all seven). Comparing a segment to itself, an unsupported
+`dimension`/`metric`/`statistic`, or a malformed UUID segment is a plain
+`400`. A Robot/Persona/ContentSource renamed between two publications still
+reports as one segment (its most recently published name), not two — see
+`docs/ARCHITECTURE.md` for the query-level fix this phase made to
+`PublicationDashboardStore` to guarantee that.

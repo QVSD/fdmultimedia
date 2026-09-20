@@ -1,6 +1,6 @@
 # Roadmap
 
-The repository is currently at Phase 13B. Completed phases are marked below;
+The repository is currently at Phase 13C. Completed phases are marked below;
 later phases are planned high-level direction and intentionally do not go into
 implementation detail before they are started.
 
@@ -304,5 +304,22 @@ implementation detail before they are started.
    publication-time ContentSource name snapshot alongside the existing
    Robot/Persona ones. No ranking, scoring, or optimization — purely
    descriptive aggregation of already-immutable data. *(complete)*
-31. **Revenue tracking / automatic optimization** — separate future work, not
+31. **Deterministic performance insights (Phase 13C)** — a deterministic,
+   non-AI `PERFORMANCE_INSIGHTS_V1` engine reuses Phase 13B's exact
+   observation-window/cohort semantics to produce bounded, evidence-bound
+   descriptive comparisons (`HIGHER_OBSERVED`/`LOWER_OBSERVED`/
+   `SIMILAR_OBSERVED`, never "better"/"worse"/"winner") across ORIGIN,
+   AI_USAGE, Robot, Persona, ContentSource, and provider segments, gated by
+   configurable minimum sample size, minimum coverage, and a material-
+   difference threshold — below any of which the engine reports
+   `INSUFFICIENT_SAMPLE`/`LOW_COVERAGE`/`TOO_YOUNG` instead of a directional
+   claim. A bounded automatic `/insights` endpoint covers only ORIGIN and
+   AI_USAGE (each has exactly two natural buckets); Robot/Persona/
+   ContentSource/provider comparisons are explicit (`/insights/compare`)
+   rather than an implicit leaderboard. Every result carries a causality
+   disclaimer, is purely descriptive, and never mutates a Robot, Persona,
+   ContentSource, schedule, or AI policy — recommendations are limited to
+   asking a human to collect more data, wait for maturity, or review content
+   manually. *(complete)*
+32. **Revenue tracking / automatic optimization** — separate future work, not
    started.

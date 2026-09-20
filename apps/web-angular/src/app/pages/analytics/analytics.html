@@ -8,8 +8,13 @@
     }
   </header>
 
-  <section class="analytics__band" aria-labelledby="dashboard-heading">
-    <div class="analytics__section-heading"><h2 id="dashboard-heading">Published content</h2><button type="button" (click)="reloadDashboard()" [disabled]="dashboardLoading()">Reload</button></div>
+  <nav class="analytics__tabs" aria-label="Analytics views">
+    <button type="button" [class.analytics__tab--active]="tab() === 'dashboard'" (click)="switchTab('dashboard')">Dashboard</button>
+    <button type="button" [class.analytics__tab--active]="tab() === 'insights'" (click)="switchTab('insights')">Insights</button>
+  </nav>
+
+  <section class="analytics__band" aria-labelledby="filters-heading">
+    <div class="analytics__section-heading"><h2 id="filters-heading">Filters</h2></div>
     <div class="analytics__filters">
       <label>From <input type="date" [value]="filters().dateFrom || ''" (change)="filter('dateFrom', $any($event.target).value)"></label>
       <label>To <input type="date" [value]="filters().dateTo || ''" (change)="filter('dateTo', $any($event.target).value)"></label>
@@ -53,6 +58,11 @@
         </select>
       </label>
     </div>
+  </section>
+
+  @if (tab() === 'dashboard') {
+  <section class="analytics__band" aria-labelledby="dashboard-heading">
+    <div class="analytics__section-heading"><h2 id="dashboard-heading">Published content</h2><button type="button" (click)="reloadDashboard()" [disabled]="dashboardLoading()">Reload</button></div>
     @if (dashboardLoading()) { <p role="status">Loading dashboard…</p> }
     @if (dashboardError()) { <p role="alert">{{ dashboardError() }}</p> }
     @if (!dashboardLoading() && !dashboardError() && summary(); as dashboard) {
@@ -121,6 +131,120 @@
       }
     }
   </section>
+  }
+
+  @if (tab() === 'insights') {
+  <section class="analytics__band" aria-labelledby="insights-heading">
+    <div class="analytics__section-heading"><h2 id="insights-heading">Insights</h2></div>
+    <p class="analytics__muted">{{ insights()?.disclaimer || 'These comparisons describe observed associations in the selected publications and do not establish causation.' }}</p>
+    @if (insightsLoading()) { <p role="status">Loading insights…</p> }
+    @if (insightsError()) { <p role="alert">{{ insightsError() }}</p> }
+    @if (!insightsLoading() && !insightsError() && insights(); as data) {
+      @if (data.notices.length > 0) {
+        <ul class="analytics__notices">
+          @for (notice of data.notices; track notice.type) { <li role="status">{{ notice.message }}</li> }
+        </ul>
+      }
+      <div class="analytics__insight-grid">
+        @for (observation of data.observations; track observation.id) {
+          <article class="analytics__insight-card">
+            <header>
+              <span class="analytics__badge">{{ observation.dimension }}</span>
+              <span class="analytics__badge">{{ observation.metric }}</span>
+              <span>{{ resultTypeLabel(observation.type) }}</span>
+            </header>
+            <div class="analytics__insight-sides">
+              <div><strong>{{ observation.left.label }}</strong><span>n={{ observation.left.sampleCount }} / {{ observation.left.eligibleByAgeCount }} eligible</span></div>
+              <div><strong>{{ observation.right.label }}</strong><span>n={{ observation.right.sampleCount }} / {{ observation.right.eligibleByAgeCount }} eligible</span></div>
+            </div>
+            @if (observation.type === 'DIRECTIONAL_COMPARISON') {
+              <p>{{ directionLabel(observation.direction) }} — {{ decimal(observation.left.medianValue) }} vs {{ decimal(observation.right.medianValue) }}</p>
+            }
+            <p>{{ observation.message }}</p>
+            @if (observation.recommendations.length > 0) {
+              <div class="analytics__recommendations">
+                <h3>Next checks</h3>
+                <ul>@for (rec of observation.recommendations; track rec.type) { <li>{{ rec.message }}</li> }</ul>
+              </div>
+            }
+            @if (observation.limitations.length > 0) {
+              <details><summary>Limitations</summary><ul>@for (l of observation.limitations; track l) { <li>{{ l }}</li> }</ul></details>
+            }
+          </article>
+        }
+      </div>
+    }
+
+    <div class="analytics__section-heading"><h2>Comparison builder</h2></div>
+    <div class="analytics__filters">
+      <label>Dimension
+        <select [value]="compareDimension()" (change)="setCompareField('compareDimension', $any($event.target).value)">
+          @for (d of dimensions; track d) { <option [value]="d">{{ d.replace('_', ' ') }}</option> }
+        </select>
+      </label>
+      <label>Left segment
+        <select [value]="compareLeft()" (change)="setCompareField('compareLeft', $any($event.target).value)">
+          <option value="">Choose a segment</option>
+          @for (option of segmentOptions(compareDimension()); track option.value) { <option [value]="option.value">{{ option.label }}</option> }
+        </select>
+      </label>
+      <label>Right segment
+        <select [value]="compareRight()" (change)="setCompareField('compareRight', $any($event.target).value)">
+          <option value="">Choose a segment</option>
+          @for (option of segmentOptions(compareDimension()); track option.value) { <option [value]="option.value">{{ option.label }}</option> }
+        </select>
+      </label>
+      <label>Metric
+        <select [value]="compareMetric()" (change)="setCompareField('compareMetric', $any($event.target).value)">
+          @for (m of trendMetrics; track m) { <option [value]="m">{{ m.replace('_', ' ') }}</option> }
+        </select>
+      </label>
+      <label>Statistic
+        <select [value]="compareStatistic()" (change)="setCompareField('compareStatistic', $any($event.target).value)">
+          <option value="MEDIAN">Median</option><option value="AVERAGE">Average</option>
+        </select>
+      </label>
+    </div>
+    <button type="button" (click)="runCompareFromForm()" [disabled]="!compareLeft() || !compareRight() || compareLoading()">
+      {{ compareLoading() ? 'Comparing…' : 'Compare' }}
+    </button>
+    @if (compareError()) { <p role="alert">{{ compareError() }}</p> }
+    @if (!compareLoading() && compareResult(); as result) {
+      <article class="analytics__insight-card">
+        <header>
+          <span class="analytics__badge">{{ result.dimension }}</span>
+          <span class="analytics__badge">{{ result.metric }}</span>
+          <span>{{ resultTypeLabel(result.type) }}</span>
+        </header>
+        <div class="analytics__insight-sides">
+          <div><strong>{{ result.left.label }}</strong>
+            <span>n={{ result.left.sampleCount }} / {{ result.left.eligibleByAgeCount }} eligible</span>
+            <span>median {{ decimal(result.left.medianValue) }} · average {{ decimal(result.left.averageValue) }}</span>
+          </div>
+          <div><strong>{{ result.right.label }}</strong>
+            <span>n={{ result.right.sampleCount }} / {{ result.right.eligibleByAgeCount }} eligible</span>
+            <span>median {{ decimal(result.right.medianValue) }} · average {{ decimal(result.right.averageValue) }}</span>
+          </div>
+        </div>
+        @if (result.type === 'DIRECTIONAL_COMPARISON') {
+          <p>{{ directionLabel(result.direction) }}
+            @if (result.relativeDifferencePercent != null) { ({{ decimal(result.relativeDifferencePercent) }}% relative difference) }
+          </p>
+        }
+        <p>{{ result.message }}</p>
+        @if (result.recommendations.length > 0) {
+          <div class="analytics__recommendations">
+            <h3>Next checks</h3>
+            <ul>@for (rec of result.recommendations; track rec.type) { <li>{{ rec.message }}</li> }</ul>
+          </div>
+        }
+        <details><summary>Limitations</summary><ul>@for (l of result.limitations; track l) { <li>{{ l }}</li> }</ul></details>
+      </article>
+    } @else if (!compareLoading() && !compareError() && compareLeft() && compareRight() && compareLeft() === compareRight()) {
+      <p role="alert">Choose two different segments to compare.</p>
+    }
+  </section>
+  }
 
   <section class="analytics__band" aria-labelledby="publication-heading"><h2 id="publication-heading">Publication detail</h2>
 

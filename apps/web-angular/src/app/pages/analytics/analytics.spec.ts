@@ -7,6 +7,7 @@ import { PublicationAnalyticsService } from '../../core/publishing/publication-a
 import { PublicationSummary } from '../../core/publishing/publishing.models';
 import { PublicationAnalyticsSnapshot, PublicationAttribution } from '../../core/publishing/publication-analytics.models';
 import { DashboardSummary } from '../../core/publishing/publication-dashboard.models';
+import { ComparisonResult, InsightsResponse } from '../../core/publishing/publication-insights.models';
 import { Analytics } from './analytics';
 
 const publication = {
@@ -31,11 +32,53 @@ const dashboard = {
     SHARES: { total: null, average: null, median: null, sampleCount: 0 },
     TOTAL_INTERACTIONS: { total: null, average: null, median: null, sampleCount: 0 } },
 } as DashboardSummary;
+const insightsResponse = {
+  engineVersion: 'PERFORMANCE_INSIGHTS_V1',
+  filtersFingerprint: 'fp-1',
+  disclaimer: 'These comparisons describe observed associations in the selected publications and do not establish causation.',
+  notices: [{ type: 'MATURITY', message: '2 recent publication(s) have not yet reached the 72-hour observation window.' }],
+  observations: [{
+    id: 'obs-1', type: 'DIRECTIONAL_COMPARISON', engineVersion: 'PERFORMANCE_INSIGHTS_V1',
+    dimension: 'ORIGIN', metric: 'VIEWS', statistic: 'MEDIAN', observationWindow: 'H72',
+    left: { segmentId: 'MANUAL', label: 'Manual', publicationCount: 20, eligibleByAgeCount: 20,
+      analyticsPublicationCount: 20, sampleCount: 20, coverage: 1, medianValue: 100, averageValue: 100 },
+    right: { segmentId: 'ROBOT', label: 'Robot', publicationCount: 20, eligibleByAgeCount: 20,
+      analyticsPublicationCount: 20, sampleCount: 20, coverage: 1, medianValue: 80, averageValue: 80 },
+    absoluteDifference: 20, relativeDifferencePercent: 25, direction: 'HIGHER_OBSERVED', materialDifference: true,
+    message: 'At the 72-hour observation window, Manual had a higher observed median views than Robot in this sample (100 vs 80; n=20 vs n=20).',
+    limitations: ['These comparisons describe observed associations in the selected publications and do not establish causation.',
+      'TEST analytics are deterministic development data, not real audience behavior.'],
+    recommendations: [{ type: 'REVIEW_CONTENT_DIFFERENCES', message: 'Review the publications in both cohorts to identify content differences not represented by these analytics dimensions.' }],
+  }, {
+    id: 'obs-2', type: 'INSUFFICIENT_SAMPLE', engineVersion: 'PERFORMANCE_INSIGHTS_V1',
+    dimension: 'AI_USAGE', metric: 'TOTAL_INTERACTIONS', statistic: 'MEDIAN', observationWindow: 'H72',
+    left: { segmentId: 'AI_APPLIED', label: 'AI applied', publicationCount: 2, eligibleByAgeCount: 2,
+      analyticsPublicationCount: 2, sampleCount: 2, coverage: 1, medianValue: null, averageValue: null },
+    right: { segmentId: 'NO_APPLIED_AI', label: 'No applied AI', publicationCount: 20, eligibleByAgeCount: 20,
+      analyticsPublicationCount: 20, sampleCount: 20, coverage: 1, medianValue: 80, averageValue: 80 },
+    absoluteDifference: null, relativeDifferencePercent: null, direction: null, materialDifference: false,
+    message: 'Not enough total interactions observations are available to compare AI applied and No applied AI at the 72-hour observation window (n=2 vs n=20; 5 required per segment).',
+    limitations: ['These comparisons describe observed associations in the selected publications and do not establish causation.'],
+    recommendations: [{ type: 'COLLECT_MORE_DATA', message: 'Collect more observations before comparing these segments.' }],
+  }],
+} as unknown as InsightsResponse;
+const compareResult = {
+  id: 'cmp-1', type: 'DIRECTIONAL_COMPARISON', engineVersion: 'PERFORMANCE_INSIGHTS_V1',
+  dimension: 'ORIGIN', metric: 'VIEWS', statistic: 'MEDIAN', observationWindow: 'H72',
+  left: { segmentId: 'MANUAL', label: 'Manual', publicationCount: 20, eligibleByAgeCount: 20,
+    analyticsPublicationCount: 20, sampleCount: 20, coverage: 1, medianValue: 100, averageValue: 100 },
+  right: { segmentId: 'ROBOT', label: 'Robot', publicationCount: 20, eligibleByAgeCount: 20,
+    analyticsPublicationCount: 20, sampleCount: 20, coverage: 1, medianValue: 80, averageValue: 80 },
+  absoluteDifference: 20, relativeDifferencePercent: 25, direction: 'HIGHER_OBSERVED', materialDifference: true,
+  message: 'At the 72-hour observation window, Manual had a higher observed median views than Robot in this sample (100 vs 80; n=20 vs n=20).',
+  limitations: ['These comparisons describe observed associations in the selected publications and do not establish causation.'],
+  recommendations: [],
+} as unknown as ComparisonResult;
 
 describe('Analytics', () => {
   let fixture: ComponentFixture<Analytics>;
   let analytics: Pick<PublicationAnalyticsService, 'history' | 'attribution' | 'state' | 'refresh' |
-    'dashboardSummary' | 'dashboardTrend' | 'dashboardBreakdown' | 'dashboardOptions'>;
+    'dashboardSummary' | 'dashboardTrend' | 'dashboardBreakdown' | 'dashboardOptions' | 'insights' | 'compareSegments'>;
   let publications: Subject<PublicationSummary[]>;
 
   beforeEach(async () => {
@@ -52,6 +95,8 @@ describe('Analytics', () => {
       dashboardBreakdown: vi.fn().mockReturnValue(of({ dimension: 'ROBOT', rows: [{ key: 'NONE',
         label: 'Manual / No Robot', coverage: dashboard.coverage, metrics: dashboard.metrics }], truncated: false })),
       dashboardOptions: vi.fn().mockReturnValue(of({ providers: ['TEST'], robots: [], personas: [], contentSources: [], truncated: false })),
+      insights: vi.fn().mockReturnValue(of(insightsResponse)),
+      compareSegments: vi.fn().mockReturnValue(of(compareResult)),
     };
     await TestBed.configureTestingModule({
       imports: [Analytics],
@@ -138,5 +183,71 @@ describe('Analytics', () => {
     expect(text).toContain('n=0');
     expect(text).toContain('Publication cohort trend');
     expect(text).toContain('Manual / No Robot');
+  });
+
+  describe('Insights tab', () => {
+    beforeEach(() => {
+      (fixture.componentInstance as any).tab.set('insights');
+      fixture.detectChanges();
+    });
+
+    it('shows the causality disclaimer, maturity notices, and bounded automatic observations', () => {
+      const text = fixture.nativeElement.textContent as string;
+      expect(text).toContain('do not establish causation');
+      expect(text).toContain('2 recent publication(s) have not yet reached');
+      expect(text).toContain('Manual');
+      expect(text).toContain('Robot');
+      expect(text).toContain('Higher observed');
+      expect(fixture.nativeElement.querySelectorAll('.analytics__insight-card').length).toBe(2);
+    });
+
+    it('never uses winner/loser/better/worse language anywhere in the rendered insights', () => {
+      const text = (fixture.nativeElement.textContent as string).toLowerCase();
+      expect(text).not.toContain('winner');
+      expect(text).not.toContain('loser');
+      expect(text).not.toContain('better');
+      expect(text).not.toContain('worse');
+      expect(text).not.toContain('best persona');
+      expect(text).not.toContain('best robot');
+    });
+
+    it('renders an insufficient-sample observation with its evidence-bound recommendation, not a directional claim', () => {
+      const text = fixture.nativeElement.textContent as string;
+      expect(text).toContain('Not enough total interactions observations');
+      expect(text).toContain('Collect more observations before comparing');
+      expect(text).toContain('Not enough observations yet');
+    });
+
+    it('shows the TEST-data limitation for TEST-backed observations', () => {
+      const text = fixture.nativeElement.textContent as string;
+      expect(text).toContain('TEST analytics are deterministic development data');
+    });
+
+    it('runs an explicit comparison and renders its evidence without winner styling', () => {
+      const component = fixture.componentInstance as any;
+      component.compareDimension.set('ORIGIN');
+      component.compareLeft.set('MANUAL');
+      component.compareRight.set('ROBOT');
+      component.runCompare(component.filters());
+      fixture.detectChanges();
+      expect(analytics.compareSegments).toHaveBeenCalledWith(expect.objectContaining({
+        dimension: 'ORIGIN', leftSegmentId: 'MANUAL', rightSegmentId: 'ROBOT', metric: 'VIEWS', statistic: 'MEDIAN',
+      }));
+      const text = fixture.nativeElement.textContent as string;
+      expect(text).toContain('100');
+      expect(text).toContain('80');
+      expect(text).toContain('25');
+    });
+
+    it('rejects comparing a segment to itself client-side without calling the API', () => {
+      const component = fixture.componentInstance as any;
+      (analytics.compareSegments as ReturnType<typeof vi.fn>).mockClear();
+      component.compareLeft.set('MANUAL');
+      component.compareRight.set('MANUAL');
+      component.runCompare(component.filters());
+      fixture.detectChanges();
+      expect(analytics.compareSegments).not.toHaveBeenCalled();
+      expect(fixture.nativeElement.textContent).toContain('Choose two different segments to compare');
+    });
   });
 });

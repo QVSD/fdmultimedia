@@ -2536,3 +2536,230 @@ ones) with an invalid value silently falling back to the default rather than
 being forwarded to the backend, which independently re-validates everything
 regardless — the frontend check exists to avoid a round-trip 400, not as the
 authority.
+
+## Deterministic performance insights (Phase 13C)
+
+Phase 13C turns Phase 13B's descriptive dashboard into bounded,
+evidence-bound observations a human can act on — never autonomous
+optimization. `PerformanceInsightService` (`PERFORMANCE_INSIGHTS_V1`) is
+plain deterministic application logic: the same dataset, filters, and engine
+version always produce the same result, including its `id` — nothing here
+calls an LLM, a `ContentSuggestion` provider, or any AI Worker job, and
+nothing it produces can mutate a Robot, Persona, ContentSource, Draft,
+Suggestion, PublishSchedule, Publication, SocialAccount, AI policy, or
+schedule. There is no "Apply recommendation" action anywhere in this phase.
+
+### No new snapshot-selection algorithm, no new migration
+
+The engine adds zero new tables and zero new SQL logic for cohort/snapshot
+selection. `PublicationDashboardStore.segments(query, dimension, keys, now)`
+is the one new query method, and it is built entirely from the *same*
+`observed(query)` CTE, `coverageSql()`, `metricSql()`, and `dimensionKeyExpr`/
+`dimensionLabelExpr` helpers `breakdown()` already used — it differs only in
+filtering to exactly the requested segment keys (`WHERE <key-expr> IN
+(:segmentKeys)`) instead of grouping every segment and capping at 100. A
+requested key with zero matching publications is simply absent from the
+result; the service treats a missing key as a legitimate zero-sample
+segment rather than a query error. This means an insight comparison and the
+Phase 13B breakdown table are *structurally* incapable of disagreeing about
+what a given cohort's coverage or median looks like — there is only one
+cohort-building code path.
+
+### A latent Phase 13B bug this phase found and fixed
+
+`breakdown()`/`segments()` originally grouped by `dimension_key,
+dimension_label` together. For ORIGIN/AI_USAGE/PROVIDER that's harmless (the
+label *is* the key), but for ROBOT/PERSONA/CONTENT_SOURCE it was wrong: if
+one of those entities was renamed between two publications, the two
+publications' rows carry two *different* correct label snapshots for the
+*same* key (Phase 13B's whole point — the label is per-publication historical
+truth, not a live join), so grouping by both columns silently split one
+entity's aggregate into two smaller rows with the same ID. This under-counted
+sample size and mis-stated the median/average for any renamed entity, and
+"discovering" it wasn't cosmetic — the first live comparison against a
+renamed Persona threw `IllegalStateException: Duplicate key` inside the new
+`Collectors.toMap(BreakdownRow::key, ...)` step, because `segments()` builds
+an actual lookup keyed by ID and cannot tolerate two rows claiming the same
+key. The fix: group only by the key expression; the label becomes a
+per-group aggregate, `(ARRAY_AGG(<per-publication-label> ORDER BY
+published_at DESC))[1]` — deterministically the label from that key's most
+recently *published* row, the same "most recent wins" rule `options()`
+already used for its own name maps. This fixed both the crash and a
+previously-silent Phase 13B undercount; a live check confirmed a Persona
+that had two publications under two different historical names now
+correctly reports as one segment with `publicationCount: 2`.
+
+### Reused observation-window and filter semantics
+
+`PerformanceInsightService` never accepts its own `workspaceId`, date range,
+or window logic — every request is first validated and turned into a
+`DashboardQuery` by calling `PublicationDashboardService.query(user,
+request)` (a package-private method, reused directly since both classes
+live in `com.fdmultimedia.api.analytics`), which is the exact same
+validation Phase 13B's own dashboard endpoints use: date range ≤ 365 days
+and not in the future, provider/window/origin/aiUsage restricted to their
+enum values, workspace derived from the authenticated membership (never a
+request parameter). `LATEST`/`H24`/`H72`/`D7` and their
+target/minimum/maximum-age tolerance bands are Phase 13B's own `Window` enum,
+untouched.
+
+### Comparison engine: one shared decision tree for explicit and automatic
+
+`buildComparison(query, dimension, leftKey, rightKey, metric, statistic,
+now)` is the single method both `GET /api/analytics/insights/compare`
+(explicit, human-chosen segments) and the automatic `GET
+/api/analytics/insights` (bounded, pre-chosen segment pairs) call — there is
+one decision tree, not two. Given the two sides' `SegmentEvidence`
+(publication count, age-eligible count, snapshot-bearing count, the chosen
+metric's sample count, coverage ratio, median, and average), classification
+is a strict priority order, most-specific first:
+
+1. **`TOO_YOUNG`** — a side has publications but none old enough yet for the
+   selected window (`eligibleByAgeCount == 0`, `publicationCount > 0`).
+2. **`METRIC_UNAVAILABLE`** — a side has a healthy population of *snapshots*
+   (`analyticsPublicationCount >= minSampleSize`) that consistently never
+   populate the selected metric field (`sampleCount == 0`) — a provider/metric
+   support gap, not a data-volume problem.
+3. **`INSUFFICIENT_SAMPLE`** — either side's metric sample count is below
+   `app.performance-insights.min-sample-size` (default 5; a missing segment
+   — zero matching publications at all — is exactly this case with
+   `sampleCount = 0`).
+4. **`LOW_COVERAGE`** — either side's coverage (`sampleCount /
+   eligibleByAgeCount`) is below `app.performance-insights.min-coverage`
+   (default 0.60), even though its sample count alone would have been
+   enough.
+5. **`DIRECTIONAL_COMPARISON`** — only once every gate above passes for both
+   sides.
+
+Only case 5 computes a direction. `MEDIAN` is the default/primary statistic
+(social metrics skew easily); `AVERAGE` is available per request, and the
+evidence DTO always carries both regardless of which one is authoritative,
+so the UI can show "which statistic produced this observation" rather than
+hide it.
+
+### Arithmetic: BigDecimal, explicit zero-denominator handling
+
+`absoluteDifference = leftValue - rightValue` (BigDecimal, always defined
+once case 5 is reached). `relativeDifferencePercent = absoluteDifference /
+abs(rightValue) * 100` — defined *only* when `rightValue != 0`; a zero
+denominator makes the *percent* undefined, so the field is `null`, never a
+divide-by-zero. That null only affects the reported number, not the
+decision: materiality when `rightValue == 0` falls back to "material iff
+`leftValue != 0`" (identical zero on both sides is `SIMILAR_OBSERVED`, e.g.
+0 vs 0 shares; a nonzero left against a zero right is always material —
+there is no meaningful "percent smaller than infinity" reading). Otherwise
+materiality is `abs(relativeDifferencePercent) >=
+app.performance-insights.material-difference-percent` (default 10).
+Direction is always stated **relative to the left segment** —
+`HIGHER_OBSERVED` when left exceeds right beyond the threshold,
+`LOWER_OBSERVED` the reverse, `SIMILAR_OBSERVED` below it — and is a
+descriptive label only; the code and every message template deliberately
+avoid "better"/"worse"/"winner"/"loser"/"best", and never claims statistical
+significance (no p-values, no confidence intervals — Phase 13C is
+explicitly descriptive, not inferential).
+
+### Automatic candidates: bounded, not a leaderboard
+
+`GET /api/analytics/insights` never ranks or searches for the "biggest gap."
+It generates a fixed, small, deterministic set: two dimensions
+(`ORIGIN` — `MANUAL` vs `ROBOT`; `AI_USAGE` — `AI_APPLIED` vs
+`NO_APPLIED_AI`) chosen specifically because each has exactly two natural,
+mutually-exclusive buckets with no naming/ranking ambiguity, times two
+metrics (`VIEWS`, `TOTAL_INTERACTIONS` — a deliberately smaller subset of
+Phase 13B's own recommended default three-metric set, chosen so 2×2 = 4
+stays comfortably under the "at most 5 directional insights per request"
+bound without an arbitrary truncation rule at the boundary). Robot, Persona,
+ContentSource, and provider comparisons are **only** available through the
+explicit `/insights/compare` endpoint with human-chosen `leftSegmentId`/
+`rightSegmentId` — comparing many named Robots or Personas automatically
+would itself function as an implicit leaderboard, which this phase
+deliberately avoids. Before the four comparisons, the same request computes
+workspace-wide maturity/coverage notices (too-young count, missing-snapshot
+count, or "no published content at all") from Phase 13B's own `summary()`
+aggregate — these are informational, never a performance claim, and are
+ordered first in the response.
+
+### Segment identifiers
+
+Every dimension's segment ID is the exact string `breakdown()`/`segments()`
+already use as `dimension_key`: a Robot/Persona/ContentSource's UUID or the
+literal `NONE` for "no Robot"/"no applied Persona"/"no ContentSource"
+(matching Phase 13B's own established convention rather than introducing a
+second null-token spelling like `__NONE__`), `MANUAL`/`ROBOT` for origin,
+`AI_APPLIED`/`NO_APPLIED_AI` for AI usage, and the provider name (`TEST`/
+`INSTAGRAM`) for provider. `normalizeSegmentId` validates the ID's shape
+against the selected dimension (UUID-or-`NONE` for entity dimensions, exact
+fixed vocabulary for the other three) before any query runs, and comparing a
+segment to itself is rejected with `400` before either side is evaluated.
+Because the entity-ID filters flow through the exact same workspace-scoped
+`observed()` CTE as the dashboard's own `robotId`/`personaId`/
+`contentSourceId` filters, a segment ID belonging to another workspace can
+never leak whether it exists — it simply matches zero rows in the
+caller's own workspace-scoped population, the identical behavior as any
+other segment with zero publications.
+
+### Evidence, messages, recommendations, and limitations
+
+`ComparisonResult` is the one response shape both endpoints return — a
+`type` (`DIRECTIONAL_COMPARISON`/`INSUFFICIENT_SAMPLE`/`LOW_COVERAGE`/
+`TOO_YOUNG`/`METRIC_UNAVAILABLE`) plus both sides' full `SegmentEvidence`
+(publication count, age-eligible count, snapshot-bearing count, sample
+count, coverage, median, average) so the UI never has to guess *why* a
+result looks the way it does. Every message is a backend-built template —
+the frontend never infers a conclusion from raw numbers. Every result also
+carries the causality disclaimer as its first `limitations[]` entry, plus a
+"TEST analytics are deterministic development data" note whenever TEST is
+the (or an unfiltered/unknown) provider, and an additional
+provider-semantics-may-differ note specifically for `PROVIDER`-dimension
+comparisons. Recommendations are strictly evidence-bound — `TOO_YOUNG` →
+`WAIT_FOR_OBSERVATION_WINDOW`, `INSUFFICIENT_SAMPLE` → `COLLECT_MORE_DATA`,
+`LOW_COVERAGE`/`METRIC_UNAVAILABLE` → `CHECK_ANALYTICS_COVERAGE`, and a
+*material* `DIRECTIONAL_COMPARISON` → `REVIEW_CONTENT_DIFFERENCES` (a
+`SIMILAR_OBSERVED` result gets no recommendation at all — there is nothing
+actionable to suggest). None of the four recommendation types can mutate
+anything; they only ask a human to look further.
+
+### Determinism: IDs and the filters fingerprint
+
+`ComparisonResult.id` is `sha256(engineVersion | fingerprint | leftKey |
+rightKey | type)` — a deterministic hash, never `UUID.randomUUID()` — so
+identical requests produce identical IDs (useful for frontend list keys and
+for asserting equality in tests) and a *different* result type for the same
+segments (e.g. lowering `min-sample-size` mid-session turns
+`INSUFFICIENT_SAMPLE` into `DIRECTIONAL_COMPARISON`) deterministically
+produces a different ID rather than colliding. `filtersFingerprint` is a
+plain, readable, pipe-joined canonical string of the full analytical context
+(date range, window, provider, Robot/Persona/ContentSource/origin/AI-usage
+filters, and — when applicable — dimension/metric/statistic); it exists for
+future auditing, not persistence, and contains nothing secret.
+
+### Angular integration
+
+The existing `/analytics` page gains a `Dashboard`/`Insights` tab switcher
+(`?tab=`) rather than a second route or a disconnected page. The filter
+controls (date range, window, provider, Robot, Persona, ContentSource,
+origin, AI usage) moved out of the Dashboard-only band so both tabs share
+exactly the same `DashboardFilters` state and the same query parameters —
+switching tabs never resets or duplicates a filter. The Insights tab shows
+the disclaimer, the bounded automatic observations (each as a neutral,
+side-by-side card — deliberately no per-side color, no trophy icon, no
+"winner" label anywhere in the CSS or templates), and a comparison builder
+(dimension → left/right segment → metric → statistic → Compare) whose
+selections are also query parameters
+(`compareDimension`/`compareLeft`/`compareRight`/`compareMetric`/
+`compareStatistic`), so a specific comparison is a shareable URL and
+re-runs automatically once both segments are present in the params —
+matching the "URL/backend is the source of truth, the frontend only
+observes" pattern established since Phase 12A. Segment dropdown options for
+Robot/Persona/ContentSource reuse the dashboard's own `options()` (already
+loaded); Origin/AI-usage/Provider use fixed vocabularies with no extra
+request.
+
+### Out of scope for this phase
+
+Performance rankings, "best Robot"/"best Persona," virality scoring, any
+form of autonomous optimization, automatic Robot/Persona/prompt/schedule
+changes, statistical significance/p-values/confidence intervals, A/B
+experiments, engagement/revenue prediction, alerts, anomaly detection,
+follower/commenter-level data, new Instagram OAuth scopes, TikTok/YouTube
+analytics, and any AI/LLM participation in insight generation.

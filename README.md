@@ -5,18 +5,30 @@ social-media content workflows, video processing workers running across
 multiple laptops/cloud machines, scheduling, AI-assisted content creation,
 publishing, analytics, and revenue tracking.
 
-## Phase 13B scope
+## Phase 13C scope
 
-This repository is currently at **Phase 13B: Publication Analytics Dashboard**.
+This repository is currently at **Phase 13C: Deterministic Performance Insights**.
 Phase 13A gave published TEST content deterministic, historical analytics
-snapshots and a publication-time provenance snapshot; analytics observes
-publications and never changes Robots, Personas, captions, schedules, or AI
-policies. Instagram analytics remains permission-gated pending verified
-insights scopes. Phase 13B adds read-only comparison, trend, and breakdown
-views over that same data — date-range/window/provider/Robot/Persona/
-ContentSource/origin/AI-usage filtering, explicit coverage reporting so a low
-sample count is never hidden inside an average, and bounded breakdowns — with
-no ranking, scoring, or automatic optimization.
+snapshots and a publication-time provenance snapshot; Phase 13B added
+read-only comparison, trend, and breakdown views over that data —
+date-range/window/provider/Robot/Persona/ContentSource/origin/AI-usage
+filtering, explicit coverage reporting so a low sample count is never hidden
+inside an average, and bounded breakdowns. Phase 13C turns that descriptive
+data into bounded, evidence-bound observations a human can act on: a
+deterministic `PERFORMANCE_INSIGHTS_V1` engine (no LLM, no AI provider)
+reuses Phase 13B's exact cohort/observation-window semantics to compare two
+segments (ORIGIN, AI usage, Robot, Persona, ContentSource, or provider) and
+reports `HIGHER_OBSERVED`/`LOWER_OBSERVED`/`SIMILAR_OBSERVED` — never
+"better"/"worse"/"winner" — gated by a configurable minimum sample size,
+minimum coverage, and material-difference threshold, below which it reports
+`INSUFFICIENT_SAMPLE`/`LOW_COVERAGE`/`TOO_YOUNG` instead of a directional
+claim. Every result carries a visible causality disclaimer and, for TEST
+data, a "this is deterministic development data" limitation. Recommendations
+are conservative (collect more data, wait for the observation window, review
+content manually) and never mutate a Robot, Persona, ContentSource,
+schedule, or AI policy. Analytics still never changes Robots, Personas,
+captions, schedules, or AI policies; Instagram analytics remains
+permission-gated pending verified insights scopes.
 
 ## Earlier phases
 Phase 9A introduced current Worker telemetry and per-attempt execution metrics;
