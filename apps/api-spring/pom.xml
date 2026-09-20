@@ -73,6 +73,20 @@
 			<artifactId>s3</artifactId>
 			<version>2.31.78</version>
 		</dependency>
+		<!--
+			Phase 14B: Welch's t-test needs the Student's-t CDF/inverse-CDF for
+			the two-sided p-value and 95% critical value. No statistics library
+			existed anywhere in the repo before this (grep-confirmed); commons-math3
+			is long-stable, has zero transitive dependencies of its own, and is not
+			present in Spring Boot 4.1.1's managed BOM, so it carries no version-
+			conflict risk. Used only for deterministic local math (TDistribution) —
+			no network calls, no randomness.
+		-->
+		<dependency>
+			<groupId>org.apache.commons</groupId>
+			<artifactId>commons-math3</artifactId>
+			<version>3.6.1</version>
+		</dependency>
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-actuator-test</artifactId>

@@ -19,10 +19,12 @@ public class ExperimentController {
 
     private final ExperimentService service;
     private final ExperimentOutcomeService outcomeService;
+    private final ExperimentAnalysisService analysisService;
 
-    public ExperimentController(ExperimentService service, ExperimentOutcomeService outcomeService) {
+    public ExperimentController(ExperimentService service, ExperimentOutcomeService outcomeService, ExperimentAnalysisService analysisService) {
         this.service = service;
         this.outcomeService = outcomeService;
+        this.analysisService = analysisService;
     }
 
     @GetMapping
@@ -79,5 +81,11 @@ public class ExperimentController {
     @GetMapping("/{experimentId}/outcomes")
     public ExperimentOutcome outcomes(@AuthenticationPrincipal AuthenticatedUser principal, @PathVariable UUID experimentId) {
         return outcomeService.outcomes(principal, experimentId);
+    }
+
+    /** Item 53: no metric/window query params — the Experiment's own frozen primary metric/target window are always used. */
+    @GetMapping("/{experimentId}/analysis")
+    public ExperimentAnalysisResponse analysis(@AuthenticationPrincipal AuthenticatedUser principal, @PathVariable UUID experimentId) {
+        return analysisService.analyze(principal, experimentId);
     }
 }

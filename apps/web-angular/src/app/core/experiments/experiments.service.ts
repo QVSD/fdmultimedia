@@ -5,6 +5,7 @@ import { Observable } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import {
   CreateExperimentRequest,
+  ExperimentAnalysisResponse,
   ExperimentAssignmentSummary,
   ExperimentOutcome,
   ExperimentSummary,
@@ -59,5 +60,12 @@ export class ExperimentsService {
 
   outcomes(experimentId: string): Observable<ExperimentOutcome> {
     return this.http.get<ExperimentOutcome>(`${environment.apiBaseUrl}/experiments/${experimentId}/outcomes`, { withCredentials: true });
+  }
+
+  /** Item 53: no metric/window query params — the Experiment's own frozen primary metric/target window are always used. */
+  analysis(experimentId: string): Observable<ExperimentAnalysisResponse> {
+    return this.http.get<ExperimentAnalysisResponse>(`${environment.apiBaseUrl}/experiments/${experimentId}/analysis`, {
+      withCredentials: true,
+    });
   }
 }

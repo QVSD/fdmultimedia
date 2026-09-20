@@ -5,9 +5,36 @@ social-media content workflows, video processing workers running across
 multiple laptops/cloud machines, scheduling, AI-assisted content creation,
 publishing, analytics, and revenue tracking.
 
+## Phase 14B scope
+
+This repository is currently at **Phase 14B: Statistical Experiment Analysis**.
+Phase 14A gave Experiments a controlled, deterministic A/B assignment and a
+descriptive operational outcome endpoint; Phase 14B adds reproducible
+statistical evidence on top of that same immutable assignment/publication
+data — a deterministic `EXPERIMENT_ANALYSIS_V1` engine (no LLM, no AI
+provider) computes Welch's unequal-variance t-test (mean difference, 95%
+confidence interval, two-sided p-value, Hedges' g effect size) over exactly
+one deterministically-selected outcome per `ExperimentAssignment` — never
+per Publication, so a retried or duplicated Publication can never inflate a
+sample. Two populations are always shown side by side: `ASSIGNED_OBSERVED`
+(every observed outcome, including protocol deviations) and
+`PER_PROTOCOL_OBSERVED` (excludes publications whose final content deviated
+from the assigned treatment) — an `ExperimentAssignment` that never
+published, or hasn't matured to the Experiment's own fixed observation
+window yet, is visible in the funnel, never fabricated as a zero. Below a
+configurable minimum sample per arm, or when a pooled variance term is
+exactly zero, the engine returns `INSUFFICIENT_SAMPLE`/
+`INSUFFICIENT_VARIANCE` with descriptive statistics only — never a
+fabricated confidence interval or p-value. The response never contains a
+`winner`/`recommendedVariant`/`deployVariant` field: `confidenceIntervalIncludesZero`
+is reported, an active Experiment carries a standing "checking interim
+results can bias inference" warning, and Robot/Persona/schedule mutation
+remains completely out of scope — this phase only computes and displays
+evidence.
+
 ## Phase 14A scope
 
-This repository is currently at **Phase 14A: Controlled Experiments & A/B Testing Foundation**.
+Phase 14A (Controlled Experiments & A/B Testing Foundation) preceded this phase.
 An `Experiment` is a controlled assignment mechanism, not an optimizer: it
 compares exactly two frozen variants (A/B) of one factor — PERSONA in this
 phase — and assigns a `RobotRun` to a variant deterministically, before any

@@ -5,11 +5,14 @@ import { EMPTY, Subscription, catchError, finalize, interval, startWith, switchM
 
 import { ExperimentsService } from '../../core/experiments/experiments.service';
 import {
+  AnalysisPopulation,
   CreateExperimentRequest,
+  ExperimentAnalysisResponse,
   ExperimentAssignmentSummary,
   ExperimentMetric,
   ExperimentObservationWindow,
   ExperimentOutcome,
+  ExperimentPopulationAnalysis,
   ExperimentSummary,
 } from '../../core/experiments/experiment.models';
 import { PersonasService } from '../../core/personas/personas.service';
@@ -65,6 +68,9 @@ export class Experiments implements OnInit, OnDestroy {
   protected readonly expandedExperimentId = signal<string | null>(null);
   protected readonly assignmentsByExperiment = signal<Record<string, ExperimentAssignmentSummary[]>>({});
   protected readonly outcomeByExperiment = signal<Record<string, ExperimentOutcome>>({});
+  protected readonly analysisByExperiment = signal<Record<string, ExperimentAnalysisResponse>>({});
+  protected readonly analysisLoadState = signal<Record<string, LoadState>>({});
+  protected readonly populationByExperiment = signal<Record<string, AnalysisPopulation>>({});
   protected readonly detailLoadState = signal<Record<string, LoadState>>({});
   protected readonly lifecycleBusy = signal<Record<string, boolean>>({});
   protected readonly lifecycleError = signal<Record<string, string | null>>({});
@@ -189,6 +195,17 @@ export class Experiments implements OnInit, OnDestroy {
       },
       error: () => this.detailLoadState.update((state) => ({ ...state, [experimentId]: 'error' })),
     });
+    this.analysisLoadState.update((state) => ({ ...state, [experimentId]: 'loading' }));
+    if (!this.populationByExperiment()[experimentId]) {
+      this.populationByExperiment.update((byId) => ({ ...byId, [experimentId]: 'ASSIGNED_OBSERVED' }));
+    }
+    this.experimentsService.analysis(experimentId).subscribe({
+      next: (analysis) => {
+        this.analysisByExperiment.update((byId) => ({ ...byId, [experimentId]: analysis }));
+        this.analysisLoadState.update((state) => ({ ...state, [experimentId]: 'ready' }));
+      },
+      error: () => this.analysisLoadState.update((state) => ({ ...state, [experimentId]: 'error' })),
+    });
   }
 
   protected assignmentsFor(experimentId: string): ExperimentAssignmentSummary[] {
@@ -197,6 +214,54 @@ export class Experiments implements OnInit, OnDestroy {
 
   protected outcomeFor(experimentId: string): ExperimentOutcome | null {
     return this.outcomeByExperiment()[experimentId] ?? null;
+  }
+
+  protected analysisFor(experimentId: string): ExperimentAnalysisResponse | null {
+    return this.analysisByExperiment()[experimentId] ?? null;
+  }
+
+  protected selectedPopulationFor(experimentId: string): AnalysisPopulation {
+    return this.populationByExperiment()[experimentId] ?? 'ASSIGNED_OBSERVED';
+  }
+
+  protected setPopulation(experimentId: string, population: AnalysisPopulation): void {
+    this.populationByExperiment.update((byId) => ({ ...byId, [experimentId]: population }));
+  }
+
+  protected activePopulationAnalysis(experimentId: string): ExperimentPopulationAnalysis | null {
+    const analysis = this.analysisFor(experimentId);
+    if (!analysis) {
+      return null;
+    }
+    return this.selectedPopulationFor(experimentId) === 'ASSIGNED_OBSERVED' ? analysis.assignedObserved : analysis.perProtocolObserved;
+  }
+
+  protected analysisStatusLabel(status: ExperimentAnalysisResponse['assignedObserved']['status']): string {
+    switch (status) {
+      case 'NO_OBSERVATIONS':
+        return 'No observations yet';
+      case 'MIXED_PROVIDERS':
+        return 'Mixed providers — inference not performed';
+      case 'INSUFFICIENT_SAMPLE':
+        return 'Insufficient sample';
+      case 'INSUFFICIENT_VARIANCE':
+        return 'Insufficient variance';
+      case 'READY':
+        return 'Ready';
+    }
+  }
+
+  protected populationLabel(population: AnalysisPopulation): string {
+    return population === 'ASSIGNED_OBSERVED' ? 'Assigned observed' : 'Per-protocol observed';
+  }
+
+  protected confidenceIntervalExplanation(population: ExperimentPopulationAnalysis): string {
+    if (population.status !== 'READY') {
+      return '';
+    }
+    return population.effect.confidenceIntervalIncludesZero
+      ? 'The observed data remain compatible with effects in either direction at this confidence level.'
+      : 'The 95% interval does not include zero.';
   }
 
   protected assignedCount(variantKey: 'A' | 'B', experiment: ExperimentSummary): number {

@@ -1,6 +1,6 @@
 # Roadmap
 
-The repository is currently at Phase 14A. Completed phases are marked below;
+The repository is currently at Phase 14B. Completed phases are marked below;
 later phases are planned high-level direction and intentionally do not go into
 implementation detail before they are started.
 
@@ -337,5 +337,21 @@ implementation detail before they are started.
    snapshot-selection semantics at the experiment's own fixed observation
    window/metric — no winner, no significance testing, no automatic
    Robot/Persona/schedule mutation. *(complete)*
-33. **Revenue tracking / automatic optimization** — separate future work, not
+33. **Statistical experiment analysis (Phase 14B)** — a deterministic,
+   non-AI `EXPERIMENT_ANALYSIS_V1` engine computes Welch's unequal-variance
+   t-test (mean difference, 95% CI, two-sided p-value, Hedges' g) over a
+   canonical one-row-per-`ExperimentAssignment` dataset — a deterministic
+   Publication selection rule (earliest `published_at`, then id) so a
+   duplicated Publication can never inflate a sample, and Phase 13B's exact
+   snapshot-selection semantics reused verbatim for the Experiment's own
+   fixed observation window. Two populations are always shown side by side,
+   `ASSIGNED_OBSERVED` and `PER_PROTOCOL_OBSERVED` (excludes protocol
+   deviations), never merged or hidden. Below a configurable minimum sample
+   or with zero pooled variance, only descriptive statistics are shown —
+   never a fabricated CI/p-value. No `winner`/`recommendedVariant` field
+   exists anywhere; an active Experiment carries a standing interim-analysis
+   warning, and mixed analytics providers block inferential pooling. No new
+   migration, no persisted result — every analysis is computed on demand
+   from already-immutable data. *(complete)*
+34. **Revenue tracking / automatic optimization** — separate future work, not
    started.

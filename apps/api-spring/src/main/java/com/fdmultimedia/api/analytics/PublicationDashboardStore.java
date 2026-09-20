@@ -159,10 +159,6 @@ public class PublicationDashboardStore {
     }
 
     private static String observed(DashboardQuery query) {
-        String snapshotFilter = query.window() == Window.LATEST ? "" :
-                " AND s.publication_age_seconds BETWEEN :minimumAge AND :maximumAge";
-        String ordering = query.window() == Window.LATEST ? "s.collected_at DESC, s.id DESC" :
-                "ABS(s.publication_age_seconds - :targetAge), s.collected_at DESC, s.id DESC";
         return """
                 WITH cohort AS (
                     SELECT p.id, p.published_at, sa.platform AS provider, a.robot_id, a.robot_name_snapshot,
@@ -189,12 +185,34 @@ public class PublicationDashboardStore {
                     SELECT c.*, (c.published_at <= :matureBefore) AS eligible, s.id AS snapshot_id,
                            s.views, s.reach, s.likes, s.comments, s.shares, s.saves, s.total_interactions
                     FROM cohort c
-                    LEFT JOIN LATERAL (
-                        SELECT s.id, s.views, s.reach, s.likes, s.comments, s.shares, s.saves,
-                               s.total_interactions
-                        FROM publication_analytics_snapshots s
-                        WHERE s.publication_id = c.id AND c.published_at <= :matureBefore
-                """ + snapshotFilter + " ORDER BY " + ordering + " LIMIT 1) s ON TRUE) ";
+                """ + snapshotLateralJoinSql(query.window(), "c.id", "c.published_at",
+                        "s.views, s.reach, s.likes, s.comments, s.shares, s.saves, s.total_interactions", "s") + ") ";
+    }
+
+    /**
+     * The one snapshot-selection algorithm: given a Publication (via
+     * {@code publicationIdExpr}/{@code matureBeforeExpr}, both plain SQL
+     * expressions evaluable in the enclosing scope) and a target observation
+     * {@code window}, picks at most one {@code publication_analytics_snapshots}
+     * row — nearest to the window's target age for H24/H72/D7, most recent
+     * for LATEST — exactly like {@link #observed} always has. Package-public
+     * (not just used within this class) specifically so
+     * {@code com.fdmultimedia.api.experiments}'s Phase 14B statistical
+     * analysis reuses this verbatim instead of writing a second
+     * snapshot-selection query; only the selected metric columns and the
+     * surrounding query shape (per-Publication here, per-ExperimentAssignment
+     * there) ever differ.
+     */
+    public static String snapshotLateralJoinSql(
+            Window window, String publicationIdExpr, String matureBeforeExpr, String selectColumnsSql, String resultAlias) {
+        String snapshotFilter = window == Window.LATEST ? "" :
+                " AND s.publication_age_seconds BETWEEN :minimumAge AND :maximumAge";
+        String ordering = window == Window.LATEST ? "s.collected_at DESC, s.id DESC" :
+                "ABS(s.publication_age_seconds - :targetAge), s.collected_at DESC, s.id DESC";
+        return "LEFT JOIN LATERAL (SELECT s.id, " + selectColumnsSql
+                + " FROM publication_analytics_snapshots s WHERE s.publication_id = " + publicationIdExpr
+                + " AND " + matureBeforeExpr + " <= :matureBefore" + snapshotFilter
+                + " ORDER BY " + ordering + " LIMIT 1) " + resultAlias + " ON TRUE";
     }
 
     private static String coverageSql() {

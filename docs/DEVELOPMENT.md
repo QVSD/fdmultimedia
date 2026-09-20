@@ -757,3 +757,55 @@ several `POST /api/robots/{id}/run` requests in parallel against distinct
 Robots on the same Experiment and confirming `GET
 .../assignments` shows one row per run, no duplicates, and a
 balanced A/B split (difference at most one).
+
+## Statistical experiment analysis (Phase 14B)
+
+`GET /api/experiments/{id}/analysis` takes no query parameters — it always
+uses the Experiment's own frozen `targetObservationWindow`/`primaryMetric`,
+never a caller-supplied override. It works for every Experiment status
+(`DRAFT` simply has no assignments yet, so both populations report
+`NO_OBSERVATIONS`; `CANCELLED` remains readable if assignment data exists);
+only `ACTIVE` adds `activeExperimentWarning` to the response.
+
+Threshold: `app.experiment-analysis.min-sample-per-variant`
+(`EXPERIMENT_ANALYSIS_MIN_SAMPLE_PER_VARIANT`, default `5` — deliberately
+the same considered-default rationale `PerformanceInsightProperties` already
+documents, not a shortcut). Below it, a population reports
+`INSUFFICIENT_SAMPLE` with descriptive statistics only (mean/median/
+standard deviation/min/max) and every inferential field (`standardError`/
+`degreesOfFreedom`/`confidenceIntervalLower`/`confidenceIntervalUpper`/
+`pValue`/`standardizedEffectSize`) forced to `null` — never a value computed
+from too little data and presented as if valid.
+
+To see a genuine `READY` result locally: an Experiment needs at least
+`min-sample-per-variant` **published, matured-to-the-target-window,
+snapshot-bearing** observations in both arms. The `H24` window is the
+fastest to reach without any DB manipulation; for `H72`/`D7` locally,
+directly updating a real TEST Publication's `published_at` (and, if
+already collected, its snapshot's `collected_at`/`publication_age_seconds`)
+in Postgres to simulate elapsed time is an accepted, explicitly-called-out
+shortcut for *runtime acceptance only* (never for automated tests, which
+use `WelchStatisticsTest`'s direct math instead) — document exactly what
+you changed and why, and never touch a non-TEST provider's data this way.
+
+To see `INSUFFICIENT_VARIANCE`: an Experiment whose observed values are
+identical within both arms (realistic with TEST's deterministic provider —
+the same seed inputs can genuinely produce identical `views` counts across
+a small sample) reports `INSUFFICIENT_VARIANCE`, not a divide-by-zero or a
+fabricated p-value.
+
+To see the `ASSIGNED_OBSERVED`/`PER_PROTOCOL_OBSERVED` populations
+genuinely differ: apply a *different* `ContentSuggestion` than the one the
+experimental RobotRun generated (e.g. manually create and apply a second
+suggestion on the same Draft before it publishes) — `protocolDeviation`
+becomes `true` on that Publication's attribution, `ASSIGNED_OBSERVED` still
+counts it, and `PER_PROTOCOL_OBSERVED` excludes it; both variant's
+`protocolDeviationCount` reflects it either way.
+
+The one new dependency this phase introduces is `commons-math3` (Student's-t
+distribution for the critical value and p-value) — no other statistics
+library existed anywhere in the repository before. All numerical reference
+values used in `WelchStatisticsTest` were computed independently with
+Python + SciPy (`scipy.stats.ttest_ind(..., equal_var=False)`) during
+development, never by calling the Java implementation itself — see the
+Phase 14B final report for the exact script.

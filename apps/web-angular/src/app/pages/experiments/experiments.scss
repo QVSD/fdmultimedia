@@ -233,6 +233,64 @@ button {
   }
 }
 
+.experiments__warning {
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: #f9fafb;
+  color: #374151;
+  font-size: 0.85rem;
+}
+
+// Population toggle: both buttons share the exact same style, only the
+// "active" one gets a slightly stronger border — never a color that could
+// read as one population being "correct" (item 63/64).
+.experiments__population-toggle {
+  display: flex;
+  gap: 0.5rem;
+
+  button {
+    background: #ffffff;
+    color: #111827;
+    border: 1px solid #d1d5db;
+    font-weight: 600;
+  }
+}
+
+.experiments__population-toggle--active {
+  border-color: #111827 !important;
+  background: #f3f4f6 !important;
+}
+
+.experiments__effect {
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 0.6rem 0.75rem;
+  display: grid;
+  gap: 0.3rem;
+  font-size: 0.85rem;
+
+  p {
+    margin: 0;
+  }
+}
+
+.experiments__limitations {
+  font-size: 0.82rem;
+  color: var(--color-text-muted);
+
+  summary {
+    cursor: pointer;
+    font-weight: 600;
+  }
+
+  ul {
+    margin: 0.4rem 0 0;
+    padding-left: 1.2rem;
+  }
+}
+
 .experiments__small-sample {
   margin: 0;
   color: var(--color-text-muted);

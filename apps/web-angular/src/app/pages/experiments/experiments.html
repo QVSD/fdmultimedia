@@ -6,7 +6,7 @@
       outcome exists, is frozen for the life of the Robot run, and is never influenced by analytics.
     </p>
     <p class="experiments__disclaimer">
-      Experiment outcomes are descriptive in Phase 14A. No statistical winner or causal conclusion is calculated yet.
+      Statistical analysis describes observed outcomes and uncertainty. It does not identify a winner or establish causality.
     </p>
   </header>
 
@@ -196,6 +196,110 @@
                     <p class="experiments__disclaimer">{{ outcome.disclaimer }}</p>
                   } @else {
                     <p>Loading outcome…</p>
+                  }
+
+                  <h3>Statistical analysis</h3>
+                  @if (analysisFor(experiment.id); as analysis) {
+                    @if (analysis.activeExperimentWarning) {
+                      <p class="experiments__warning" role="alert">{{ analysis.activeExperimentWarning }}</p>
+                    }
+
+                    <div class="experiments__population-toggle">
+                      <button
+                        type="button"
+                        [class.experiments__population-toggle--active]="selectedPopulationFor(experiment.id) === 'ASSIGNED_OBSERVED'"
+                        (click)="setPopulation(experiment.id, 'ASSIGNED_OBSERVED')"
+                      >
+                        Assigned observed
+                      </button>
+                      <button
+                        type="button"
+                        [class.experiments__population-toggle--active]="selectedPopulationFor(experiment.id) === 'PER_PROTOCOL_OBSERVED'"
+                        (click)="setPopulation(experiment.id, 'PER_PROTOCOL_OBSERVED')"
+                      >
+                        Per-protocol observed
+                      </button>
+                    </div>
+                    <p class="experiments__hint">
+                      Assigned observed includes every observed outcome regardless of protocol deviation. Per-protocol observed
+                      excludes publications marked with a protocol deviation. It can differ from the assigned-observed population.
+                    </p>
+
+                    @if (activePopulationAnalysis(experiment.id); as population) {
+                      <p class="experiments__badge">{{ analysisStatusLabel(population.status) }}</p>
+
+                      <div class="experiments__outcome-row">
+                        @for (variant of [population.variantA, population.variantB]; track variant.variantKey) {
+                          <div class="experiments__outcome-card">
+                            <strong>Variant {{ variant.variantKey }}</strong>
+                            <span>{{ variant.label }}</span>
+                            <dl>
+                              <dt>Assigned</dt><dd>{{ variant.assignmentCount }}</dd>
+                              <dt>Failed</dt><dd>{{ variant.failedRunCount }}</dd>
+                              <dt>Published</dt><dd>{{ variant.publishedCount }}</dd>
+                              <dt>Eligible by age</dt><dd>{{ variant.eligibleByAgeCount }}</dd>
+                              <dt>Too young</dt><dd>{{ variant.tooYoungCount }}</dd>
+                              <dt>Protocol deviations</dt><dd>{{ variant.protocolDeviationCount }}</dd>
+                              <dt>n (observed)</dt><dd>{{ variant.metricSampleCount }}</dd>
+                              <dt>Mean</dt><dd>{{ variant.mean ?? '—' }}</dd>
+                              <dt>Median</dt><dd>{{ variant.median ?? '—' }}</dd>
+                              <dt>Std. deviation</dt><dd>{{ variant.standardDeviation ?? '—' }}</dd>
+                              <dt>Min</dt><dd>{{ variant.min ?? '—' }}</dd>
+                              <dt>Max</dt><dd>{{ variant.max ?? '—' }}</dd>
+                            </dl>
+                          </div>
+                        }
+                      </div>
+
+                      @if (population.status === 'READY') {
+                        <div class="experiments__effect">
+                          <p>
+                            A &minus; B: {{ population.effect.absoluteMeanDifference }}
+                            (95% CI {{ population.effect.confidenceIntervalLower }} to {{ population.effect.confidenceIntervalUpper }})
+                          </p>
+                          @if (population.effect.relativeMeanDifferencePercent !== null) {
+                            <p>Relative difference: {{ population.effect.relativeMeanDifferencePercent }}%</p>
+                          }
+                          <p>{{ confidenceIntervalExplanation(population) }}</p>
+                          @if (population.effect.pValue !== null) {
+                            <p title="Two-sided Welch test p-value.">Two-sided Welch p-value: {{ population.effect.pValue }}</p>
+                          }
+                          @if (population.effect.standardizedEffectSize !== null) {
+                            <p title="Hedges' g: a standardized mean difference with a small-sample correction.">
+                              Standardized effect size (Hedges' g): {{ population.effect.standardizedEffectSize }}
+                            </p>
+                          }
+                        </div>
+                      } @else if (population.status === 'INSUFFICIENT_SAMPLE') {
+                        <p class="experiments__notice">
+                          More observed outcomes are required for the configured inferential analysis
+                          (n<sub>A</sub>={{ population.variantA.metricSampleCount }}, n<sub>B</sub>={{ population.variantB.metricSampleCount }}).
+                        </p>
+                      } @else if (population.status === 'INSUFFICIENT_VARIANCE') {
+                        <p class="experiments__notice">
+                          Observed values do not vary enough in one or both arms to compute a confidence interval or p-value.
+                        </p>
+                      } @else if (population.status === 'MIXED_PROVIDERS') {
+                        <p class="experiments__notice">
+                          Observed outcomes span more than one analytics provider; pooling a normalized metric across providers is not performed.
+                        </p>
+                      } @else {
+                        <p class="experiments__notice">No observed outcomes yet in this population.</p>
+                      }
+                    }
+
+                    @if (analysis.limitations.length > 0) {
+                      <details class="experiments__limitations">
+                        <summary>Limitations</summary>
+                        <ul>
+                          @for (limitation of analysis.limitations; track limitation) {
+                            <li>{{ limitation }}</li>
+                          }
+                        </ul>
+                      </details>
+                    }
+                  } @else {
+                    <p>Loading statistical analysis…</p>
                   }
 
                   <h3>Assignment history</h3>

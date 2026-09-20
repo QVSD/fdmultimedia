@@ -2932,3 +2932,171 @@ multi-factor or 3+-variant designs, AI_POLICY as an experimental factor
 (deferred, see above), audience/viewer/follower-level assignment or
 tracking, revenue/monetization experiments, and any AI/LLM participation in
 experiment analysis or conclusions.
+
+## Statistical experiment analysis (Phase 14B)
+
+Phase 14A's `Experiment`/`ExperimentAssignment`/`PublicationAttribution`
+already carry every fact Welch's t-test needs; Phase 14B adds no schema and
+persists nothing — `GET /api/experiments/{id}/analysis` computes
+`EXPERIMENT_ANALYSIS_V1` evidence on demand from that already-immutable
+data, every time, deterministically.
+
+### The canonical dataset: one row per assignment, never per Publication
+
+`ExperimentAnalysisStore.fetch` is a single bounded SQL query producing
+exactly one `AssignmentObservationRow` per `ExperimentAssignment` — never
+per Publication. This matters because a single assignment's `RobotRun` can,
+in principle, end up linked to more than one Publication (a human manually
+publishing the same underlying Draft twice, to different accounts); treating
+each as an independent observation would silently inflate the sample and
+violate the statistical independence Welch's test assumes. The query
+deduplicates deterministically with a window function:
+
+```sql
+ROW_NUMBER() OVER (PARTITION BY ea.id ORDER BY p.published_at ASC NULLS LAST, p.id ASC)
+```
+
+— the earliest-published, then lowest-id, `PUBLISHED` Publication wins;
+never the Publication with the best metric (that would be outcome-dependent
+selection, exactly what item 12 forbids). An assignment with no `PUBLISHED`
+Publication at all still produces exactly one row (all-null outcome
+columns) via the `LEFT JOIN`s, so it remains visible in the funnel rather
+than silently disappearing.
+
+Publication lookup joins `publication_attributions` by its own
+`experiment_assignment_id` column (frozen at capture time, Phase 14A) —
+never by re-deriving the chain through `content_drafts`/`publish_schedules`,
+and never by trusting a Robot's *current* `experimentId` (which could have
+been detached since). Snapshot selection for the matured metric reuses
+`PublicationDashboardStore.snapshotLateralJoinSql` **verbatim** — the exact
+same target-window LATERAL join and tie-break (`ABS(publication_age_seconds
+- targetAge), collected_at DESC, id DESC`) Phase 13B/13C/14A's outcome
+endpoint already uses, now extracted into a small reusable static method so
+both call sites can never silently drift apart. This is the same
+reuse-not-reimplement discipline Phase 13C/14A established for the dashboard
+itself.
+
+### Two populations, always both visible
+
+`AnalysisPopulation.ASSIGNED_OBSERVED` includes every assignment with an
+observed primary-metric value, regardless of `protocolDeviation`.
+`PER_PROTOCOL_OBSERVED` additionally excludes any assignment whose selected
+Publication deviated from the assigned treatment. Neither is a formal
+causal intention-to-treat estimator — a missing outcome (never published,
+still too young, no matured snapshot) is excluded from the metric sample
+rather than imputed — hence the deliberately explicit `_OBSERVED` suffix on
+both names (item 10) rather than "ITT"/"per-protocol" alone. Both
+populations are computed from the *same* canonical rows
+(`ExperimentAnalysisService.summarizeVariant`, called once per population
+with a `perProtocolOnly` flag), so they can never disagree about the
+underlying funnel counts — only about which rows contribute to the metric
+sample.
+
+### Status: what can be trusted, never who "won"
+
+`AnalysisStatus` — `NO_OBSERVATIONS` → `MIXED_PROVIDERS` → `INSUFFICIENT_SAMPLE`
+→ `INSUFFICIENT_VARIANCE` → `READY`, checked in that priority order — governs
+only whether the inferential fields (`standardError`/`degreesOfFreedom`/
+`confidenceIntervalLower`/`confidenceIntervalUpper`/`pValue`/
+`standardizedEffectSize`) are populated or forced to `null`. Descriptive
+statistics (`mean`/`median`/`standardDeviation`/`min`/`max`) and the raw
+`absoluteMeanDifference`/`relativeMeanDifferencePercent` are always computed
+whenever both arms have at least one observation — a plain difference in
+observed means is a description, not an inferential claim, so it is never
+gated the same way a confidence interval is. Mixed-provider detection
+(`MIXED_PROVIDERS`) inspects the `provider` (social platform) on every row
+contributing a metric value in that population; more than one distinct
+provider blocks inference entirely (normalized metric semantics may not be
+comparable across providers — the same limitation Phase 13C's own
+`PROVIDER`-dimension comparisons carry) while still showing descriptive
+stats per arm.
+
+### `WelchStatistics`: pure math, exhaustively tested against an independent reference
+
+`WelchStatistics` (no Spring, no I/O) is the entire inferential engine:
+sample mean/median/variance (`n-1` denominator, never population variance),
+Welch's standard error (`sqrt(sA²/nA + sB²/nB)`), Welch-Satterthwaite
+degrees of freedom, the two-sided 95% critical value and p-value from Apache
+Commons Math's `TDistribution` (the repository's first statistics
+dependency — grep-confirmed nothing existed before, zero transitive
+dependencies of its own, no version conflict with Spring Boot 4.1.1's
+managed BOM), and Hedges' g (Cohen's d with the small-sample bias
+correction). Every code path is null-safe rather than exception-safe:
+`n=0`/`n=1`/zero-variance-in-either-or-both-arms never throw and never
+produce `NaN`/`Infinity` — a private `sanitize()` guard is the one place
+such a value could ever leak into a DTO, and it never does (exhaustively
+tested, see below). `WelchStatisticsTest`'s four reference datasets were
+computed independently with Python 3.13.5 + SciPy 1.18.0
+(`scipy.stats.ttest_ind(..., equal_var=False)`) during development — never
+by calling this production code — and compared with a numeric tolerance;
+the exact script and output are reproduced in the Phase 14B final report.
+
+### Rounding at the boundary only
+
+`WelchStatistics` and `ExperimentAnalysisService`'s aggregation work
+entirely in `double` internally — statistical computation needs
+`sqrt`/`pow`/a t-distribution CDF, none of which `BigDecimal` supports
+natively — and only the `ExperimentAnalysisService.round(...)` boundary
+converts to `BigDecimal` for the API response (scale 4 for means/
+differences/CI/effect size, scale 6 for the p-value, to keep small values
+distinguishable). Every count (`assignmentCount`, `metricSampleCount`, ...)
+is a plain `long`, never downcast to `int`.
+
+### No metric fishing, no window substitution
+
+The `/analysis` endpoint accepts no metric or window query parameter at
+all — it always uses `experiment.getTargetObservationWindow()`/
+`getPrimaryMetric()`, the same frozen values the Experiment was activated
+with. There is exactly one pre-specified primary analysis per Experiment,
+so no multiple-comparison correction is needed and none is implemented;
+scanning all seven metrics for the most favorable p-value is structurally
+impossible, not merely discouraged.
+
+### Bounded, never silently truncated
+
+`ExperimentAnalysisStore.countAssignments` is checked against
+`MAX_ANALYSIS_ASSIGNMENTS` (10,000) **before** the row query ever runs; over
+the bound, the service returns a controlled `409 EXPERIMENT_ANALYSIS_TOO_LARGE`
+rather than silently analyzing only the first N assignments (the codebase's
+assignment-history *list* endpoint is paginated at 200 for a completely
+different, UI-facing reason — that pagination has no bearing on the
+statistical population, which is never truncated).
+
+### No decision, ever
+
+`ExperimentAnalysisResponse` and its nested records have no `winner`/
+`bestVariant`/`recommendedVariant`/`deployVariant` field — by omission, not
+a runtime check (the same discipline `ExperimentOutcome` already
+established in Phase 14A). `confidenceIntervalIncludesZero` is reported as
+a plain boolean; the Angular UI renders one of two fixed, backend-driven
+sentences from it ("the observed data remain compatible with effects in
+either direction..." / "the 95% interval does not include zero") and never
+appends a conclusion. An `ACTIVE` Experiment's analysis always carries
+`activeExperimentWarning` — repeatedly checking an active experiment and
+stopping based on interim results is a well-known way to bias inference;
+the warning is descriptive, not a block — viewing analysis never pauses,
+completes, or otherwise touches the Experiment (`ExperimentAnalysisService`
+is `@Transactional(readOnly = true)` throughout, and calls no repository
+save/update method anywhere).
+
+### Angular integration
+
+`/experiments`' existing detail expansion gains a "Statistical analysis"
+section directly below Phase 14A's "Outcome evidence" (never a separate
+page or route) with an Assigned-observed/Per-protocol-observed toggle
+(defaulting to assigned-observed), side-by-side neutral A/B variant cards
+identical in structure, and — only when `status === 'READY'` — the mean
+difference, 95% CI, p-value, and Hedges' g. No per-side color, trophy icon,
+or "winner"/"best" label exists anywhere in the new template or SCSS.
+
+### Out of scope for this phase
+
+Automatic winner selection or deployment recommendation, automatic
+Experiment completion or early stopping, sample-size stopping rules,
+sequential/group-sequential designs or alpha spending, Bayesian
+winner-probability or multi-armed bandits, automatic traffic reallocation,
+automatic Robot/Persona/prompt/schedule changes, post-hoc metric or
+subgroup fishing, bootstrap confidence intervals (Welch's CI is the one
+inferential method for V1), power analysis, multivariate/3+-variant
+designs, audience/viewer-level experimentation, and any AI/LLM
+participation in statistical analysis or conclusions.
