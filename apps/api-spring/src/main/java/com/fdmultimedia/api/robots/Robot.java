@@ -340,6 +340,12 @@ public class Robot {
         this.updatedAt = now;
     }
 
+    /** Phase 15A: the sole operational mutation performed by a decision application. */
+    public void applyPersona(Persona persona, Instant now) {
+        this.persona = persona;
+        this.updatedAt = now;
+    }
+
     public UUID getId() { return id; }
     public Workspace getWorkspace() { return workspace; }
     public String getName() { return name; }

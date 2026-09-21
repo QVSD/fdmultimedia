@@ -700,3 +700,7 @@ docs/              Architecture, development, and roadmap docs
 # Phase 14C: Experiment decisions
 
 Experiments now accept a positive minimum practical effect (absolute primary-metric units) while DRAFT; it freezes at activation. Legacy experiments keep a null threshold. `/api/experiments/{id}/decision-readiness` evaluates deterministic guardrails for assigned-observed and per-protocol evidence. A human can append a reasoned, idempotent decision through `/decisions`; the evidence snapshot and SHA-256 fingerprint remain historical. Decisions never deploy a variant, stop an experiment, or change a Robot, Persona, schedule, or allocation. See [architecture](docs/ARCHITECTURE.md) and [development](docs/DEVELOPMENT.md).
+
+# Phase 15A: Safe decision application
+
+`DECISION_APPLICATION_V1` adds a separate, explicit application step for PERSONA experiments and SELECT_VARIANT_A/B decisions. A read-only preview resolves the frozen variant Persona identity, checks the live Persona is ACTIVE, shows the exact Robot Persona diff, and fingerprints every relevant precondition. Apply requires that fingerprint plus separate confirmations for ACTIVE experiments, NOT_READY decisions, and older decisions. It changes only `Robot.personaId`; the Experiment link, lifecycle, allocation, schedule, publishing, and other Robot settings remain unchanged. Applications and rollbacks are immutable, idempotent audit rows. Rollback refuses to overwrite a Robot that has diverged. Set `EXPERIMENT_DECISION_APPLICATION_ENABLED=false` to disable mutations while preserving preview/history.

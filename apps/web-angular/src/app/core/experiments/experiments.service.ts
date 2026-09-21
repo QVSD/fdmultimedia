@@ -8,6 +8,8 @@ import {
   DecisionReadiness,
   DecisionRecord,
   DecisionType,
+  DecisionApplicationPreview,
+  DecisionApplicationRecord,
   AnalysisPopulation,
   ExperimentAnalysisResponse,
   ExperimentAssignmentSummary,
@@ -86,5 +88,21 @@ export class ExperimentsService {
       decision, selectedVariantKey: decision === 'SELECT_VARIANT_A' ? 'A' : decision === 'SELECT_VARIANT_B' ? 'B' : null,
       population, rationale, idempotencyKey,
     }, { withCredentials: true });
+  }
+
+  applicationPreview(experimentId: string, decisionId: string, robotId: string): Observable<DecisionApplicationPreview> {
+    return this.http.post<DecisionApplicationPreview>(`${environment.apiBaseUrl}/experiments/${experimentId}/decisions/${decisionId}/application-preview`, { robotId }, { withCredentials: true });
+  }
+  applyDecision(experimentId: string, decisionId: string, request: object): Observable<DecisionApplicationRecord> {
+    return this.http.post<DecisionApplicationRecord>(`${environment.apiBaseUrl}/experiments/${experimentId}/decisions/${decisionId}/applications`, request, { withCredentials: true });
+  }
+  applications(experimentId: string): Observable<DecisionApplicationRecord[]> {
+    return this.http.get<DecisionApplicationRecord[]>(`${environment.apiBaseUrl}/experiments/${experimentId}/decision-applications`, { withCredentials: true });
+  }
+  rollbackPreview(applicationId: string): Observable<DecisionApplicationPreview> {
+    return this.http.post<DecisionApplicationPreview>(`${environment.apiBaseUrl}/experiments/decision-applications/${applicationId}/rollback-preview`, {}, { withCredentials: true });
+  }
+  rollback(applicationId: string, previewFingerprint: string, idempotencyKey: string): Observable<DecisionApplicationRecord> {
+    return this.http.post<DecisionApplicationRecord>(`${environment.apiBaseUrl}/experiments/decision-applications/${applicationId}/rollback`, { previewFingerprint, idempotencyKey }, { withCredentials: true });
   }
 }

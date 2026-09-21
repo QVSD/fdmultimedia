@@ -358,3 +358,7 @@ implementation detail before they are started.
 # Phase 14C: Experiment guardrails and human decisions
 
 The deterministic readiness layer and append-only human decision record preserve the distinction between statistical evidence and operator intent. No auto-winner, auto-stop, traffic allocation, LLM recommendation, or configuration mutation belongs in 14C; these remain outside this phase and must not be inferred from the existence of a recorded decision.
+
+# Phase 15A: Safe PERSONA decision application
+
+An operator can now separately preview and apply a SELECT_VARIANT Persona treatment to one explicitly selected, Experiment-linked Robot. Precondition fingerprints, independent confirmations, immutable audit, idempotency, kill switch, no-op handling, and divergence-safe rollback keep the action narrow. Phase 15B, adaptive allocation, bulk rollout, and autonomous optimization remain unstarted.

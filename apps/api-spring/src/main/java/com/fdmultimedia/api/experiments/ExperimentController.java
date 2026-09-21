@@ -22,14 +22,17 @@ public class ExperimentController {
     private final ExperimentAnalysisService analysisService;
     private final ExperimentDecisionReadinessService readinessService;
     private final ExperimentDecisionService decisionService;
+    private final DecisionApplicationService applicationService;
 
     public ExperimentController(ExperimentService service, ExperimentOutcomeService outcomeService, ExperimentAnalysisService analysisService,
-            ExperimentDecisionReadinessService readinessService, ExperimentDecisionService decisionService) {
+            ExperimentDecisionReadinessService readinessService, ExperimentDecisionService decisionService,
+            DecisionApplicationService applicationService) {
         this.service = service;
         this.outcomeService = outcomeService;
         this.analysisService = analysisService;
         this.readinessService = readinessService;
         this.decisionService = decisionService;
+        this.applicationService = applicationService;
     }
 
     @GetMapping
@@ -114,5 +117,43 @@ public class ExperimentController {
     public ExperimentDecisionRecord decision(@AuthenticationPrincipal AuthenticatedUser principal, @PathVariable UUID experimentId,
             @PathVariable UUID decisionId) {
         return decisionService.detail(principal, experimentId, decisionId);
+    }
+
+    @PostMapping("/{experimentId}/decisions/{decisionId}/application-preview")
+    public DecisionApplicationPreview applicationPreview(@AuthenticationPrincipal AuthenticatedUser principal,
+            @PathVariable UUID experimentId, @PathVariable UUID decisionId,
+            @Valid @RequestBody DecisionApplicationPreviewRequest request) {
+        return applicationService.preview(principal, experimentId, decisionId, request.robotId());
+    }
+
+    @PostMapping("/{experimentId}/decisions/{decisionId}/applications")
+    public DecisionApplicationRecord applyDecision(@AuthenticationPrincipal AuthenticatedUser principal,
+            @PathVariable UUID experimentId, @PathVariable UUID decisionId,
+            @Valid @RequestBody DecisionApplicationRequest request) {
+        return applicationService.apply(principal, experimentId, decisionId, request);
+    }
+
+    @GetMapping("/{experimentId}/decision-applications")
+    public List<DecisionApplicationRecord> applications(@AuthenticationPrincipal AuthenticatedUser principal,
+            @PathVariable UUID experimentId) {
+        return applicationService.history(principal, experimentId);
+    }
+
+    @GetMapping("/decision-applications/{applicationId}")
+    public DecisionApplicationRecord application(@AuthenticationPrincipal AuthenticatedUser principal,
+            @PathVariable UUID applicationId) {
+        return applicationService.detail(principal, applicationId);
+    }
+
+    @PostMapping("/decision-applications/{applicationId}/rollback-preview")
+    public DecisionApplicationPreview rollbackPreview(@AuthenticationPrincipal AuthenticatedUser principal,
+            @PathVariable UUID applicationId) {
+        return applicationService.rollbackPreview(principal, applicationId);
+    }
+
+    @PostMapping("/decision-applications/{applicationId}/rollback")
+    public DecisionApplicationRecord rollback(@AuthenticationPrincipal AuthenticatedUser principal,
+            @PathVariable UUID applicationId, @Valid @RequestBody DecisionRollbackRequest request) {
+        return applicationService.rollback(principal, applicationId, request);
     }
 }

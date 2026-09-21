@@ -10,6 +10,8 @@ import {
   DecisionReadiness,
   DecisionRecord,
   DecisionType,
+  DecisionApplicationPreview,
+  DecisionApplicationRecord,
   ExperimentAnalysisResponse,
   ExperimentAssignmentSummary,
   ExperimentMetric,
@@ -20,6 +22,8 @@ import {
 } from '../../core/experiments/experiment.models';
 import { PersonasService } from '../../core/personas/personas.service';
 import { PersonaSummary } from '../../core/personas/persona.models';
+import { RobotsService } from '../../core/robots/robots.service';
+import { RobotSummary } from '../../core/robots/robot.models';
 
 type LoadState = 'loading' | 'ready' | 'error';
 
@@ -60,6 +64,7 @@ function emptyForm(): ExperimentFormState {
 export class Experiments implements OnInit, OnDestroy {
   protected readonly experiments = signal<ExperimentSummary[]>([]);
   protected readonly personas = signal<PersonaSummary[]>([]);
+  protected readonly robots = signal<RobotSummary[]>([]);
   protected readonly loadState = signal<LoadState>('loading');
 
   protected readonly windows: ExperimentObservationWindow[] = ['H24', 'H72', 'D7'];
@@ -86,6 +91,15 @@ export class Experiments implements OnInit, OnDestroy {
   protected readonly decisionRationale = signal('');
   protected readonly decisionBusy = signal(false);
   protected readonly decisionError = signal<string | null>(null);
+  protected readonly applicationsByExperiment = signal<Record<string, DecisionApplicationRecord[]>>({});
+  protected readonly applicationPreview = signal<DecisionApplicationPreview | null>(null);
+  protected readonly applicationRobotId = signal('');
+  protected readonly rollbackApplicationId = signal<string | null>(null);
+  protected readonly applicationBusy = signal(false);
+  protected readonly applicationError = signal<string | null>(null);
+  protected readonly confirmActive = signal(false);
+  protected readonly confirmNotReady = signal(false);
+  protected readonly confirmOlder = signal(false);
   private pendingDecisionKey: string | null = null;
   protected readonly decisionTypes: DecisionType[] = ['SELECT_VARIANT_A', 'SELECT_VARIANT_B', 'KEEP_CURRENT_CONFIGURATION', 'INCONCLUSIVE', 'CANCEL_EXPERIMENT'];
 
@@ -94,10 +108,12 @@ export class Experiments implements OnInit, OnDestroy {
   constructor(
     private readonly experimentsService: ExperimentsService,
     private readonly personasService: PersonasService,
+    private readonly robotsService: RobotsService,
   ) {}
 
   ngOnInit(): void {
     this.personasService.list().subscribe((personas) => this.personas.set(personas));
+    this.robotsService.list().subscribe((robots) => this.robots.set(robots));
     this.subscription = interval(5000)
       .pipe(
         startWith(0),
@@ -253,6 +269,56 @@ export class Experiments implements OnInit, OnDestroy {
       next: (value) => this.decisionsByExperiment.update((all) => ({ ...all, [experimentId]: value })),
       error: () => this.decisionError.set('Decision history could not be loaded.'),
     });
+    this.experimentsService.applications(experimentId).subscribe({
+      next: (value) => this.applicationsByExperiment.update((all) => ({ ...all, [experimentId]: value })),
+      error: () => this.applicationError.set('Application history could not be loaded.'),
+    });
+  }
+
+  protected linkedRobots(experimentId: string): RobotSummary[] { return this.robots().filter((robot) => robot.experimentId === experimentId); }
+  protected applicationsFor(experimentId: string): DecisionApplicationRecord[] { return this.applicationsByExperiment()[experimentId] ?? []; }
+  protected canRollback(application: DecisionApplicationRecord, experimentId: string): boolean {
+    return application.status === 'APPLIED' && !application.noOp
+      && !this.applicationsFor(experimentId).some((item) => item.rollbackOfApplicationId === application.id);
+  }
+
+  protected previewApplication(experiment: ExperimentSummary, decision: DecisionRecord): void {
+    if (!this.applicationRobotId()) { this.applicationError.set('Select a Robot linked to this experiment.'); return; }
+    this.applicationBusy.set(true); this.applicationError.set(null); this.rollbackApplicationId.set(null);
+    this.experimentsService.applicationPreview(experiment.id, decision.id, this.applicationRobotId())
+      .pipe(finalize(() => this.applicationBusy.set(false))).subscribe({
+        next: (value) => { this.applicationPreview.set(value); this.confirmActive.set(false); this.confirmNotReady.set(false); this.confirmOlder.set(false); },
+        error: () => this.applicationError.set('Application preview could not be loaded.'),
+      });
+  }
+
+  protected applySelectedPersona(preview: DecisionApplicationPreview): void {
+    this.applicationBusy.set(true); this.applicationError.set(null);
+    this.experimentsService.applyDecision(preview.experimentId, preview.decisionId, {
+      robotId: preview.robotId, previewFingerprint: preview.previewFingerprint, idempotencyKey: crypto.randomUUID(),
+      confirmActiveExperiment: this.confirmActive(), confirmNotReadyDecision: this.confirmNotReady(), confirmOlderDecision: this.confirmOlder(),
+    }).pipe(finalize(() => this.applicationBusy.set(false))).subscribe({
+      next: (saved) => { this.applicationsByExperiment.update((all) => ({ ...all, [preview.experimentId]: [saved, ...(all[preview.experimentId] ?? [])] })); this.applicationPreview.set(null); this.robotsService.list().subscribe((items) => this.robots.set(items)); },
+      error: (error) => this.applicationError.set(error?.error?.message?.includes('STALE') ? 'Application preview is stale. Preview again.' : 'Persona application was rejected. Review confirmations and blocking reasons.'),
+    });
+  }
+
+  protected previewRollback(application: DecisionApplicationRecord): void {
+    this.applicationBusy.set(true); this.applicationError.set(null); this.rollbackApplicationId.set(application.id);
+    this.experimentsService.rollbackPreview(application.id).pipe(finalize(() => this.applicationBusy.set(false))).subscribe({
+      next: (value) => this.applicationPreview.set(value), error: () => this.applicationError.set('Rollback preview could not be loaded.'),
+    });
+  }
+
+  protected rollbackPersona(preview: DecisionApplicationPreview): void {
+    const applicationId = this.rollbackApplicationId();
+    if (!applicationId || !confirm('Rollback changes only the Robot Persona if the Robot still matches the state created by this application. Continue?')) return;
+    this.applicationBusy.set(true); this.applicationError.set(null);
+    this.experimentsService.rollback(applicationId, preview.previewFingerprint, crypto.randomUUID())
+      .pipe(finalize(() => this.applicationBusy.set(false))).subscribe({
+        next: (saved) => { this.applicationsByExperiment.update((all) => ({ ...all, [saved.experimentId]: [saved, ...(all[saved.experimentId] ?? [])] })); this.applicationPreview.set(null); this.rollbackApplicationId.set(null); this.robotsService.list().subscribe((items) => this.robots.set(items)); },
+        error: () => this.applicationError.set('Rollback was rejected because the preview is stale or Robot state diverged.'),
+      });
   }
 
   private validThreshold(value: string): boolean {

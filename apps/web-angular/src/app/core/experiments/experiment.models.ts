@@ -211,3 +211,23 @@ export interface DecisionRecord {
   readinessStatusSnapshot: 'NOT_READY' | 'READY_FOR_REVIEW';
   evidenceFingerprint: string;
 }
+
+export interface DecisionApplicationPreview {
+  applicationVersion: string; experimentId: string; experimentName: string; decisionId: string; decisionType: string;
+  decisionReadinessSnapshot: string | null; decisionPopulation: string | null; decisionEvidenceFingerprint: string;
+  selectedVariantKey: ExperimentVariantKey; robotId: string; robotName: string; robotExperimentId: string | null;
+  currentPersona: { id: string | null; name: string | null; status: string };
+  targetPersona: { id: string | null; name: string | null; status: string };
+  noOp: boolean; eligible: boolean; blockingReasons: string[]; warnings: string[];
+  changes: Array<{ field: string; before: { id: string | null; name: string | null }; after: { id: string | null; name: string | null } }>;
+  previewFingerprint: string;
+}
+
+export interface DecisionApplicationRecord {
+  id: string; experimentId: string; experimentNameSnapshot: string; experimentDecisionId: string;
+  robotId: string; robotNameSnapshot: string; applicationVersion: string; status: 'APPLIED' | 'ROLLED_BACK';
+  selectedVariantKey: ExperimentVariantKey; targetPersonaId: string | null; targetPersonaNameSnapshot: string;
+  previousPersonaId: string | null; previousPersonaNameSnapshot: string | null; previewFingerprint: string;
+  decisionEvidenceFingerprint: string; requestedByUserId: string; requestedAt: string; appliedByUserId: string;
+  appliedAt: string; noOp: boolean; rollbackOfApplicationId: string | null;
+}

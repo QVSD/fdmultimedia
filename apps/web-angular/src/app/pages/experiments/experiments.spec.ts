@@ -5,6 +5,9 @@ import { ExperimentsService } from '../../core/experiments/experiments.service';
 import {
   AnalysisStatus,
   DecisionReadiness,
+  DecisionApplicationPreview,
+  DecisionApplicationRecord,
+  DecisionRecord,
   ExperimentAnalysisResponse,
   ExperimentOutcome,
   ExperimentPopulationAnalysis,
@@ -12,6 +15,7 @@ import {
 } from '../../core/experiments/experiment.models';
 import { PersonasService } from '../../core/personas/personas.service';
 import { PersonaSummary } from '../../core/personas/persona.models';
+import { RobotsService } from '../../core/robots/robots.service';
 import { Experiments } from './experiments';
 
 describe('Experiments', () => {
@@ -19,9 +23,10 @@ describe('Experiments', () => {
   let fixture: ComponentFixture<Experiments>;
   let experimentsService: Pick<
     ExperimentsService,
-    'list' | 'create' | 'activate' | 'pause' | 'resume' | 'complete' | 'cancel' | 'assignments' | 'outcomes' | 'analysis' | 'readiness' | 'decisions' | 'recordDecision'
+    'list' | 'create' | 'activate' | 'pause' | 'resume' | 'complete' | 'cancel' | 'assignments' | 'outcomes' | 'analysis' | 'readiness' | 'decisions' | 'recordDecision' | 'applications' | 'applicationPreview' | 'applyDecision' | 'rollbackPreview' | 'rollback'
   >;
   let personasService: Pick<PersonasService, 'list'>;
+  let robotsService: Pick<RobotsService, 'list'>;
 
   beforeEach(async () => {
     experimentsService = {
@@ -38,7 +43,13 @@ describe('Experiments', () => {
       readiness: vi.fn().mockReturnValue(of(null)),
       decisions: vi.fn().mockReturnValue(of([])),
       recordDecision: vi.fn().mockReturnValue(of(null)),
+      applications: vi.fn().mockReturnValue(of([])),
+      applicationPreview: vi.fn().mockReturnValue(of(null)),
+      applyDecision: vi.fn().mockReturnValue(of(null)),
+      rollbackPreview: vi.fn().mockReturnValue(of(null)),
+      rollback: vi.fn().mockReturnValue(of(null)),
     };
+    robotsService = { list: vi.fn().mockReturnValue(of([])) };
     personasService = {
       list: vi.fn().mockReturnValue(of([activePersona('persona-1', 'Friendly'), activePersona('persona-2', 'Bold')])),
     };
@@ -48,6 +59,7 @@ describe('Experiments', () => {
       providers: [
         { provide: ExperimentsService, useValue: experimentsService },
         { provide: PersonasService, useValue: personasService },
+        { provide: RobotsService, useValue: robotsService },
       ],
     }).compileComponents();
 
@@ -64,6 +76,42 @@ describe('Experiments', () => {
     fixture.detectChanges();
 
     expect(fixture.nativeElement.textContent).toContain('No experiments yet.');
+  });
+
+  it('renders safe application preview, independent confirmations, audit, and rollback without deployment wording', () => {
+    const exp = experiment({ status: 'ACTIVE' });
+    const decision = {
+      id: 'decision-1', experimentId: exp.id, idempotencyKey: 'key', decision: 'SELECT_VARIANT_A', selectedVariantKey: 'A',
+      rationale: 'Human choice', decidedByUserId: 'user-1', decidedAt: new Date().toISOString(), guardrailVersion: 'EXPERIMENT_GUARDRAILS_V1',
+      analysisVersion: 'EXPERIMENT_ANALYSIS_V1', experimentStatusSnapshot: 'ACTIVE', primaryMetricSnapshot: 'VIEWS',
+      observationWindowSnapshot: 'H72', minimumPracticalEffectSnapshot: '10', analysisPopulationSnapshot: 'ASSIGNED_OBSERVED',
+      variantASampleSizeSnapshot: 5, variantBSampleSizeSnapshot: 5, absoluteMeanDifferenceSnapshot: '2', confidenceIntervalLowerSnapshot: '-1',
+      confidenceIntervalUpperSnapshot: '5', pValueSnapshot: '0.4', standardizedEffectSizeSnapshot: '0.2', readinessStatusSnapshot: 'NOT_READY',
+      evidenceFingerprint: 'a'.repeat(64),
+    } as DecisionRecord;
+    const preview = {
+      applicationVersion: 'DECISION_APPLICATION_V1', experimentId: exp.id, experimentName: exp.name, decisionId: decision.id,
+      decisionType: decision.decision, decisionReadinessSnapshot: 'NOT_READY', decisionPopulation: 'ASSIGNED_OBSERVED',
+      decisionEvidenceFingerprint: decision.evidenceFingerprint, selectedVariantKey: 'A', robotId: 'robot-1', robotName: 'Publisher',
+      robotExperimentId: exp.id, currentPersona: { id: 'p1', name: 'Current', status: 'ACTIVE' },
+      targetPersona: { id: 'p2', name: 'Selected', status: 'ACTIVE' }, noOp: false, eligible: true, blockingReasons: [],
+      warnings: ['EXPERIMENT_STILL_ACTIVE', 'DECISION_RECORDED_WHILE_NOT_READY', 'NEWER_DECISION_EXISTS'],
+      changes: [], previewFingerprint: 'b'.repeat(64),
+    } as DecisionApplicationPreview;
+    const application = { id: 'application-1', experimentId: exp.id, experimentNameSnapshot: exp.name,
+      experimentDecisionId: decision.id, robotId: 'robot-1', robotNameSnapshot: 'Publisher', applicationVersion: 'DECISION_APPLICATION_V1',
+      status: 'APPLIED', selectedVariantKey: 'A', targetPersonaId: 'p2', targetPersonaNameSnapshot: 'Selected', previousPersonaId: 'p1',
+      previousPersonaNameSnapshot: 'Current', previewFingerprint: preview.previewFingerprint, decisionEvidenceFingerprint: decision.evidenceFingerprint,
+      requestedByUserId: 'user-1', requestedAt: new Date().toISOString(), appliedByUserId: 'user-1', appliedAt: new Date().toISOString(),
+      noOp: false, rollbackOfApplicationId: null } as DecisionApplicationRecord;
+    component['experiments'].set([exp]); component['expandedExperimentId'].set(exp.id);
+    component['decisionsByExperiment'].set({ [exp.id]: [decision] }); component['applicationPreview'].set(preview);
+    component['applicationsByExperiment'].set({ [exp.id]: [application] }); fixture.detectChanges();
+    const text = (fixture.nativeElement.textContent as string).toLowerCase();
+    expect(text).toContain('persona application preview'); expect(text).toContain('current → selected');
+    expect(text).toContain('experiment is still active'); expect(text).toContain('a newer decision exists');
+    expect(text).toContain('apply selected persona'); expect(text).toContain('preview rollback');
+    expect(text).not.toContain('deploy winner'); expect(text).not.toContain('winning persona');
   });
 
   it('requires a practical threshold and sends it in the create request', () => {

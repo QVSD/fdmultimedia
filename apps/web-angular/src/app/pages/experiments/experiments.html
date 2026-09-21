@@ -372,9 +372,54 @@
                           <span>Practical threshold: {{ decision.minimumPracticalEffectSnapshot ?? 'Not configured' }} · {{ decision.guardrailVersion }}</span>
                           <span>Evidence fingerprint: {{ decision.evidenceFingerprint }}</span>
                           <p>{{ decision.rationale }}</p>
+                          @if (decision.decision === 'SELECT_VARIANT_A' || decision.decision === 'SELECT_VARIANT_B') {
+                            <label><span>Robot linked to this experiment</span><select [ngModel]="applicationRobotId()" (ngModelChange)="applicationRobotId.set($event)" [name]="'application-robot-' + decision.id">
+                              <option value="">Select Robot</option>
+                              @for (robot of linkedRobots(experiment.id); track robot.id) { <option [value]="robot.id">{{ robot.name }}</option> }
+                            </select></label>
+                            <button type="button" [disabled]="applicationBusy()" (click)="previewApplication(experiment, decision)">Preview application</button>
+                          }
+                          @if (applicationPreview(); as preview) {
+                            @if (preview.decisionId === decision.id && !rollbackApplicationId()) {
+                              <section class="experiments__notice">
+                                <strong>Persona application preview</strong>
+                                <p>{{ preview.robotName }}: {{ preview.currentPersona.name ?? 'No Persona' }} → {{ preview.targetPersona.name ?? 'No Persona' }}</p>
+                                <p>Decision evidence: {{ preview.decisionEvidenceFingerprint }}</p><p>Preview fingerprint: {{ preview.previewFingerprint }}</p>
+                                @for (reason of preview.blockingReasons; track reason) { <p class="experiments__error">{{ reason }}</p> }
+                                @for (warning of preview.warnings; track warning) { <p class="experiments__warning">{{ warning }}</p> }
+                                @if (preview.warnings.includes('EXPERIMENT_STILL_ACTIVE')) { <label><input type="checkbox" [ngModel]="confirmActive()" (ngModelChange)="confirmActive.set($event)" name="confirm-active"> Experiment is still active.</label> }
+                                @if (preview.warnings.includes('DECISION_RECORDED_WHILE_NOT_READY')) { <label><input type="checkbox" [ngModel]="confirmNotReady()" (ngModelChange)="confirmNotReady.set($event)" name="confirm-not-ready"> Decision was recorded while evidence was not ready.</label> }
+                                @if (preview.warnings.includes('NEWER_DECISION_EXISTS')) { <label><input type="checkbox" [ngModel]="confirmOlder()" (ngModelChange)="confirmOlder.set($event)" name="confirm-older"> A newer decision exists.</label> }
+                                <p>This action changes only the selected Robot's Persona. It does not complete the experiment, detach the Robot, reallocate traffic, or change schedules/publishing.</p>
+                                <button type="button" [disabled]="!preview.eligible || applicationBusy()" (click)="applySelectedPersona(preview)">Apply selected Persona</button>
+                              </section>
+                            }
+                          }
                         </li>
                       }
                     </ul>
+                  }
+                  @if (applicationError()) { <p class="experiments__error" role="alert">{{ applicationError() }}</p> }
+                  <h3>Decision applications</h3>
+                  @if (!applicationsByExperiment()[experiment.id]?.length) { <p>No decision applications recorded.</p> }
+                  @for (application of applicationsFor(experiment.id); track application.id) {
+                    <div class="experiments__variant-detail">
+                      <strong>{{ application.status }} · {{ application.appliedAt | date: 'short' }} @if (application.noOp) { · no operational change }</strong>
+                      <span>{{ application.robotNameSnapshot }}: {{ application.previousPersonaNameSnapshot ?? 'No Persona' }} → {{ application.targetPersonaNameSnapshot }}</span>
+                      <span>Variant {{ application.selectedVariantKey }} · Operator {{ application.appliedByUserId }}</span>
+                      <span>Decision evidence: {{ application.decisionEvidenceFingerprint }}</span><span>Preview: {{ application.previewFingerprint }}</span>
+                      @if (canRollback(application, experiment.id)) { <button type="button" (click)="previewRollback(application)">Preview rollback</button> }
+                    </div>
+                  }
+                  @if (applicationPreview(); as preview) {
+                    @if (rollbackApplicationId()) {
+                      <section class="experiments__notice"><strong>Rollback preview</strong>
+                        <p>{{ preview.robotName }}: {{ preview.currentPersona.name ?? 'No Persona' }} → {{ preview.targetPersona.name ?? 'No Persona' }}</p>
+                        @for (reason of preview.blockingReasons; track reason) { <p class="experiments__error">{{ reason }}</p> }
+                        <p>Preview fingerprint: {{ preview.previewFingerprint }}</p>
+                        <button type="button" [disabled]="!preview.eligible || applicationBusy()" (click)="rollbackPersona(preview)">Rollback Persona change</button>
+                      </section>
+                    }
                   }
 
                   <h3>Assignment history</h3>
