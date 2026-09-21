@@ -104,6 +104,11 @@ public class SocialAccount {
         this.updatedAt = now;
     }
 
+    public void markError(Instant now) {
+        this.status = SocialAccountStatus.ERROR;
+        this.updatedAt = now;
+    }
+
     @PrePersist
     void prePersist() {
         Instant timestamp = createdAt != null ? createdAt : Instant.now();

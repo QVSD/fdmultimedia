@@ -878,6 +878,19 @@
                           @if (instagramEligibilityHint(asset); as hint) {
                             <p class="content__error">{{ hint }}</p>
                           }
+                        } @else if (selectedAccountFor(asset)?.platform === 'TIKTOK') {
+                          @if (tiktokCapabilities()[asset.id]; as capabilities) {
+                            <label><span>Privacy</span><select name="tiktok-privacy-{{ asset.id }}" [ngModel]="tiktokPrivacy()[asset.id] ?? ''" (ngModelChange)="setTikTokPrivacy(asset, $event)">
+                              <option value="" disabled>Select privacy</option>
+                              @for (privacy of capabilities.privacyLevelOptions; track privacy) { <option [value]="privacy">{{ privacy }}</option> }
+                            </select></label>
+                            <label><input type="checkbox" name="disable-comment-{{ asset.id }}" [disabled]="capabilities.commentDisabled" [ngModel]="tiktokDisableComment()[asset.id] ?? capabilities.commentDisabled" (ngModelChange)="setTikTokFlag('comment', asset, $event)" /> Disable comments</label>
+                            <label><input type="checkbox" name="disable-duet-{{ asset.id }}" [disabled]="capabilities.duetDisabled" [ngModel]="tiktokDisableDuet()[asset.id] ?? capabilities.duetDisabled" (ngModelChange)="setTikTokFlag('duet', asset, $event)" /> Disable duet</label>
+                            <label><input type="checkbox" name="disable-stitch-{{ asset.id }}" [disabled]="capabilities.stitchDisabled" [ngModel]="tiktokDisableStitch()[asset.id] ?? capabilities.stitchDisabled" (ngModelChange)="setTikTokFlag('stitch', asset, $event)" /> Disable stitch</label>
+                            <p class="content__muted">Maximum duration: {{ capabilities.maxVideoPostDurationSec }} seconds. Unaudited clients can publish only SELF_ONLY.</p>
+                          } @else {
+                            <button type="button" (click)="setPublishAccount(asset, publishAccountFor(asset))">Load TikTok settings</button>
+                          }
                         }
                       }
                     } @else {

@@ -53,4 +53,10 @@ public class WorkerPublishingController {
         return publishingService.driveInstagramPublication(
                 (WorkerPrincipal) authentication.getPrincipal(), jobId, request.machineIdentifier());
     }
+
+    @PostMapping("/{jobId}/tiktok/drive")
+    public PublicationDriveResponse driveTikTok(Authentication authentication, @PathVariable UUID jobId,
+            @Valid @RequestBody WorkerPublicationAuthorizationRequest request) {
+        return publishingService.driveTikTokPublication((WorkerPrincipal) authentication.getPrincipal(), jobId, request.machineIdentifier());
+    }
 }

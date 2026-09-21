@@ -9,7 +9,7 @@ import { HighlightAnalysisSummary, HighlightCandidateSummary, MediaAssetSummary,
 import { PublishingService } from '../../core/publishing/publishing.service';
 import { PublicationSummary } from '../../core/publishing/publishing.models';
 import { SocialAccountsService } from '../../core/social-accounts/social-accounts.service';
-import { SocialAccountSummary } from '../../core/social-accounts/social-account.models';
+import { SocialAccountSummary, TikTokCreatorInfo } from '../../core/social-accounts/social-account.models';
 import { ContentDraftsService } from '../../core/content-drafts/content-drafts.service';
 import { ContentDraftStatus, ContentDraftSummary, ContentDraftWorkflowStage } from '../../core/content-drafts/content-draft.models';
 import { PublishSchedulesService } from '../../core/publish-schedules/publish-schedules.service';
@@ -56,6 +56,11 @@ export class Content implements OnInit, OnDestroy {
   protected readonly publishCaptions = signal<Record<string, string>>({});
   protected readonly publishBusy = signal<Record<string, boolean>>({});
   protected readonly publishErrors = signal<Record<string, string | null>>({});
+  protected readonly tiktokCapabilities = signal<Record<string, TikTokCreatorInfo | null>>({});
+  protected readonly tiktokPrivacy = signal<Record<string, string>>({});
+  protected readonly tiktokDisableComment = signal<Record<string, boolean>>({});
+  protected readonly tiktokDisableDuet = signal<Record<string, boolean>>({});
+  protected readonly tiktokDisableStitch = signal<Record<string, boolean>>({});
 
   protected readonly activeView = signal<'assets' | 'drafts' | 'schedule' | 'sources'>('assets');
 
@@ -600,6 +605,19 @@ export class Content implements OnInit, OnDestroy {
 
   protected setPublishAccount(asset: MediaAssetSummary, value: string): void {
     this.publishAccountId.update((ids) => ({ ...ids, [asset.id]: value }));
+    const account = this.socialAccounts().find((candidate) => candidate.id === value);
+    if (account?.platform === 'TIKTOK') {
+      this.socialAccountsService.publishingCapabilities(value).subscribe({
+        next: (capabilities) => this.tiktokCapabilities.update((items) => ({ ...items, [asset.id]: capabilities })),
+        error: () => this.publishErrors.update((errors) => ({ ...errors, [asset.id]: 'TikTok creator settings could not be loaded.' })),
+      });
+    }
+  }
+
+  protected setTikTokPrivacy(asset: MediaAssetSummary, value: string): void { this.tiktokPrivacy.update((items) => ({ ...items, [asset.id]: value })); }
+  protected setTikTokFlag(kind: 'comment'|'duet'|'stitch', asset: MediaAssetSummary, value: boolean): void {
+    const target = kind === 'comment' ? this.tiktokDisableComment : kind === 'duet' ? this.tiktokDisableDuet : this.tiktokDisableStitch;
+    target.update((items) => ({ ...items, [asset.id]: value }));
   }
 
   protected publishCaptionFor(asset: MediaAssetSummary): string {
@@ -637,9 +655,23 @@ export class Content implements OnInit, OnDestroy {
       return;
     }
     const caption = this.publishCaptionFor(asset).trim();
+    const account = this.selectedAccountFor(asset);
+    const capabilities = this.tiktokCapabilities()[asset.id];
+    const privacyLevel = this.tiktokPrivacy()[asset.id] ?? '';
+    if (account?.platform === 'TIKTOK' && (!capabilities || !privacyLevel)) {
+      this.publishErrors.update((errors) => ({ ...errors, [asset.id]: 'Load TikTok creator settings and choose privacy before publishing.' }));
+      return;
+    }
+    const tiktokSettings = account?.platform === 'TIKTOK' ? {
+      privacyLevel, disableComment: this.tiktokDisableComment()[asset.id] ?? capabilities!.commentDisabled,
+      disableDuet: this.tiktokDisableDuet()[asset.id] ?? capabilities!.duetDisabled,
+      disableStitch: this.tiktokDisableStitch()[asset.id] ?? capabilities!.stitchDisabled,
+    } : undefined;
     this.publishBusy.update((busy) => ({ ...busy, [asset.id]: true }));
-    this.publishingService
-      .createPublication(asset.id, socialAccountId, caption || null)
+    const request = tiktokSettings
+      ? this.publishingService.createPublication(asset.id, socialAccountId, caption || null, tiktokSettings)
+      : this.publishingService.createPublication(asset.id, socialAccountId, caption || null);
+    request
       .pipe(finalize(() => this.publishBusy.update((busy) => ({ ...busy, [asset.id]: false }))))
       .subscribe({
         next: (publication) => {

@@ -23,6 +23,7 @@ import com.fdmultimedia.api.jobs.JobType;
 import com.fdmultimedia.api.publishing.instagram.InstagramDriveOutcome;
 import com.fdmultimedia.api.publishing.instagram.InstagramPublishingService;
 import com.fdmultimedia.api.publishing.instagram.InstagramProperties;
+import com.fdmultimedia.api.publishing.tiktok.*;
 import com.fdmultimedia.api.users.AppUser;
 import com.fdmultimedia.api.workers.Worker;
 import com.fdmultimedia.api.workers.security.WorkerPrincipal;
@@ -57,6 +58,9 @@ public class PublishingService {
     private final SocialCredentialService credentialService;
     private final InstagramPublishingService instagramPublishingService;
     private final InstagramProperties instagramProperties;
+    private final TikTokPublishingService tiktokPublishingService;
+    private final TikTokPublicationSettingsRepository tiktokSettingsRepository;
+    private final TikTokProperties tiktokProperties;
     private final Clock clock;
     private final PublicationAttributionService attributionService;
     private final PublicationAnalyticsStore analyticsStore;
@@ -73,7 +77,8 @@ public class PublishingService {
             PublishingEligibilityService eligibilityService,
             SocialCredentialService credentialService,
             InstagramPublishingService instagramPublishingService,
-            InstagramProperties instagramProperties,
+            InstagramProperties instagramProperties, TikTokPublishingService tiktokPublishingService,
+            TikTokPublicationSettingsRepository tiktokSettingsRepository, TikTokProperties tiktokProperties,
             Clock clock,
             PublicationAttributionService attributionService,
             PublicationAnalyticsStore analyticsStore) {
@@ -89,6 +94,9 @@ public class PublishingService {
         this.credentialService = credentialService;
         this.instagramPublishingService = instagramPublishingService;
         this.instagramProperties = instagramProperties;
+        this.tiktokPublishingService = tiktokPublishingService;
+        this.tiktokSettingsRepository = tiktokSettingsRepository;
+        this.tiktokProperties = tiktokProperties;
         this.clock = clock;
         this.attributionService = attributionService;
         this.analyticsStore = analyticsStore;
@@ -102,7 +110,7 @@ public class PublishingService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Asset not found"));
         SocialAccount account = socialAccounts.findByWorkspaceAndId(workspace, request.socialAccountId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Social account not found"));
-        return createPublicationInternal(workspace, asset, account, request.caption(), membership.getUser(), null, null, null);
+        return createPublicationInternal(workspace, asset, account, request.caption(), membership.getUser(), null, null, null, request.tiktokSettings());
     }
 
     /**
@@ -113,12 +121,18 @@ public class PublishingService {
      */
     @Transactional
     public PublicationSummary createPublicationForDraft(
-            AuthenticatedUser principal, MediaAsset asset, UUID socialAccountId, String caption, UUID contentDraftId) {
+            AuthenticatedUser principal, MediaAsset asset, UUID socialAccountId, String caption, UUID contentDraftId,
+            TikTokSettingsRequest tiktokSettings) {
         WorkspaceMembership membership = authService.currentMembershipFor(principal);
         Workspace workspace = membership.getWorkspace();
         SocialAccount account = socialAccounts.findByWorkspaceAndId(workspace, socialAccountId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Social account not found"));
-        return createPublicationInternal(workspace, asset, account, caption, membership.getUser(), contentDraftId, null, null);
+        return createPublicationInternal(workspace, asset, account, caption, membership.getUser(), contentDraftId, null, null, tiktokSettings);
+    }
+
+    public PublicationSummary createPublicationForDraft(AuthenticatedUser principal, MediaAsset asset,
+            UUID socialAccountId, String caption, UUID contentDraftId) {
+        return createPublicationForDraft(principal, asset, socialAccountId, caption, contentDraftId, null);
     }
 
     /**
@@ -132,13 +146,19 @@ public class PublishingService {
     public PublicationSummary createPublicationForSchedule(
             Workspace workspace, MediaAsset asset, SocialAccount account, String caption, UUID contentDraftId,
             AppUser createdByUser, UUID scheduleId, UUID appliedSuggestionId) {
+        return createPublicationForSchedule(workspace, asset, account, caption, contentDraftId, createdByUser, scheduleId, appliedSuggestionId, null);
+    }
+
+    public PublicationSummary createPublicationForSchedule(
+            Workspace workspace, MediaAsset asset, SocialAccount account, String caption, UUID contentDraftId,
+            AppUser createdByUser, UUID scheduleId, UUID appliedSuggestionId, TikTokSettingsRequest tiktokSettings) {
         return createPublicationInternal(workspace, asset, account, caption, createdByUser,
-                contentDraftId, scheduleId, appliedSuggestionId);
+                contentDraftId, scheduleId, appliedSuggestionId, tiktokSettings);
     }
 
     private PublicationSummary createPublicationInternal(
             Workspace workspace, MediaAsset asset, SocialAccount account, String rawCaption, AppUser user,
-            UUID contentDraftId, UUID scheduleId, UUID appliedSuggestionId) {
+            UUID contentDraftId, UUID scheduleId, UUID appliedSuggestionId, TikTokSettingsRequest tiktokSettings) {
         eligibilityService.validateAssetEligibility(asset, account.getPlatform());
         validateAccountEligibility(account);
         String caption = validateCaption(rawCaption);
@@ -146,6 +166,12 @@ public class PublishingService {
         Instant now = Instant.now(clock);
         Publication publication = publications.save(new Publication(
                 workspace, asset, account, caption, user, contentDraftId, now));
+        if (account.getPlatform() == SocialPlatform.TIKTOK) {
+            if (tiktokSettings == null) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "TikTok publishing settings must be selected explicitly");
+            }
+            tiktokSettingsRepository.save(new TikTokPublicationSettings(publication, tiktokSettings, now));
+        }
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("publicationId", publication.getId().toString());
         payload.put("assetId", asset.getId().toString());
@@ -270,6 +296,25 @@ public class PublishingService {
                         outcome.errorCode(), outcome.errorMessage(), outcome.terminal(), now);
                 yield new PublicationDriveResponse("FAILED");
             }
+        };
+    }
+
+    @Transactional
+    public PublicationDriveResponse driveTikTokPublication(WorkerPrincipal principal, UUID jobId, String machineIdentifier) {
+        Worker worker = jobService.requireOnlineWorker(principal, machineIdentifier);
+        Job job = requirePublishJob(worker, jobId);
+        Publication publication = requirePublicationForJob(job);
+        validateJobReferencesPublication(job, publication);
+        if (publication.getSocialAccount().getPlatform() != SocialPlatform.TIKTOK) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Job is not a TikTok publication");
+        }
+        if (publication.getStatus() != PublicationStatus.PUBLISHING) publication.markPublishing(Instant.now(clock));
+        InstagramDriveOutcome outcome = tiktokPublishingService.drive(publication);
+        Instant now = Instant.now(clock);
+        return switch (outcome.status()) {
+            case IN_PROGRESS -> new PublicationDriveResponse("IN_PROGRESS");
+            case PUBLISHED -> { completePublicationInternal(job, worker, publication, job.getAttemptCount(), job.getStartedAt(), outcome.providerRequestId(), outcome.providerPublicationId(), now); yield new PublicationDriveResponse("PUBLISHED"); }
+            case FAILED -> { failPublicationInternal(job, worker, publication, job.getAttemptCount(), job.getStartedAt(), outcome.errorCode(), outcome.errorMessage(), outcome.terminal(), now); yield new PublicationDriveResponse("FAILED"); }
         };
     }
 
@@ -409,6 +454,12 @@ public class PublishingService {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Social account is not active");
         }
         if (account.getPlatform() == SocialPlatform.TEST) {
+            return;
+        }
+        if (account.getPlatform() == SocialPlatform.TIKTOK) {
+            if (!tiktokProperties.isConfigured()) throw new ResponseStatusException(HttpStatus.CONFLICT, "TikTok integration is not configured");
+            SocialCredentialMetadata credential = credentialService.metadataFor(account);
+            if (!credential.present()) throw new ResponseStatusException(HttpStatus.CONFLICT, "TikTok account has no stored credential; reconnect it");
             return;
         }
         if (account.getPlatform() != SocialPlatform.INSTAGRAM) {

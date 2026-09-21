@@ -75,10 +75,15 @@ public class PublishScheduleDispatchService {
         }
         PublicationSummary publication;
         try {
-            publication = publishingService.createPublicationForSchedule(
-                    schedule.getWorkspace(), media, account, schedule.getCaptionSnapshot(),
-                    schedule.getContentDraft().getId(), schedule.getCreatedByUser(),
-                    schedule.getId(), schedule.getAppliedContentSuggestionIdSnapshot());
+            publication = schedule.getTikTokSettings() == null
+                    ? publishingService.createPublicationForSchedule(
+                            schedule.getWorkspace(), media, account, schedule.getCaptionSnapshot(),
+                            schedule.getContentDraft().getId(), schedule.getCreatedByUser(),
+                            schedule.getId(), schedule.getAppliedContentSuggestionIdSnapshot())
+                    : publishingService.createPublicationForSchedule(
+                            schedule.getWorkspace(), media, account, schedule.getCaptionSnapshot(),
+                            schedule.getContentDraft().getId(), schedule.getCreatedByUser(),
+                            schedule.getId(), schedule.getAppliedContentSuggestionIdSnapshot(), schedule.getTikTokSettings());
         } catch (ResponseStatusException ex) {
             fail(schedule, "PROVIDER_UNAVAILABLE", ex.getReason(), now);
             return;

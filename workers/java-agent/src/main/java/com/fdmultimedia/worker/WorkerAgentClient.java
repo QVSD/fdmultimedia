@@ -362,6 +362,12 @@ final class WorkerAgentClient {
                 new TypeReference<InstagramDriveStatus>() {});
     }
 
+    InstagramDriveStatus driveTikTokPublication(UUID jobId, String machineIdentifier)
+            throws IOException, InterruptedException {
+        return send("/worker-agent/publications/" + jobId + "/tiktok/drive",
+                Map.of("machineIdentifier", machineIdentifier), new TypeReference<InstagramDriveStatus>() {});
+    }
+
     SocialCopyAuthorization authorizeSocialCopyGeneration(UUID jobId, String machineIdentifier)
             throws IOException, InterruptedException {
         return send(

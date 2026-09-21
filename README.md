@@ -704,3 +704,7 @@ Experiments now accept a positive minimum practical effect (absolute primary-met
 # Phase 15A: Safe decision application
 
 `DECISION_APPLICATION_V1` adds a separate, explicit application step for PERSONA experiments and SELECT_VARIANT_A/B decisions. A read-only preview resolves the frozen variant Persona identity, checks the live Persona is ACTIVE, shows the exact Robot Persona diff, and fingerprints every relevant precondition. Apply requires that fingerprint plus separate confirmations for ACTIVE experiments, NOT_READY decisions, and older decisions. It changes only `Robot.personaId`; the Experiment link, lifecycle, allocation, schedule, publishing, and other Robot settings remain unchanged. Applications and rollbacks are immutable, idempotent audit rows. Rollback refuses to overwrite a Robot that has diverged. Set `EXPERIMENT_DECISION_APPLICATION_ENABLED=false` to disable mutations while preserving preview/history.
+
+# Phase 16A: TikTok official publishing
+
+TikTok uses Login Kit OAuth and the official Direct Post API. Creator Info supplies explicit privacy/interaction choices; access and rotating refresh tokens remain AES-GCM encrypted on the backend. Private media uses bounded `FILE_UPLOAD` chunks and durable `publish_id` reconciliation. Unaudited clients remain `SELF_ONLY`; analytics, draft/photo upload, AUTO_SCHEDULE, and browser automation are out of scope.

@@ -134,8 +134,11 @@ public class ContentDraftService {
         if (draft.getStatus() != ContentDraftStatus.READY && draft.getStatus() != ContentDraftStatus.PUBLISHED) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Draft is not ready to publish");
         }
-        PublicationSummary publication = publishingService.createPublicationForDraft(
-                principal, draft.getMediaAsset(), request.socialAccountId(), draft.getCaption(), draft.getId());
+        PublicationSummary publication = request.tiktokSettings() == null
+                ? publishingService.createPublicationForDraft(
+                        principal, draft.getMediaAsset(), request.socialAccountId(), draft.getCaption(), draft.getId())
+                : publishingService.createPublicationForDraft(
+                        principal, draft.getMediaAsset(), request.socialAccountId(), draft.getCaption(), draft.getId(), request.tiktokSettings());
         draft.applyPublishingDisplayState(ContentDraftStatus.PUBLISHING, null, Instant.now(clock));
         ContentDraftSummary summary = toSummary(draft, workspace);
         return summary.publications().stream().anyMatch(p -> p.id().equals(publication.id()))

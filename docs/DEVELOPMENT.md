@@ -169,6 +169,19 @@ exercise the Instagram code paths locally without real Meta credentials:
 - Without those prerequisites, leave `INSTAGRAM_ENABLED=false` (the
   default) — the app starts normally, the Settings page shows "Instagram is
   not configured on this server yet", and TEST publishing is unaffected.
+- **TikTok** follows the same pattern via `TikTokApiClientTest` and friends
+  (local fake HTTP server, no live credentials needed for the automated
+  suite). A real end-to-end TikTok publish additionally requires: a TikTok
+  for Developers app with the Content Posting API product and `video.publish`
+  scope approved; a real creator account that has authorized that app; a
+  publicly reachable HTTPS `TIKTOK_REDIRECT_URI`; and the same
+  `SOCIAL_CREDENTIAL_ENCRYPTION_KEY` used for Instagram. Set
+  `TIKTOK_ENABLED=true` plus `TIKTOK_CLIENT_KEY`/`TIKTOK_CLIENT_SECRET` from
+  `.env.example`, restart the stack, and the Settings page will offer
+  "Connect TikTok". Until your app passes TikTok's audit, every post it makes
+  is restricted to private (`SELF_ONLY`) visibility — this is a TikTok
+  platform restriction, not something this app can or should bypass. Without
+  those prerequisites, leave `TIKTOK_ENABLED=false` (the default).
 
 ## Testing scheduled publishing locally
 

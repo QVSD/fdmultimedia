@@ -85,6 +85,12 @@ app:
       oauth-redirect-uri: ${META_OAUTH_REDIRECT_URI:}
       public-base-url: ${META_PUBLIC_BASE_URL:}
       graph-api-version: ${META_GRAPH_API_VERSION:v25.0}
+    tiktok:
+      enabled: ${TIKTOK_ENABLED:false}
+      client-key: ${TIKTOK_CLIENT_KEY:}
+      client-secret: ${TIKTOK_CLIENT_SECRET:}
+      oauth-redirect-uri: ${TIKTOK_REDIRECT_URI:}
+      chunk-bytes: ${TIKTOK_UPLOAD_CHUNK_BYTES:33554432}
     schedule:
       enabled: ${PUBLISH_SCHEDULER_ENABLED:true}
       min-lead: ${PUBLISH_SCHEDULE_MIN_LEAD_SECONDS:30}s

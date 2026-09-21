@@ -3,6 +3,9 @@ package com.fdmultimedia.api.accounts;
 import com.fdmultimedia.api.auth.security.AuthenticatedUser;
 import com.fdmultimedia.api.publishing.instagram.InstagramAccountConnectionService;
 import com.fdmultimedia.api.publishing.instagram.InstagramProperties;
+import com.fdmultimedia.api.publishing.tiktok.TikTokAccountConnectionService;
+import com.fdmultimedia.api.publishing.tiktok.TikTokModels;
+import com.fdmultimedia.api.publishing.tiktok.TikTokProperties;
 import jakarta.validation.Valid;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -23,14 +26,19 @@ public class SocialAccountController {
     private final SocialAccountService socialAccountService;
     private final InstagramAccountConnectionService instagramAccountConnectionService;
     private final InstagramProperties instagramProperties;
+    private final TikTokAccountConnectionService tiktokConnectionService;
+    private final TikTokProperties tiktokProperties;
 
     public SocialAccountController(
             SocialAccountService socialAccountService,
             InstagramAccountConnectionService instagramAccountConnectionService,
-            InstagramProperties instagramProperties) {
+            InstagramProperties instagramProperties, TikTokAccountConnectionService tiktokConnectionService,
+            TikTokProperties tiktokProperties) {
         this.socialAccountService = socialAccountService;
         this.instagramAccountConnectionService = instagramAccountConnectionService;
         this.instagramProperties = instagramProperties;
+        this.tiktokConnectionService = tiktokConnectionService;
+        this.tiktokProperties = tiktokProperties;
     }
 
     @PostMapping
@@ -56,7 +64,16 @@ public class SocialAccountController {
     public SocialAccountSummary disconnect(
             @AuthenticationPrincipal AuthenticatedUser principal,
             @PathVariable UUID accountId) {
-        return instagramAccountConnectionService.disconnect(principal, accountId);
+        SocialAccountSummary account = socialAccountService.getFor(principal, accountId);
+        return account.platform() == SocialPlatform.TIKTOK
+                ? tiktokConnectionService.disconnect(principal, accountId)
+                : instagramAccountConnectionService.disconnect(principal, accountId);
+    }
+
+    @PostMapping("/{accountId}/publishing-capabilities")
+    public TikTokModels.CreatorInfo capabilities(@AuthenticationPrincipal AuthenticatedUser principal,
+            @PathVariable UUID accountId) {
+        return tiktokConnectionService.capabilities(principal, accountId);
     }
 
     /** Lets the frontend show/hide "Connect Instagram" without duplicating server config logic. */
@@ -65,6 +82,7 @@ public class SocialAccountController {
         Map<String, Boolean> availability = new LinkedHashMap<>();
         availability.put("TEST", true);
         availability.put("INSTAGRAM", instagramProperties.isConfigured());
+        availability.put("TIKTOK", tiktokProperties.isConfigured());
         return availability;
     }
 }

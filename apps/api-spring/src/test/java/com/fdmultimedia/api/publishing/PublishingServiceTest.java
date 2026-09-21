@@ -32,6 +32,9 @@ import com.fdmultimedia.api.jobs.JobSummary;
 import com.fdmultimedia.api.jobs.JobType;
 import com.fdmultimedia.api.publishing.instagram.InstagramProperties;
 import com.fdmultimedia.api.publishing.instagram.InstagramPublishingService;
+import com.fdmultimedia.api.publishing.tiktok.TikTokProperties;
+import com.fdmultimedia.api.publishing.tiktok.TikTokPublicationSettingsRepository;
+import com.fdmultimedia.api.publishing.tiktok.TikTokPublishingService;
 import com.fdmultimedia.api.users.AppUser;
 import com.fdmultimedia.api.workers.Worker;
 import com.fdmultimedia.api.workers.WorkerCredential;
@@ -70,11 +73,15 @@ class PublishingServiceTest {
     private final SocialCredentialService credentialService = mock(SocialCredentialService.class);
     private final InstagramPublishingService instagramPublishingService = mock(InstagramPublishingService.class);
     private final InstagramProperties instagramProperties = new InstagramProperties();
+    private final TikTokPublishingService tiktokPublishingService = mock(TikTokPublishingService.class);
+    private final TikTokPublicationSettingsRepository tiktokSettings = mock(TikTokPublicationSettingsRepository.class);
+    private final TikTokProperties tiktokProperties = new TikTokProperties();
     private final PublicationAttributionService attributionService = mock(PublicationAttributionService.class);
     private final PublicationAnalyticsStore analyticsStore = mock(PublicationAnalyticsStore.class);
     private final PublishingService service = new PublishingService(
             authService, assets, socialAccounts, publications, attempts, jobService, storage, properties,
             eligibilityService, credentialService, instagramPublishingService, instagramProperties,
+            tiktokPublishingService, tiktokSettings, tiktokProperties,
             Clock.fixed(NOW, ZoneOffset.UTC), attributionService, analyticsStore);
 
     private Workspace workspace;

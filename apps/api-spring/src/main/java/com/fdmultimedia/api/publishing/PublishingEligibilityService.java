@@ -40,6 +40,15 @@ public class PublishingEligibilityService {
         }
         if (platform == SocialPlatform.INSTAGRAM) {
             validateInstagramEligibility(asset);
+        } else if (platform == SocialPlatform.TIKTOK) {
+            String container = asset.getContainerFormat();
+            String codec = asset.getVideoCodec();
+            if (container != null && java.util.stream.Stream.of("mp4", "mov", "webm").noneMatch(v -> container.toLowerCase(java.util.Locale.ROOT).contains(v))) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "TikTok requires MP4, MOV, or WebM video");
+            }
+            if (codec != null && java.util.stream.Stream.of("h264", "hevc", "h265", "vp8", "vp9").noneMatch(v -> codec.toLowerCase(java.util.Locale.ROOT).contains(v))) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "TikTok video codec is not supported");
+            }
         }
     }
 

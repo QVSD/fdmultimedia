@@ -40,6 +40,9 @@ public class PublicationProviderState {
     @Column(name = "provider_media_id")
     private String providerMediaId;
 
+    @Column(name = "provider_upload_url")
+    private String providerUploadUrl;
+
     @Column(nullable = false)
     private String state;
 
@@ -82,11 +85,16 @@ public class PublicationProviderState {
         this.updatedAt = now;
     }
 
+    public void prepareUpload(String uploadUrl, Instant now) { this.providerUploadUrl = uploadUrl; this.state = "UPLOAD_PENDING"; this.updatedAt = now; }
+    public void markProcessing(Instant now) { this.providerUploadUrl = null; this.state = "PROCESSING"; this.updatedAt = now; }
+    public void markOutcomeUnknown(Instant now) { this.providerUploadUrl = null; this.state = "OUTCOME_UNKNOWN"; this.updatedAt = now; }
+
     public UUID getId() { return id; }
     public Publication getPublication() { return publication; }
     public String getProvider() { return provider; }
     public String getProviderContainerId() { return providerContainerId; }
     public String getProviderMediaId() { return providerMediaId; }
+    public String getProviderUploadUrl() { return providerUploadUrl; }
     public String getState() { return state; }
     public Instant getCreatedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }

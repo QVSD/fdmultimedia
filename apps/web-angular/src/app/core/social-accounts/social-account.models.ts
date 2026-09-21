@@ -14,4 +14,15 @@ export interface SocialAccountSummary {
 export interface SocialPlatformAvailability {
   TEST: boolean;
   INSTAGRAM: boolean;
+  TIKTOK: boolean;
+}
+
+export interface TikTokCreatorInfo {
+  username: string;
+  nickname: string;
+  privacyLevelOptions: string[];
+  commentDisabled: boolean;
+  duetDisabled: boolean;
+  stitchDisabled: boolean;
+  maxVideoPostDurationSec: number;
 }

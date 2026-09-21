@@ -17,6 +17,7 @@ import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
 import java.time.Instant;
 import java.util.UUID;
+import com.fdmultimedia.api.publishing.tiktok.TikTokSettingsRequest;
 
 /**
  * "Publish this ContentDraft to this SocialAccount at this instant." Not a
@@ -54,6 +55,10 @@ public class PublishSchedule {
 
     @Column(name = "applied_content_suggestion_id_snapshot")
     private UUID appliedContentSuggestionIdSnapshot;
+    @Column(name="tiktok_privacy_level") private String tiktokPrivacyLevel;
+    @Column(name="tiktok_disable_comment") private Boolean tiktokDisableComment;
+    @Column(name="tiktok_disable_duet") private Boolean tiktokDisableDuet;
+    @Column(name="tiktok_disable_stitch") private Boolean tiktokDisableStitch;
 
     @Column(name = "scheduled_for", nullable = false)
     private Instant scheduledFor;
@@ -99,6 +104,11 @@ public class PublishSchedule {
             Instant scheduledFor,
             AppUser createdByUser,
             Instant now) {
+        this(workspace, contentDraft, mediaAsset, socialAccount, captionSnapshot, scheduledFor, createdByUser, now, null);
+    }
+
+    public PublishSchedule(Workspace workspace, ContentDraft contentDraft, MediaAsset mediaAsset, SocialAccount socialAccount,
+            String captionSnapshot, Instant scheduledFor, AppUser createdByUser, Instant now, TikTokSettingsRequest tiktok) {
         this.id = UUID.randomUUID();
         this.workspace = workspace;
         this.contentDraft = contentDraft;
@@ -112,6 +122,7 @@ public class PublishSchedule {
         this.createdByUser = createdByUser;
         this.createdAt = now;
         this.updatedAt = now;
+        if (tiktok != null) { tiktokPrivacyLevel=tiktok.privacyLevel(); tiktokDisableComment=tiktok.disableComment(); tiktokDisableDuet=tiktok.disableDuet(); tiktokDisableStitch=tiktok.disableStitch(); }
     }
 
     @PrePersist
@@ -186,4 +197,5 @@ public class PublishSchedule {
     public Instant getCancelledAt() { return cancelledAt; }
     public String getFailureCode() { return failureCode; }
     public String getFailureMessage() { return failureMessage; }
+    public TikTokSettingsRequest getTikTokSettings() { return tiktokPrivacyLevel == null ? null : new TikTokSettingsRequest(tiktokPrivacyLevel, Boolean.TRUE.equals(tiktokDisableComment), Boolean.TRUE.equals(tiktokDisableDuet), Boolean.TRUE.equals(tiktokDisableStitch)); }
 }

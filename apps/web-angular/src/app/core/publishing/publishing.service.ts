@@ -9,10 +9,11 @@ import { PublicationSummary } from './publishing.models';
 export class PublishingService {
   constructor(private readonly http: HttpClient) {}
 
-  createPublication(assetId: string, socialAccountId: string, caption: string | null): Observable<PublicationSummary> {
+  createPublication(assetId: string, socialAccountId: string, caption: string | null,
+    tiktokSettings?: { privacyLevel: string; disableComment: boolean; disableDuet: boolean; disableStitch: boolean }): Observable<PublicationSummary> {
     return this.http.post<PublicationSummary>(
       `${environment.apiBaseUrl}/assets/${assetId}/publications`,
-      { socialAccountId, caption },
+      { socialAccountId, caption, tiktokSettings: tiktokSettings ?? null },
       { withCredentials: true },
     );
   }

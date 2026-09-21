@@ -39,6 +39,38 @@ public class SocialCredentialService {
                         () -> credentials.save(new SocialAccountCredential(account, credentialType, ciphertext, tokenExpiresAt, scopes, now)));
     }
 
+    @Transactional
+    public void storeOAuthTokens(SocialAccount account, String credentialType, String accessToken, String refreshToken,
+            Instant accessExpiresAt, Instant refreshExpiresAt, String scopes) {
+        Instant now = Instant.now(clock);
+        String encryptedAccess = encryptionService.encrypt(accessToken);
+        String encryptedRefresh = encryptionService.encrypt(refreshToken);
+        credentials.findBySocialAccount(account).ifPresentOrElse(existing ->
+                existing.replaceOAuthTokens(encryptedAccess, encryptedRefresh, accessExpiresAt, refreshExpiresAt, scopes, now),
+                () -> {
+                    SocialAccountCredential created = new SocialAccountCredential(
+                            account, credentialType, encryptedAccess, accessExpiresAt, scopes, now);
+                    created.replaceOAuthTokens(encryptedAccess, encryptedRefresh, accessExpiresAt, refreshExpiresAt, scopes, now);
+                    credentials.save(created);
+                });
+    }
+
+    @Transactional(readOnly = true)
+    public OAuthCredential decryptOAuthCredential(SocialAccount account) {
+        SocialAccountCredential credential = credentials.findBySocialAccount(account)
+                .orElseThrow(() -> new CredentialUnavailableException("No credential stored for this account"));
+        if (credential.getEncryptedRefreshToken() == null) {
+            throw new CredentialUnavailableException("Refresh credential is unavailable");
+        }
+        return new OAuthCredential(
+                encryptionService.decrypt(credential.getEncryptedAccessToken()),
+                encryptionService.decrypt(credential.getEncryptedRefreshToken()),
+                credential.getTokenExpiresAt(), credential.getRefreshTokenExpiresAt(), credential.getScopes());
+    }
+
+    public record OAuthCredential(String accessToken, String refreshToken, Instant accessExpiresAt,
+            Instant refreshExpiresAt, String scopes) {}
+
     @Transactional(readOnly = true)
     public String decryptAccessToken(SocialAccount account) {
         SocialAccountCredential credential = credentials.findBySocialAccount(account)

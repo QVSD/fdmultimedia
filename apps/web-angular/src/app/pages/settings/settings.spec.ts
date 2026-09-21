@@ -222,6 +222,6 @@ describe('Settings', () => {
   }
 
   function availability(instagram: boolean): SocialPlatformAvailability {
-    return { TEST: true, INSTAGRAM: instagram };
+    return { TEST: true, INSTAGRAM: instagram, TIKTOK: false };
   }
 });

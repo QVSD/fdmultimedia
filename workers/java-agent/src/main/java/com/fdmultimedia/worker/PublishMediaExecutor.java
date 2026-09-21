@@ -56,12 +56,14 @@ final class PublishMediaExecutor {
 
     private void driveUntilTerminal(WorkerAgentClient client, ClaimedJob job, String machineIdentifier, String platform)
             throws IOException, InterruptedException, ImportFailureException {
-        if (!"INSTAGRAM".equals(platform)) {
+        if (!"INSTAGRAM".equals(platform) && !"TIKTOK".equals(platform)) {
             throw new ImportFailureException("PUBLISH_UNSUPPORTED_PLATFORM", "Worker cannot drive platform " + platform, true);
         }
         Instant deadline = Instant.now().plus(INSTAGRAM_DRIVE_MAX_DURATION);
         while (true) {
-            InstagramDriveStatus status = client.driveInstagramPublication(job.jobId(), machineIdentifier);
+            InstagramDriveStatus status = "TIKTOK".equals(platform)
+                    ? client.driveTikTokPublication(job.jobId(), machineIdentifier)
+                    : client.driveInstagramPublication(job.jobId(), machineIdentifier);
             if (!"IN_PROGRESS".equals(status.status())) {
                 // PUBLISHED or FAILED: the backend has already finalized the Job
                 // and Publication as part of that call. Nothing left to report.

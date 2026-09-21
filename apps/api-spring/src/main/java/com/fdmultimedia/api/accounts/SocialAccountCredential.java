@@ -36,8 +36,14 @@ public class SocialAccountCredential {
     @Column(name = "encrypted_access_token", nullable = false)
     private String encryptedAccessToken;
 
+    @Column(name = "encrypted_refresh_token")
+    private String encryptedRefreshToken;
+
     @Column(name = "token_expires_at")
     private Instant tokenExpiresAt;
+
+    @Column(name = "refresh_token_expires_at")
+    private Instant refreshTokenExpiresAt;
 
     @Column
     private String scopes;
@@ -94,6 +100,13 @@ public class SocialAccountCredential {
         this.updatedAt = now;
     }
 
+    public void replaceOAuthTokens(String encryptedAccessToken, String encryptedRefreshToken,
+            Instant tokenExpiresAt, Instant refreshTokenExpiresAt, String scopes, Instant now) {
+        replace(encryptedAccessToken, tokenExpiresAt, scopes, now);
+        this.encryptedRefreshToken = encryptedRefreshToken;
+        this.refreshTokenExpiresAt = refreshTokenExpiresAt;
+    }
+
     public boolean isExpired(Instant now) {
         return tokenExpiresAt != null && !tokenExpiresAt.isAfter(now);
     }
@@ -102,7 +115,9 @@ public class SocialAccountCredential {
     public SocialAccount getSocialAccount() { return socialAccount; }
     public String getCredentialType() { return credentialType; }
     public String getEncryptedAccessToken() { return encryptedAccessToken; }
+    public String getEncryptedRefreshToken() { return encryptedRefreshToken; }
     public Instant getTokenExpiresAt() { return tokenExpiresAt; }
+    public Instant getRefreshTokenExpiresAt() { return refreshTokenExpiresAt; }
     public String getScopes() { return scopes; }
     public Instant getLastValidatedAt() { return lastValidatedAt; }
     public Instant getCreatedAt() { return createdAt; }

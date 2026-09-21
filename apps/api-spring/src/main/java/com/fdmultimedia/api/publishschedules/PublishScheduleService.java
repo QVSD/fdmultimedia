@@ -66,11 +66,14 @@ public class PublishScheduleService {
         }
         MediaAsset media = draft.getMediaAsset();
         eligibilityService.validateAssetEligibility(media, account.getPlatform());
+        if (account.getPlatform() == com.fdmultimedia.api.accounts.SocialPlatform.TIKTOK && request.tiktokSettings() == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "TikTok publishing settings must be selected explicitly");
+        }
         Instant scheduledFor = validateScheduledFor(request.scheduledFor());
 
         Instant now = Instant.now(clock);
         PublishSchedule schedule = new PublishSchedule(
-                workspace, draft, media, account, draft.getCaption(), scheduledFor, membership.getUser(), now);
+                workspace, draft, media, account, draft.getCaption(), scheduledFor, membership.getUser(), now, request.tiktokSettings());
         return toSummary(schedules.save(schedule));
     }
 

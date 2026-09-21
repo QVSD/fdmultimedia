@@ -18,6 +18,7 @@ const CALLBACK_REASONS: Record<string, string> = {
   invalid_state: 'The Instagram connection request expired or was already used. Please try again.',
   missing_code: 'Instagram did not return an authorization code. Please try again.',
   exchange_failed: 'Instagram could not be connected right now. Please try again in a moment.',
+  missing_scope: 'TikTok did not grant video publishing permission. Reconnect and approve video.publish.',
 };
 
 @Component({
@@ -34,6 +35,7 @@ export class Settings implements OnInit {
   protected readonly createError = signal<string | null>(null);
   protected readonly platformAvailability = signal<SocialPlatformAvailability | null>(null);
   protected readonly connectingInstagram = signal(false);
+  protected readonly connectingTikTok = signal(false);
   protected readonly connectError = signal<string | null>(null);
   protected readonly disconnecting = signal<Record<string, boolean>>({});
   protected readonly disconnectErrors = signal<Record<string, string | null>>({});
@@ -49,7 +51,7 @@ export class Settings implements OnInit {
     this.refresh();
     this.socialAccountsService.platforms().subscribe({
       next: (availability) => this.platformAvailability.set(availability),
-      error: () => this.platformAvailability.set({ TEST: true, INSTAGRAM: false }),
+      error: () => this.platformAvailability.set({ TEST: true, INSTAGRAM: false, TIKTOK: false }),
     });
     this.readCallbackBanner();
   }
@@ -57,6 +59,8 @@ export class Settings implements OnInit {
   protected instagramAvailable(): boolean {
     return this.platformAvailability()?.INSTAGRAM ?? false;
   }
+
+  protected tiktokAvailable(): boolean { return this.platformAvailability()?.TIKTOK ?? false; }
 
   protected createAccount(): void {
     this.createError.set(null);
@@ -90,6 +94,14 @@ export class Settings implements OnInit {
         },
         error: () => this.connectError.set('Instagram could not be connected right now.'),
       });
+  }
+
+  protected connectTikTok(): void {
+    this.connectError.set(null); this.connectingTikTok.set(true);
+    this.socialAccountsService.connectTikTok().pipe(finalize(() => this.connectingTikTok.set(false))).subscribe({
+      next: (response) => { window.location.href = response.authorizationUrl; },
+      error: () => this.connectError.set('TikTok could not be connected right now.'),
+    });
   }
 
   protected disconnect(account: SocialAccountSummary): void {
@@ -130,15 +142,17 @@ export class Settings implements OnInit {
 
   private readCallbackBanner(): void {
     const params = this.route.snapshot.queryParamMap;
-    const instagram = params.get('instagram');
-    if (!instagram) {
+    const platform = params.get('instagram') ? 'instagram' : params.get('tiktok') ? 'tiktok' : null;
+    const outcome = platform ? params.get(platform) : null;
+    if (!platform || !outcome) {
       return;
     }
-    if (instagram === 'connected') {
-      this.callbackBanner.set({ kind: 'success', message: 'Instagram account connected successfully.' });
-    } else if (instagram === 'error') {
+    const label = platform === 'tiktok' ? 'TikTok' : 'Instagram';
+    if (outcome === 'connected') {
+      this.callbackBanner.set({ kind: 'success', message: `${label} account connected successfully.` });
+    } else if (outcome === 'error') {
       const reason = params.get('reason') ?? '';
-      this.callbackBanner.set({ kind: 'error', message: CALLBACK_REASONS[reason] ?? 'Instagram could not be connected.' });
+      this.callbackBanner.set({ kind: 'error', message: CALLBACK_REASONS[reason] ?? `${label} could not be connected.` });
     }
     this.router.navigate([], { queryParams: {}, replaceUrl: true });
   }

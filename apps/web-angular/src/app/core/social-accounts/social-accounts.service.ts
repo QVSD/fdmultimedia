@@ -3,7 +3,7 @@ import { Injectable } from '@angular/core';
 import { Observable } from 'rxjs';
 
 import { environment } from '../../../environments/environment';
-import { SocialAccountSummary, SocialPlatformAvailability } from './social-account.models';
+import { SocialAccountSummary, SocialPlatformAvailability, TikTokCreatorInfo } from './social-account.models';
 
 @Injectable({ providedIn: 'root' })
 export class SocialAccountsService {
@@ -41,5 +41,13 @@ export class SocialAccountsService {
       {},
       { withCredentials: true },
     );
+  }
+
+  connectTikTok(): Observable<{ authorizationUrl: string }> {
+    return this.http.post<{ authorizationUrl: string }>(`${environment.apiBaseUrl}/social-accounts/tiktok/connect`, {}, { withCredentials: true });
+  }
+
+  publishingCapabilities(accountId: string): Observable<TikTokCreatorInfo> {
+    return this.http.post<TikTokCreatorInfo>(`${environment.apiBaseUrl}/social-accounts/${accountId}/publishing-capabilities`, {}, { withCredentials: true });
   }
 }

@@ -1,0 +1,3 @@
+package com.fdmultimedia.api.publishing.tiktok;
+import com.fdmultimedia.api.accounts.crypto.CredentialEncryptionService; import jakarta.annotation.PostConstruct; import org.springframework.stereotype.Component;
+@Component public class TikTokStartupCheck {private final TikTokProperties p;private final CredentialEncryptionService encryption;public TikTokStartupCheck(TikTokProperties p,CredentialEncryptionService e){this.p=p;encryption=e;}@PostConstruct void validate(){if(!p.isEnabled())return;if(!encryption.isAvailable())throw new IllegalStateException("TikTok publishing requires SOCIAL_CREDENTIAL_ENCRYPTION_KEY");if(!p.isConfigured())throw new IllegalStateException("TikTok publishing is enabled but client configuration is incomplete");}}

@@ -52,6 +52,16 @@
         <p class="settings__error">{{ connectError() }}</p>
       }
     </div>
+    <div class="settings__instagram">
+      @if (tiktokAvailable()) {
+        <button type="button" (click)="connectTikTok()" [disabled]="connectingTikTok()">
+          {{ connectingTikTok() ? 'Redirecting to TikTok...' : 'Connect TikTok' }}
+        </button>
+        <p class="settings__muted">Uses TikTok Login Kit and the official Direct Post API. Unaudited apps are limited to private posts.</p>
+      } @else {
+        <p class="settings__muted">TikTok is not configured on this server yet.</p>
+      }
+    </div>
 
     @switch (loadState()) {
       @case ('loading') {
@@ -75,7 +85,7 @@
                   {{ statusLabel(account.status) }}
                 </span>
                 <span class="settings__muted">Added {{ account.createdAt | date:'medium' }}</span>
-                @if (account.platform === 'INSTAGRAM' && account.status === 'ACTIVE') {
+                @if ((account.platform === 'INSTAGRAM' || account.platform === 'TIKTOK') && account.status === 'ACTIVE') {
                   <button
                     class="settings__disconnect"
                     type="button"
