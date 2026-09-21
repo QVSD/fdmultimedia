@@ -18,6 +18,7 @@ import com.fdmultimedia.api.workspaces.Workspace;
 import com.fdmultimedia.api.workspaces.WorkspaceMembership;
 import com.fdmultimedia.api.workspaces.WorkspaceRole;
 import java.time.Clock;
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
@@ -74,6 +75,28 @@ class ExperimentServiceTest {
     private CreateExperimentRequest validCreateRequest(Persona a, Persona b) {
         return new CreateExperimentRequest("Persona A/B test", "desc", "Bolder tone drives more saves",
                 ExperimentFactor.PERSONA, "H72", "VIEWS", a.getId(), "Variant A", b.getId(), "Variant B");
+    }
+
+    @Test
+    void newDraftRequiresPositiveBoundedPracticalEffect() {
+        Persona a = activePersona("Friendly");
+        Persona b = activePersona("Bold");
+        for (BigDecimal invalid : new BigDecimal[] { null, BigDecimal.ZERO, BigDecimal.ONE.negate(), new BigDecimal("0.00001") }) {
+            CreateExperimentRequest request = new CreateExperimentRequest("Test", null, "hypothesis", ExperimentFactor.PERSONA,
+                    "H24", "VIEWS", a.getId(), null, b.getId(), null, invalid);
+            assertThatThrownBy(() -> service.create(user, request)).isInstanceOf(ResponseStatusException.class)
+                    .extracting("statusCode").isEqualTo(HttpStatus.BAD_REQUEST);
+        }
+    }
+
+    @Test
+    void legacyDraftCannotActivateWithoutThreshold() {
+        Experiment legacy = new Experiment(workspace, "Legacy", null, "hypothesis", ExperimentFactor.PERSONA,
+                DashboardQuery.Window.H24, DashboardQuery.Metric.VIEWS, owner, NOW);
+        legacy.setDraftPracticalEffect(null, NOW);
+        when(experiments.findByWorkspaceAndIdForUpdate(workspace, legacy.getId())).thenReturn(Optional.of(legacy));
+        assertThatThrownBy(() -> service.activate(user, legacy.getId())).isInstanceOf(ResponseStatusException.class)
+                .extracting("statusCode").isEqualTo(HttpStatus.CONFLICT);
     }
 
     @Test

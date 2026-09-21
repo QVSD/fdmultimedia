@@ -44,6 +44,12 @@
           }
         </select>
       </label>
+      <label>
+        <span>Minimum practical effect ({{ createForm().primaryMetric }})</span>
+        <input type="number" min="0.0001" step="0.0001" required [ngModel]="createForm().minimumPracticalEffect"
+          (ngModelChange)="updateCreateField('minimumPracticalEffect', $event)" name="create-practical-effect" />
+        <small>The smallest absolute difference in {{ createForm().primaryMetric }} you consider operationally meaningful. This freezes at activation.</small>
+      </label>
 
       <fieldset class="experiments__variant">
         <legend>Variant A</legend>
@@ -84,7 +90,7 @@
       @if (createError()) {
         <p class="experiments__error" role="alert">{{ createError() }}</p>
       }
-      <button type="submit" [disabled]="createBusy()">{{ createBusy() ? 'Creating…' : 'Create Experiment' }}</button>
+      <button type="submit" [disabled]="createBusy()">{{ createBusy() ? 'Saving…' : editingExperimentId() ? 'Update Draft' : 'Create Experiment' }}</button>
     </form>
   }
 
@@ -124,6 +130,7 @@
 
               <div class="experiments__controls">
                 @if (experiment.status === 'DRAFT') {
+                  <button type="button" (click)="editDraft(experiment)" [disabled]="lifecycleBusy()[experiment.id]">Edit Draft</button>
                   <button type="button" (click)="activate(experiment)" [disabled]="lifecycleBusy()[experiment.id]">Activate</button>
                   <button type="button" (click)="cancel(experiment)" [disabled]="lifecycleBusy()[experiment.id]">Cancel</button>
                 }
@@ -152,6 +159,8 @@
                 <div class="experiments__detail">
                   <h3>Hypothesis</h3>
                   <p>{{ experiment.hypothesis }}</p>
+                  <p>Primary metric: {{ experiment.primaryMetric }} · Observation window: {{ windowLabel(experiment.targetObservationWindow) }} · Minimum practical effect:
+                    {{ experiment.minimumPracticalEffect ?? 'Not configured (legacy experiment)' }}</p>
                   @if (experiment.description) {
                     <p class="experiments__description">{{ experiment.description }}</p>
                   }
@@ -300,6 +309,72 @@
                     }
                   } @else {
                     <p>Loading statistical analysis…</p>
+                  }
+
+                  <h3>Decision readiness</h3>
+                  @if (readinessFor(experiment.id); as readiness) {
+                    @if (decisionPopulation(experiment.id); as review) {
+                      <p><strong>{{ review.readinessStatus }}</strong> · {{ populationLabel(review.population) }}</p>
+                      <p>Observed direction: {{ review.direction }} · Practical effect: {{ review.practicalEffectStatus }}</p>
+                      <p>|A−B| = {{ review.evidence.effect.absoluteMeanDifference ?? '—' }} {{ readiness.primaryMetric }} ·
+                        Configured threshold = {{ readiness.minimumPracticalEffect ?? 'Not configured (legacy experiment)' }} {{ readiness.primaryMetric }}</p>
+                      <p>95% CI practical region: {{ review.intervalPracticalRelationship }}</p>
+                      <p class="experiments__hint">{{ readiness.practicalEffectNotice }} {{ readiness.intervalNotice }}</p>
+                      <table class="experiments__assignments">
+                        <thead><tr><th>Check</th><th>Status</th><th>Detail</th><th>Observed</th><th>Threshold</th></tr></thead>
+                        <tbody>
+                          @for (check of review.checks; track check.code) {
+                            <tr><th scope="row">{{ check.code }}</th><td>{{ check.status }}</td><td>{{ check.message }}</td>
+                              <td>{{ check.actualValue ?? '—' }}</td><td>{{ check.thresholdValue ?? '—' }}</td></tr>
+                          }
+                        </tbody>
+                      </table>
+                    }
+                  } @else {
+                    <p>Loading decision readiness…</p>
+                  }
+
+                  <h3>Human decisions</h3>
+                  @if (experiment.status !== 'DRAFT') {
+                    <p class="experiments__notice">Recording this decision does not change Robots, Personas, schedules, traffic allocation, or publishing configuration.</p>
+                    @if (experiment.status === 'ACTIVE') {
+                      <p class="experiments__warning">This experiment is still assigning runs. Recording a decision does not pause or complete it.</p>
+                    }
+                    @if (decisionPopulation(experiment.id)?.readinessStatus === 'NOT_READY') {
+                      <p class="experiments__warning">Evidence guardrails are not ready. A decision remains a human judgment and preserves this readiness state.</p>
+                    }
+                    <form class="experiments__form" (ngSubmit)="recordDecision(experiment)">
+                      <label><span>Decision</span><select [ngModel]="decisionType()" (ngModelChange)="decisionType.set($event)" name="decision-type">
+                        @for (type of decisionTypes; track type) {
+                          @if (experiment.status !== 'CANCELLED' || (type !== 'SELECT_VARIANT_A' && type !== 'SELECT_VARIANT_B')) {
+                            <option [value]="type">{{ type }}</option>
+                          }
+                        }
+                      </select></label>
+                      <p>Evidence population: {{ populationLabel(selectedPopulationFor(experiment.id)) }}</p>
+                      <label class="experiments__field--wide"><span>Rationale</span>
+                        <textarea rows="3" maxlength="2000" required [ngModel]="decisionRationale()"
+                          (ngModelChange)="decisionRationale.set($event)" name="decision-rationale"></textarea></label>
+                      <button type="submit" [disabled]="decisionBusy() || !readinessFor(experiment.id)">Record decision</button>
+                    </form>
+                  }
+                  @if (decisionError()) { <p class="experiments__error" role="alert">{{ decisionError() }}</p> }
+                  @if (!decisionsByExperiment()[experiment.id]?.length) {
+                    <p>No human decisions recorded.</p>
+                  } @else {
+                    <ul class="experiments__list">
+                      @for (decision of decisionsByExperiment()[experiment.id]; track decision.id) {
+                        <li class="experiments__variant-detail">
+                          <strong>{{ decision.decision }} · {{ decision.decidedAt | date: 'short' }}</strong>
+                          <span>Operator: {{ decision.decidedByUserId }} · Variant: {{ decision.selectedVariantKey ?? 'None' }}</span>
+                          <span>{{ decision.analysisPopulationSnapshot }} · {{ decision.readinessStatusSnapshot }} · nA={{ decision.variantASampleSizeSnapshot }}, nB={{ decision.variantBSampleSizeSnapshot }}</span>
+                          <span>A−B: {{ decision.absoluteMeanDifferenceSnapshot ?? '—' }} · 95% CI: {{ decision.confidenceIntervalLowerSnapshot ?? '—' }} to {{ decision.confidenceIntervalUpperSnapshot ?? '—' }} · p: {{ decision.pValueSnapshot ?? '—' }}</span>
+                          <span>Practical threshold: {{ decision.minimumPracticalEffectSnapshot ?? 'Not configured' }} · {{ decision.guardrailVersion }}</span>
+                          <span>Evidence fingerprint: {{ decision.evidenceFingerprint }}</span>
+                          <p>{{ decision.rationale }}</p>
+                        </li>
+                      }
+                    </ul>
                   }
 
                   <h3>Assignment history</h3>

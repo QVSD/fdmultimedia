@@ -26,6 +26,7 @@ export interface ExperimentSummary {
   assignmentStrategy: AssignmentStrategy;
   targetObservationWindow: ExperimentObservationWindow;
   primaryMetric: ExperimentMetric;
+  minimumPracticalEffect: string | null;
   variants: ExperimentVariantSummary[];
   createdAt: string;
   updatedAt: string;
@@ -144,6 +145,7 @@ export interface CreateExperimentRequest {
   factor: ExperimentFactor;
   targetObservationWindow: ExperimentObservationWindow;
   primaryMetric: ExperimentMetric;
+  minimumPracticalEffect: string;
   variantAPersonaId: string;
   variantALabel: string | null;
   variantBPersonaId: string;
@@ -151,3 +153,61 @@ export interface CreateExperimentRequest {
 }
 
 export type UpdateExperimentRequest = Omit<CreateExperimentRequest, 'factor'>;
+
+export type DecisionType = 'SELECT_VARIANT_A' | 'SELECT_VARIANT_B' | 'KEEP_CURRENT_CONFIGURATION' | 'INCONCLUSIVE' | 'CANCEL_EXPERIMENT';
+export interface DecisionCheck {
+  code: string;
+  status: 'PASS' | 'WARN' | 'BLOCKED' | 'NOT_APPLICABLE';
+  message: string;
+  actualValue: string | null;
+  thresholdValue: string | null;
+}
+export interface DecisionPopulation {
+  population: AnalysisPopulation;
+  readinessStatus: 'NOT_READY' | 'READY_FOR_REVIEW';
+  checks: DecisionCheck[];
+  direction: string;
+  practicalEffectStatus: string;
+  intervalPracticalRelationship: string;
+  nextSteps: string[];
+  evidence: ExperimentPopulationAnalysis;
+}
+export interface DecisionReadiness {
+  guardrailVersion: string;
+  experimentId: string;
+  experimentStatus: ExperimentStatus;
+  analysisVersion: string;
+  primaryMetric: ExperimentMetric;
+  targetObservationWindow: ExperimentObservationWindow;
+  minimumPracticalEffect: string | null;
+  assignedObserved: DecisionPopulation;
+  perProtocolObserved: DecisionPopulation;
+  practicalEffectNotice: string;
+  intervalNotice: string;
+}
+export interface DecisionRecord {
+  id: string;
+  experimentId: string;
+  idempotencyKey: string;
+  decision: DecisionType;
+  selectedVariantKey: ExperimentVariantKey | null;
+  rationale: string;
+  decidedByUserId: string;
+  decidedAt: string;
+  guardrailVersion: string;
+  analysisVersion: string;
+  experimentStatusSnapshot: ExperimentStatus;
+  primaryMetricSnapshot: ExperimentMetric;
+  observationWindowSnapshot: ExperimentObservationWindow;
+  minimumPracticalEffectSnapshot: string | null;
+  analysisPopulationSnapshot: AnalysisPopulation;
+  variantASampleSizeSnapshot: number;
+  variantBSampleSizeSnapshot: number;
+  absoluteMeanDifferenceSnapshot: string | null;
+  confidenceIntervalLowerSnapshot: string | null;
+  confidenceIntervalUpperSnapshot: string | null;
+  pValueSnapshot: string | null;
+  standardizedEffectSizeSnapshot: string | null;
+  readinessStatusSnapshot: 'NOT_READY' | 'READY_FOR_REVIEW';
+  evidenceFingerprint: string;
+}

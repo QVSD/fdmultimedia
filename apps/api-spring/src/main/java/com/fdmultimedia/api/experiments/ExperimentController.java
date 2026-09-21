@@ -20,11 +20,16 @@ public class ExperimentController {
     private final ExperimentService service;
     private final ExperimentOutcomeService outcomeService;
     private final ExperimentAnalysisService analysisService;
+    private final ExperimentDecisionReadinessService readinessService;
+    private final ExperimentDecisionService decisionService;
 
-    public ExperimentController(ExperimentService service, ExperimentOutcomeService outcomeService, ExperimentAnalysisService analysisService) {
+    public ExperimentController(ExperimentService service, ExperimentOutcomeService outcomeService, ExperimentAnalysisService analysisService,
+            ExperimentDecisionReadinessService readinessService, ExperimentDecisionService decisionService) {
         this.service = service;
         this.outcomeService = outcomeService;
         this.analysisService = analysisService;
+        this.readinessService = readinessService;
+        this.decisionService = decisionService;
     }
 
     @GetMapping
@@ -87,5 +92,27 @@ public class ExperimentController {
     @GetMapping("/{experimentId}/analysis")
     public ExperimentAnalysisResponse analysis(@AuthenticationPrincipal AuthenticatedUser principal, @PathVariable UUID experimentId) {
         return analysisService.analyze(principal, experimentId);
+    }
+
+    @GetMapping("/{experimentId}/decision-readiness")
+    public ExperimentDecisionReadiness readiness(@AuthenticationPrincipal AuthenticatedUser principal, @PathVariable UUID experimentId) {
+        return readinessService.read(principal, experimentId);
+    }
+
+    @PostMapping("/{experimentId}/decisions")
+    public ExperimentDecisionRecord decide(@AuthenticationPrincipal AuthenticatedUser principal, @PathVariable UUID experimentId,
+            @Valid @RequestBody ExperimentDecisionRequest request) {
+        return decisionService.create(principal, experimentId, request);
+    }
+
+    @GetMapping("/{experimentId}/decisions")
+    public List<ExperimentDecisionRecord> decisions(@AuthenticationPrincipal AuthenticatedUser principal, @PathVariable UUID experimentId) {
+        return decisionService.history(principal, experimentId);
+    }
+
+    @GetMapping("/{experimentId}/decisions/{decisionId}")
+    public ExperimentDecisionRecord decision(@AuthenticationPrincipal AuthenticatedUser principal, @PathVariable UUID experimentId,
+            @PathVariable UUID decisionId) {
+        return decisionService.detail(principal, experimentId, decisionId);
     }
 }

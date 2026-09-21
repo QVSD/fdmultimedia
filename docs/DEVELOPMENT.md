@@ -809,3 +809,8 @@ values used in `WelchStatisticsTest` were computed independently with
 Python + SciPy (`scipy.stats.ttest_ind(..., equal_var=False)`) during
 development, never by calling the Java implementation itself — see the
 Phase 14B final report for the exact script.
+# Experiment decisions (Phase 14C)
+
+Set `EXPERIMENT_DECISION_MIN_COVERAGE` (default `0.60`), `EXPERIMENT_DECISION_ATTRITION_WARNING_POINTS` (default `20`), and `EXPERIMENT_DECISION_DEVIATION_WARNING_RATE` (default `0.20`) to tune deterministic review checks. Values are startup-validated. New experiments must provide a positive `minimumPracticalEffect` with at most four decimals in their primary metric units before activation. Existing active V25 experiments retain `null` and remain readable/decidable.
+
+Use `/experiments` to inspect Phase 14B evidence, both readiness populations, and immutable human-decision history. Recording a decision requires an explicit rationale and does not modify Robots, Personas, schedules, publishing, assignment traffic, or experiment lifecycle. POST `/api/experiments/{id}/decisions` with `{ "decision": "INCONCLUSIVE", "selectedVariantKey": null, "population": "ASSIGNED_OBSERVED", "rationale": "More observation needed", "idempotencyKey": "<uuid>" }`. Retry with the same UUID and identical request to retrieve the same record; use a new UUID for a deliberate new decision. GET `/decision-readiness`, `/decisions`, or `/decisions/{decisionId}` requires workspace membership. The V26 migration introduces no data rewrite and leaves legacy thresholds null.

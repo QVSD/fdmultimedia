@@ -4,6 +4,7 @@ import { of, throwError } from 'rxjs';
 import { ExperimentsService } from '../../core/experiments/experiments.service';
 import {
   AnalysisStatus,
+  DecisionReadiness,
   ExperimentAnalysisResponse,
   ExperimentOutcome,
   ExperimentPopulationAnalysis,
@@ -18,7 +19,7 @@ describe('Experiments', () => {
   let fixture: ComponentFixture<Experiments>;
   let experimentsService: Pick<
     ExperimentsService,
-    'list' | 'create' | 'activate' | 'pause' | 'resume' | 'complete' | 'cancel' | 'assignments' | 'outcomes' | 'analysis'
+    'list' | 'create' | 'activate' | 'pause' | 'resume' | 'complete' | 'cancel' | 'assignments' | 'outcomes' | 'analysis' | 'readiness' | 'decisions' | 'recordDecision'
   >;
   let personasService: Pick<PersonasService, 'list'>;
 
@@ -34,6 +35,9 @@ describe('Experiments', () => {
       assignments: vi.fn().mockReturnValue(of([])),
       outcomes: vi.fn().mockReturnValue(of(outcome())),
       analysis: vi.fn().mockReturnValue(of(analysisResponse())),
+      readiness: vi.fn().mockReturnValue(of(null)),
+      decisions: vi.fn().mockReturnValue(of([])),
+      recordDecision: vi.fn().mockReturnValue(of(null)),
     };
     personasService = {
       list: vi.fn().mockReturnValue(of([activePersona('persona-1', 'Friendly'), activePersona('persona-2', 'Bold')])),
@@ -60,6 +64,50 @@ describe('Experiments', () => {
     fixture.detectChanges();
 
     expect(fixture.nativeElement.textContent).toContain('No experiments yet.');
+  });
+
+  it('requires a practical threshold and sends it in the create request', () => {
+    component['toggleCreateForm']();
+    component['updateCreateField']('name', 'Test');
+    component['updateCreateField']('hypothesis', 'Compare');
+    component['updateCreateField']('variantAPersonaId', 'persona-1');
+    component['updateCreateField']('variantBPersonaId', 'persona-2');
+    component['createExperiment']();
+    expect(experimentsService.create).not.toHaveBeenCalled();
+    expect(component['createError']()).toContain('Minimum practical effect');
+    component['updateCreateField']('minimumPracticalEffect', '0.0001');
+    component['createExperiment']();
+    expect(experimentsService.create).toHaveBeenCalledWith(expect.objectContaining({ minimumPracticalEffect: '0.0001' }));
+  });
+
+  it('shows legacy threshold, readiness checks, and the no-deployment confirmation', () => {
+    vi.mocked(experimentsService.list).mockReturnValue(of([experiment({ status: 'ACTIVE', minimumPracticalEffect: null })]));
+    const population = {
+      population: 'ASSIGNED_OBSERVED', readinessStatus: 'NOT_READY', direction: 'UNAVAILABLE',
+      practicalEffectStatus: 'NOT_CONFIGURED', intervalPracticalRelationship: 'UNAVAILABLE', nextSteps: [],
+      evidence: analysisResponse().assignedObserved,
+      checks: [{ code: 'MIN_SAMPLE', status: 'BLOCKED', message: 'More data required', actualValue: '0', thresholdValue: '5' }],
+    } as DecisionReadiness['assignedObserved'];
+    vi.mocked(experimentsService.readiness).mockReturnValue(of({
+      guardrailVersion: 'EXPERIMENT_GUARDRAILS_V1', experimentId: 'exp-1', experimentStatus: 'ACTIVE',
+      analysisVersion: 'EXPERIMENT_ANALYSIS_V1', primaryMetric: 'VIEWS', targetObservationWindow: 'H72',
+      minimumPracticalEffect: null, assignedObserved: population,
+      perProtocolObserved: { ...population, population: 'PER_PROTOCOL_OBSERVED' },
+      practicalEffectNotice: 'Meeting the practical-effect threshold does not imply statistical certainty.',
+      intervalNotice: 'An interval excluding zero does not imply practical importance.',
+    }));
+    fixture = TestBed.createComponent(Experiments);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+    component['toggleDetail'](component['experiments']()[0]);
+    fixture.detectChanges();
+    const text = fixture.nativeElement.textContent as string;
+    expect(text).toContain('Not configured (legacy experiment)');
+    expect(text).toContain('Decision readiness');
+    expect(text).toContain('NOT_READY');
+    expect(text).toContain('MIN_SAMPLE');
+    expect(text).toContain('does not change Robots, Personas, schedules, traffic allocation');
+    expect(text).toContain('No human decisions recorded.');
   });
 
   it('shows an error state when loading fails', () => {
@@ -114,6 +162,7 @@ describe('Experiments', () => {
     component['toggleCreateForm']();
     component['updateCreateField']('name', 'Bold vs Friendly');
     component['updateCreateField']('hypothesis', 'Bolder tone drives more saves');
+    component['updateCreateField']('minimumPracticalEffect', '5');
     component['updateCreateField']('variantAPersonaId', 'persona-1');
     component['updateCreateField']('variantBPersonaId', 'persona-2');
 
@@ -432,6 +481,7 @@ describe('Experiments', () => {
       assignmentStrategy: 'DETERMINISTIC_BALANCED_V1',
       targetObservationWindow: 'H72',
       primaryMetric: 'VIEWS',
+      minimumPracticalEffect: '10',
       variants: [
         { id: 'variant-a', variantKey: 'A', label: 'Friendly', personaId: 'persona-1', personaNameSnapshot: 'Friendly', frozen: false, assignedCount: 5 },
         { id: 'variant-b', variantKey: 'B', label: 'Bold', personaId: 'persona-2', personaNameSnapshot: 'Bold', frozen: false, assignedCount: 4 },

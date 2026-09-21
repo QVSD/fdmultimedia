@@ -10,6 +10,7 @@ import com.fdmultimedia.api.workspaces.Workspace;
 import com.fdmultimedia.api.workspaces.WorkspaceMembership;
 import java.time.Clock;
 import java.time.Instant;
+import java.math.BigDecimal;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -66,6 +67,7 @@ public class ExperimentService {
         ExperimentFactor factor = request.factor() == null ? ExperimentFactor.PERSONA : request.factor();
         DashboardQuery.Window window = validateWindow(request.targetObservationWindow());
         DashboardQuery.Metric metric = validateMetric(request.primaryMetric());
+        BigDecimal threshold = validateThreshold(request.minimumPracticalEffect());
 
         Persona personaA = resolvePersonaForVariant(workspace, request.variantAPersonaId());
         Persona personaB = resolvePersonaForVariant(workspace, request.variantBPersonaId());
@@ -74,6 +76,7 @@ public class ExperimentService {
         Instant now = Instant.now(clock);
         Experiment experiment = experiments.save(
                 new Experiment(workspace, name, description, hypothesis, factor, window, metric, membership.getUser(), now));
+        experiment.setDraftPracticalEffect(threshold, now);
         variants.save(new ExperimentVariant(experiment, ExperimentVariantKey.A,
                 variantLabel(request.variantALabel(), personaA), personaA.getId(), now));
         variants.save(new ExperimentVariant(experiment, ExperimentVariantKey.B,
@@ -103,6 +106,7 @@ public class ExperimentService {
         String hypothesis = validateHypothesis(request.hypothesis());
         DashboardQuery.Window window = validateWindow(request.targetObservationWindow());
         DashboardQuery.Metric metric = validateMetric(request.primaryMetric());
+        BigDecimal threshold = validateThreshold(request.minimumPracticalEffect());
         Persona personaA = resolvePersonaForVariant(workspace, request.variantAPersonaId());
         Persona personaB = resolvePersonaForVariant(workspace, request.variantBPersonaId());
         requireDistinct(personaA, personaB);
@@ -110,6 +114,7 @@ public class ExperimentService {
         Instant now = Instant.now(clock);
         try {
             experiment.updateDraft(name, description, hypothesis, window, metric, now);
+            experiment.setDraftPracticalEffect(threshold, now);
         } catch (IllegalStateException ex) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, ex.getMessage());
         }
@@ -126,6 +131,9 @@ public class ExperimentService {
         Workspace workspace = currentWorkspace(principal);
         Experiment experiment = experiments.findByWorkspaceAndIdForUpdate(workspace, experimentId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Experiment not found"));
+        if (experiment.getMinimumPracticalEffect() == null) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "MINIMUM_PRACTICAL_EFFECT_REQUIRED");
+        }
         List<ExperimentVariant> variantRows = variants.findByExperimentOrderByVariantKeyAsc(experiment);
         if (variantRows.size() != 2) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Experiment must have exactly two variants (A and B)");
@@ -318,6 +326,14 @@ public class ExperimentService {
         }
     }
 
+    private BigDecimal validateThreshold(BigDecimal value) {
+        if (value == null || value.signum() <= 0 || value.scale() > 4
+                || value.precision() - value.scale() > 16) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "minimumPracticalEffect must be positive and fit NUMERIC(20,4)");
+        }
+        return value;
+    }
+
     private Workspace currentWorkspace(AuthenticatedUser principal) {
         return authService.currentMembershipFor(principal).getWorkspace();
     }
@@ -332,7 +348,8 @@ public class ExperimentService {
                 .toList();
         return new ExperimentSummary(experiment.getId(), experiment.getName(), experiment.getDescription(),
                 experiment.getHypothesis(), experiment.getFactor(), experiment.getStatus(), experiment.getAssignmentStrategy(),
-                experiment.getTargetObservationWindow().name(), experiment.getPrimaryMetric().name(), variantSummaries,
+                experiment.getTargetObservationWindow().name(), experiment.getPrimaryMetric().name(),
+                experiment.getMinimumPracticalEffect(), variantSummaries,
                 experiment.getCreatedAt(), experiment.getUpdatedAt(), experiment.getActivatedAt(), experiment.getStoppedAt());
     }
 

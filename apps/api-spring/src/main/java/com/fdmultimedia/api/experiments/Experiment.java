@@ -14,6 +14,7 @@ import jakarta.persistence.ManyToOne;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
 import java.time.Instant;
+import java.math.BigDecimal;
 import java.util.UUID;
 
 /**
@@ -65,6 +66,9 @@ public class Experiment {
     @Column(name = "primary_metric", nullable = false)
     private DashboardQuery.Metric primaryMetric;
 
+    @Column(name = "minimum_practical_effect", precision = 20, scale = 4)
+    private BigDecimal minimumPracticalEffect;
+
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "created_by_user_id", nullable = false)
     private AppUser createdByUser;
@@ -104,6 +108,7 @@ public class Experiment {
         this.assignmentStrategy = AssignmentStrategy.DETERMINISTIC_BALANCED_V1;
         this.targetObservationWindow = targetObservationWindow;
         this.primaryMetric = primaryMetric;
+        this.minimumPracticalEffect = BigDecimal.ONE;
         this.createdByUser = createdByUser;
         this.createdAt = now;
         this.updatedAt = now;
@@ -132,6 +137,12 @@ public class Experiment {
         this.hypothesis = hypothesis;
         this.targetObservationWindow = targetObservationWindow;
         this.primaryMetric = primaryMetric;
+        this.updatedAt = now;
+    }
+
+    public void setDraftPracticalEffect(BigDecimal threshold, Instant now) {
+        requireDraft();
+        this.minimumPracticalEffect = threshold;
         this.updatedAt = now;
     }
 
@@ -198,6 +209,7 @@ public class Experiment {
     public AssignmentStrategy getAssignmentStrategy() { return assignmentStrategy; }
     public DashboardQuery.Window getTargetObservationWindow() { return targetObservationWindow; }
     public DashboardQuery.Metric getPrimaryMetric() { return primaryMetric; }
+    public BigDecimal getMinimumPracticalEffect() { return minimumPracticalEffect; }
     public AppUser getCreatedByUser() { return createdByUser; }
     public Instant getCreatedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }

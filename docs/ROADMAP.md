@@ -355,3 +355,6 @@ implementation detail before they are started.
    from already-immutable data. *(complete)*
 34. **Revenue tracking / automatic optimization** — separate future work, not
    started.
+# Phase 14C: Experiment guardrails and human decisions
+
+The deterministic readiness layer and append-only human decision record preserve the distinction between statistical evidence and operator intent. No auto-winner, auto-stop, traffic allocation, LLM recommendation, or configuration mutation belongs in 14C; these remain outside this phase and must not be inferred from the existence of a recorded decision.

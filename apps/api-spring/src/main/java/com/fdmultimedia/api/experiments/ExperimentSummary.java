@@ -3,6 +3,7 @@ package com.fdmultimedia.api.experiments;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import java.math.BigDecimal;
 
 public record ExperimentSummary(
         UUID id,
@@ -14,6 +15,7 @@ public record ExperimentSummary(
         AssignmentStrategy assignmentStrategy,
         String targetObservationWindow,
         String primaryMetric,
+        BigDecimal minimumPracticalEffect,
         List<ExperimentVariantSummary> variants,
         Instant createdAt,
         Instant updatedAt,

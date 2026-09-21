@@ -697,3 +697,6 @@ infra/
 └── docker/        Shared Docker resources
 docs/              Architecture, development, and roadmap docs
 ```
+# Phase 14C: Experiment decisions
+
+Experiments now accept a positive minimum practical effect (absolute primary-metric units) while DRAFT; it freezes at activation. Legacy experiments keep a null threshold. `/api/experiments/{id}/decision-readiness` evaluates deterministic guardrails for assigned-observed and per-protocol evidence. A human can append a reasoned, idempotent decision through `/decisions`; the evidence snapshot and SHA-256 fingerprint remain historical. Decisions never deploy a variant, stop an experiment, or change a Robot, Persona, schedule, or allocation. See [architecture](docs/ARCHITECTURE.md) and [development](docs/DEVELOPMENT.md).

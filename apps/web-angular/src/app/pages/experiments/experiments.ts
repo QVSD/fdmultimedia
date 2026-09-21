@@ -7,6 +7,9 @@ import { ExperimentsService } from '../../core/experiments/experiments.service';
 import {
   AnalysisPopulation,
   CreateExperimentRequest,
+  DecisionReadiness,
+  DecisionRecord,
+  DecisionType,
   ExperimentAnalysisResponse,
   ExperimentAssignmentSummary,
   ExperimentMetric,
@@ -26,6 +29,7 @@ interface ExperimentFormState {
   hypothesis: string;
   targetObservationWindow: ExperimentObservationWindow;
   primaryMetric: ExperimentMetric;
+  minimumPracticalEffect: string;
   variantAPersonaId: string;
   variantALabel: string;
   variantBPersonaId: string;
@@ -39,6 +43,7 @@ function emptyForm(): ExperimentFormState {
     hypothesis: '',
     targetObservationWindow: 'H72',
     primaryMetric: 'VIEWS',
+    minimumPracticalEffect: '',
     variantAPersonaId: '',
     variantALabel: '',
     variantBPersonaId: '',
@@ -61,6 +66,7 @@ export class Experiments implements OnInit, OnDestroy {
   protected readonly metrics: ExperimentMetric[] = ['VIEWS', 'REACH', 'LIKES', 'COMMENTS', 'SHARES', 'SAVES', 'TOTAL_INTERACTIONS'];
 
   protected readonly showCreateForm = signal(false);
+  protected readonly editingExperimentId = signal<string | null>(null);
   protected readonly createForm = signal<ExperimentFormState>(emptyForm());
   protected readonly createBusy = signal(false);
   protected readonly createError = signal<string | null>(null);
@@ -74,6 +80,14 @@ export class Experiments implements OnInit, OnDestroy {
   protected readonly detailLoadState = signal<Record<string, LoadState>>({});
   protected readonly lifecycleBusy = signal<Record<string, boolean>>({});
   protected readonly lifecycleError = signal<Record<string, string | null>>({});
+  protected readonly readinessByExperiment = signal<Record<string, DecisionReadiness>>({});
+  protected readonly decisionsByExperiment = signal<Record<string, DecisionRecord[]>>({});
+  protected readonly decisionType = signal<DecisionType>('INCONCLUSIVE');
+  protected readonly decisionRationale = signal('');
+  protected readonly decisionBusy = signal(false);
+  protected readonly decisionError = signal<string | null>(null);
+  private pendingDecisionKey: string | null = null;
+  protected readonly decisionTypes: DecisionType[] = ['SELECT_VARIANT_A', 'SELECT_VARIANT_B', 'KEEP_CURRENT_CONFIGURATION', 'INCONCLUSIVE', 'CANCEL_EXPERIMENT'];
 
   private subscription?: Subscription;
 
@@ -116,8 +130,25 @@ export class Experiments implements OnInit, OnDestroy {
     this.showCreateForm.update((value) => !value);
     this.createError.set(null);
     if (this.showCreateForm()) {
+      this.editingExperimentId.set(null);
       this.createForm.set(emptyForm());
     }
+  }
+
+  protected editDraft(experiment: ExperimentSummary): void {
+    if (experiment.status !== 'DRAFT') return;
+    this.editingExperimentId.set(experiment.id);
+    this.showCreateForm.set(true);
+    this.createError.set(null);
+    this.createForm.set({
+      name: experiment.name, description: experiment.description ?? '', hypothesis: experiment.hypothesis,
+      targetObservationWindow: experiment.targetObservationWindow, primaryMetric: experiment.primaryMetric,
+      minimumPracticalEffect: experiment.minimumPracticalEffect ?? '',
+      variantAPersonaId: experiment.variants.find((v) => v.variantKey === 'A')?.personaId ?? '',
+      variantALabel: experiment.variants.find((v) => v.variantKey === 'A')?.label ?? '',
+      variantBPersonaId: experiment.variants.find((v) => v.variantKey === 'B')?.personaId ?? '',
+      variantBLabel: experiment.variants.find((v) => v.variantKey === 'B')?.label ?? '',
+    });
   }
 
   protected updateCreateField<K extends keyof ExperimentFormState>(field: K, value: ExperimentFormState[K]): void {
@@ -141,6 +172,10 @@ export class Experiments implements OnInit, OnDestroy {
       this.createError.set('Variant A and Variant B must use distinct Personas.');
       return;
     }
+    if (!this.validThreshold(form.minimumPracticalEffect)) {
+      this.createError.set('Minimum practical effect must be positive with at most four decimal places.');
+      return;
+    }
     const request: CreateExperimentRequest = {
       name,
       description: form.description.trim() || null,
@@ -148,19 +183,23 @@ export class Experiments implements OnInit, OnDestroy {
       factor: 'PERSONA',
       targetObservationWindow: form.targetObservationWindow,
       primaryMetric: form.primaryMetric,
+      minimumPracticalEffect: form.minimumPracticalEffect,
       variantAPersonaId: form.variantAPersonaId,
       variantALabel: form.variantALabel.trim() || null,
       variantBPersonaId: form.variantBPersonaId,
       variantBLabel: form.variantBLabel.trim() || null,
     };
     this.createBusy.set(true);
-    this.experimentsService
-      .create(request)
+    const editingId = this.editingExperimentId();
+    const operation = editingId ? this.experimentsService.update(editingId, request) : this.experimentsService.create(request);
+    operation
       .pipe(finalize(() => this.createBusy.set(false)))
       .subscribe({
         next: (experiment) => {
-          this.experiments.set([experiment, ...this.experiments()]);
+          this.experiments.set(editingId ? this.experiments().map((item) => item.id === experiment.id ? experiment : item)
+            : [experiment, ...this.experiments()]);
           this.showCreateForm.set(false);
+          this.editingExperimentId.set(null);
           this.createForm.set(emptyForm());
         },
         error: () => this.createError.set('Experiment could not be created.'),
@@ -206,6 +245,54 @@ export class Experiments implements OnInit, OnDestroy {
       },
       error: () => this.analysisLoadState.update((state) => ({ ...state, [experimentId]: 'error' })),
     });
+    this.experimentsService.readiness(experimentId).subscribe({
+      next: (value) => this.readinessByExperiment.update((all) => ({ ...all, [experimentId]: value })),
+      error: () => this.decisionError.set('Decision readiness could not be loaded.'),
+    });
+    this.experimentsService.decisions(experimentId).subscribe({
+      next: (value) => this.decisionsByExperiment.update((all) => ({ ...all, [experimentId]: value })),
+      error: () => this.decisionError.set('Decision history could not be loaded.'),
+    });
+  }
+
+  private validThreshold(value: string): boolean {
+    return /^\d{1,16}(?:\.\d{1,4})?$/.test(value) && Number(value) > 0;
+  }
+
+  protected readinessFor(id: string): DecisionReadiness | null {
+    return this.readinessByExperiment()[id] ?? null;
+  }
+
+  protected decisionPopulation(id: string): DecisionReadiness['assignedObserved'] | null {
+    const value = this.readinessFor(id);
+    return value ? this.selectedPopulationFor(id) === 'ASSIGNED_OBSERVED' ? value.assignedObserved : value.perProtocolObserved : null;
+  }
+
+  protected recordDecision(experiment: ExperimentSummary): void {
+    const rationale = this.decisionRationale();
+    if (!rationale.trim() || rationale.length > 2000) {
+      this.decisionError.set('Rationale must contain 1 to 2000 characters.');
+      return;
+    }
+    if (!this.readinessFor(experiment.id) || this.decisionBusy()) return;
+    const type = this.decisionType();
+    const population = this.selectedPopulationFor(experiment.id);
+    if (experiment.status === 'ACTIVE' && !confirm('This experiment is still assigning runs. Recording a decision does not pause or complete it. Continue?')) return;
+    if (this.decisionPopulation(experiment.id)?.readinessStatus === 'NOT_READY'
+        && !confirm('Evidence guardrails are not ready. This state will be frozen in the audit record. Continue?')) return;
+    this.pendingDecisionKey ??= crypto.randomUUID();
+    this.decisionBusy.set(true);
+    this.decisionError.set(null);
+    this.experimentsService.recordDecision(experiment.id, type, population, rationale, this.pendingDecisionKey)
+      .pipe(finalize(() => this.decisionBusy.set(false)))
+      .subscribe({
+        next: (saved) => {
+          this.pendingDecisionKey = null;
+          this.decisionRationale.set('');
+          this.decisionsByExperiment.update((all) => ({ ...all, [experiment.id]: [saved, ...(all[experiment.id] ?? []).filter((d) => d.id !== saved.id)] }));
+        },
+        error: () => this.decisionError.set('Decision could not be recorded. Retry uses the same submission key.'),
+      });
   }
 
   protected assignmentsFor(experimentId: string): ExperimentAssignmentSummary[] {

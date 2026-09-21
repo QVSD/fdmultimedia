@@ -5,6 +5,10 @@ import { Observable } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import {
   CreateExperimentRequest,
+  DecisionReadiness,
+  DecisionRecord,
+  DecisionType,
+  AnalysisPopulation,
   ExperimentAnalysisResponse,
   ExperimentAssignmentSummary,
   ExperimentOutcome,
@@ -67,5 +71,20 @@ export class ExperimentsService {
     return this.http.get<ExperimentAnalysisResponse>(`${environment.apiBaseUrl}/experiments/${experimentId}/analysis`, {
       withCredentials: true,
     });
+  }
+
+  readiness(experimentId: string): Observable<DecisionReadiness> {
+    return this.http.get<DecisionReadiness>(`${environment.apiBaseUrl}/experiments/${experimentId}/decision-readiness`, { withCredentials: true });
+  }
+
+  decisions(experimentId: string): Observable<DecisionRecord[]> {
+    return this.http.get<DecisionRecord[]>(`${environment.apiBaseUrl}/experiments/${experimentId}/decisions`, { withCredentials: true });
+  }
+
+  recordDecision(experimentId: string, decision: DecisionType, population: AnalysisPopulation, rationale: string, idempotencyKey: string): Observable<DecisionRecord> {
+    return this.http.post<DecisionRecord>(`${environment.apiBaseUrl}/experiments/${experimentId}/decisions`, {
+      decision, selectedVariantKey: decision === 'SELECT_VARIANT_A' ? 'A' : decision === 'SELECT_VARIANT_B' ? 'B' : null,
+      population, rationale, idempotencyKey,
+    }, { withCredentials: true });
   }
 }

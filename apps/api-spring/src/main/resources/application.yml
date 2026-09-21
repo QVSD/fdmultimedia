@@ -130,6 +130,10 @@ app:
     material-difference-percent: ${PERFORMANCE_INSIGHTS_MATERIAL_DIFFERENCE_PERCENT:10}
   experiment-analysis:
     min-sample-per-variant: ${EXPERIMENT_ANALYSIS_MIN_SAMPLE_PER_VARIANT:5}
+  experiment-decision:
+    min-assignment-outcome-coverage: ${EXPERIMENT_DECISION_MIN_COVERAGE:0.60}
+    attrition-warning-percentage-points: ${EXPERIMENT_DECISION_ATTRITION_WARNING_POINTS:20}
+    protocol-deviation-warning-rate: ${EXPERIMENT_DECISION_DEVIATION_WARNING_RATE:0.20}
   storage:
     endpoint: ${STORAGE_ENDPOINT:http://localhost:9000}
     public-endpoint: ${STORAGE_PUBLIC_ENDPOINT:${STORAGE_ENDPOINT:http://localhost:9000}}
