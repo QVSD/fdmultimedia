@@ -57,6 +57,18 @@ export interface HighlightCandidateSummary {
   reason: string;
   rank: number;
   createdAt: string;
+  /** SEMANTIC_HIGHLIGHTS_V2 decomposable evidence — null for pre-V2 candidates. */
+  hookScore: number | null;
+  completenessScore: number | null;
+  informationDensityScore: number | null;
+  speechDensityScore: number | null;
+  boundaryScore: number | null;
+  coverageScore: number | null;
+  sceneScore: number | null;
+  audioBoundaryScore: number | null;
+  repetitionPenalty: number | null;
+  explanationLabels: string[] | null;
+  transcriptExcerpt: string | null;
 }
 
 export interface HighlightAnalysisSummary {
@@ -71,6 +83,9 @@ export interface HighlightAnalysisSummary {
   createdAt: string;
   updatedAt: string;
   completedAt: string | null;
+  configFingerprint: string | null;
+  configSnapshot: Record<string, unknown> | null;
+  transcriptCoverage: number | null;
   candidates: HighlightCandidateSummary[];
 }
 

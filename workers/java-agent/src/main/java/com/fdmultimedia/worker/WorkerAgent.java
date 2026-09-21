@@ -25,6 +25,9 @@ public final class WorkerAgent {
         ImportMediaExecutor importMediaExecutor = new ImportMediaExecutor();
         Map<String, HighlightAnalyzer> highlightAnalyzers = new LinkedHashMap<>();
         highlightAnalyzers.put("DETERMINISTIC_V1", new DeterministicHighlightAnalyzer());
+        // SEMANTIC_HIGHLIGHTS_V2: deterministic, transcript-driven, no LLM
+        // dependency, so — unlike TRANSCRIPT_SEMANTIC_V1 below — always on.
+        highlightAnalyzers.put("DETERMINISTIC_V2", new DeterministicMultimodalHighlightAnalyzer());
         HighlightAnalyzer semanticAnalyzer = semanticHighlightAnalyzer(config);
         boolean semanticHighlightAvailable = semanticAnalyzer != null;
         if (semanticHighlightAvailable) {

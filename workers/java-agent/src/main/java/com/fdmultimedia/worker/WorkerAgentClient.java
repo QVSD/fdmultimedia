@@ -266,6 +266,7 @@ final class WorkerAgentClient {
         body.put("analysisId", authorization.analysisId());
         body.put("assetId", authorization.assetId());
         body.put("candidates", result.candidates());
+        body.put("transcriptCoverage", result.transcriptCoverage());
         send("/worker-agent/highlights/" + jobId + "/complete", body, new TypeReference<Map<String, Object>>() {});
     }
 

@@ -844,7 +844,8 @@ class RobotRunOrchestratorTest {
 
     private HighlightAnalysis succeededAnalysis() {
         Job job = new Job(workspace, JobType.ANALYZE_HIGHLIGHTS, Map.of(), 3, NOW);
-        HighlightAnalysis analysis = new HighlightAnalysis(workspace, sourceAsset, job, "DETERMINISTIC_V1", "v1", NOW);
+        HighlightAnalysis analysis = new HighlightAnalysis(
+                workspace, sourceAsset, job, highlightProperties.getV2AnalyzerType(), highlightProperties.getV2AnalyzerVersion(), NOW);
         analysis.markRunning(NOW);
         analysis.markSucceeded(NOW);
         return analysis;
@@ -852,7 +853,8 @@ class RobotRunOrchestratorTest {
 
     private HighlightAnalysis pendingAnalysis() {
         Job job = new Job(workspace, JobType.ANALYZE_HIGHLIGHTS, Map.of(), 3, NOW);
-        return new HighlightAnalysis(workspace, sourceAsset, job, "DETERMINISTIC_V1", "v1", NOW);
+        return new HighlightAnalysis(
+                workspace, sourceAsset, job, highlightProperties.getV2AnalyzerType(), highlightProperties.getV2AnalyzerVersion(), NOW);
     }
 
     private HighlightCandidate candidateOf(HighlightAnalysis analysis, int rank) {

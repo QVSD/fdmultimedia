@@ -13,7 +13,8 @@ record HighlightAnalysisAuthorization(
         String analyzerType,
         String analyzerVersion,
         UUID transcriptId,
-        List<HighlightTranscriptSegment> transcriptSegments) {
+        List<HighlightTranscriptSegment> transcriptSegments,
+        HighlightV2Config v2Config) {
 
     HighlightAnalysisAuthorization(
             UUID analysisId,
@@ -34,6 +35,7 @@ record HighlightAnalysisAuthorization(
                 analyzerType,
                 analyzerVersion,
                 null,
-                List.of());
+                List.of(),
+                null);
     }
 }

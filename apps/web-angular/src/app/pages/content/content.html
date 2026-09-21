@@ -640,6 +640,11 @@
                     <button type="button" (click)="findHighlights(asset)" [disabled]="highlightBusy()[asset.id]">
                       {{ highlightBusy()[asset.id] ? 'Finding...' : 'Find Highlights' }}
                     </button>
+                    @if (canAnalyzeV2Highlights(asset)) {
+                      <button type="button" (click)="findHighlightsV2(asset)" [disabled]="highlightBusy()[asset.id]">
+                        {{ highlightBusy()[asset.id] ? 'Finding...' : 'Semantic Highlights V2' }}
+                      </button>
+                    }
                     @if (canAnalyzeSemanticHighlights(asset)) {
                       <button type="button" (click)="findSemanticHighlights(asset)" [disabled]="highlightBusy()[asset.id]">
                         {{ highlightBusy()[asset.id] ? 'Finding...' : 'Transcript AI' }}
@@ -754,12 +759,45 @@
                         @if (analysis.status === 'SUCCEEDED' && analysis.candidates.length === 0) {
                           <p class="content__muted">No candidates found.</p>
                         }
+                        @if (analysis.transcriptCoverage !== null) {
+                          <p class="content__muted">Transcript coverage: {{ score(analysis.transcriptCoverage) }} of media duration.</p>
+                        }
                         <div class="candidate-grid">
                           @for (candidate of analysis.candidates; track candidate.id) {
                             <div class="content__candidate">
                               <strong>#{{ candidate.rank }} {{ timeMs(candidate.startMs) }} - {{ timeMs(candidate.endMs) }}</strong>
-                              <span>{{ timeMs(candidate.durationMs) }} · Score {{ score(candidate.score) }}</span>
-                              <p>{{ candidate.reason }}</p>
+                              <span>{{ timeMs(candidate.durationMs) }} · Highlight score {{ score(candidate.score) }}</span>
+                              @if (isV2Candidate(candidate)) {
+                                <details class="content__evidence">
+                                  <summary>Why this highlight</summary>
+                                  <dl class="detail-grid">
+                                    @if (candidate.hookScore !== null) { <div><dt>Opening</dt><dd>{{ score(candidate.hookScore) }}</dd></div> }
+                                    @if (candidate.completenessScore !== null) { <div><dt>Completeness</dt><dd>{{ score(candidate.completenessScore) }}</dd></div> }
+                                    @if (candidate.speechDensityScore !== null) { <div><dt>Speech density</dt><dd>{{ score(candidate.speechDensityScore) }}</dd></div> }
+                                    @if (candidate.informationDensityScore !== null) { <div><dt>Information density</dt><dd>{{ score(candidate.informationDensityScore) }}</dd></div> }
+                                    @if (candidate.boundaryScore !== null) { <div><dt>Boundary fit</dt><dd>{{ score(candidate.boundaryScore) }}</dd></div> }
+                                    @if (candidate.coverageScore !== null) { <div><dt>Transcript coverage</dt><dd>{{ score(candidate.coverageScore) }}</dd></div> }
+                                  </dl>
+                                  @if (candidate.sceneScore === null) {
+                                    <p class="content__muted">No scene-boundary signal available for this candidate.</p>
+                                  }
+                                  @if (candidate.audioBoundaryScore === null) {
+                                    <p class="content__muted">No silence-boundary signal available for this candidate.</p>
+                                  }
+                                  @if (candidate.explanationLabels && candidate.explanationLabels.length > 0) {
+                                    <ul class="content__explanations">
+                                      @for (label of candidate.explanationLabels; track label) {
+                                        <li>{{ explanationText(label) }}</li>
+                                      }
+                                    </ul>
+                                  }
+                                  @if (candidate.transcriptExcerpt) {
+                                    <p class="content__excerpt">&ldquo;{{ candidate.transcriptExcerpt }}&rdquo;</p>
+                                  }
+                                </details>
+                              } @else {
+                                <p>{{ candidate.reason }}</p>
+                              }
                               <button
                                 type="button"
                                 (click)="createDraftFromCandidate(candidate)"

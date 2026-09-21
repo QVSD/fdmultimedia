@@ -302,6 +302,45 @@ describe('Content', () => {
     expect(assetsService.createHighlightAnalysis).toHaveBeenCalledWith(ready.id, 'TRANSCRIPT_SEMANTIC_V1');
   });
 
+  it('starts Semantic Highlights V2 analysis only when a transcript is complete, like Transcript AI', () => {
+    vi.mocked(assetsService.listTranscripts).mockReturnValue(of([]));
+    fixture = TestBed.createComponent(Content);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+    const ready = component['assets']().find((item) => item.status === 'READY')!;
+
+    expect(component['canAnalyzeV2Highlights'](ready)).toBe(false);
+    component['findHighlightsV2'](ready);
+    expect(assetsService.createHighlightAnalysis).not.toHaveBeenCalledWith(ready.id, 'DETERMINISTIC_V2');
+    expect(component['highlightErrors']()[ready.id]).toContain('Semantic Highlights V2');
+
+    component['transcripts'].set({ [ready.id]: transcript('SUCCEEDED') });
+    vi.mocked(assetsService.createHighlightAnalysis).mockReturnValue(of({
+      ...analysis('PENDING'),
+      analyzerType: 'DETERMINISTIC_V2',
+    }));
+
+    expect(component['canAnalyzeV2Highlights'](ready)).toBe(true);
+    component['findHighlightsV2'](ready);
+
+    expect(assetsService.createHighlightAnalysis).toHaveBeenCalledWith(ready.id, 'DETERMINISTIC_V2');
+  });
+
+  it('labels DETERMINISTIC_V2 as Semantic Highlights V2 and shows V2 evidence, distinct from V1', () => {
+    fixture.detectChanges();
+
+    expect(component['analyzerLabel']('DETERMINISTIC_V2')).toBe('Semantic Highlights V2');
+    expect(component['analyzerLabel']('DETERMINISTIC_V1')).toBe('Baseline');
+
+    const v1Candidate = analysis('SUCCEEDED').candidates[0];
+    expect(component['isV2Candidate'](v1Candidate)).toBe(false);
+
+    const v2Candidate = { ...v1Candidate, hookScore: 0.8 };
+    expect(component['isV2Candidate'](v2Candidate)).toBe(true);
+    expect(component['explanationText']('CLEAN_OPENING')).toContain('clean sentence boundary');
+    expect(component['explanationText']('UNKNOWN_LABEL')).toBe('UNKNOWN_LABEL');
+  });
+
   it('starts transcription for an inspected ready asset with audio', () => {
     fixture.detectChanges();
     const ready = component['assets']().find((item) => item.status === 'READY')!;
@@ -1145,6 +1184,9 @@ describe('Content', () => {
       createdAt: '2026-09-10T08:01:00Z',
       updatedAt: '2026-09-10T08:01:10Z',
       completedAt: status === 'SUCCEEDED' ? '2026-09-10T08:01:10Z' : null,
+      configFingerprint: null,
+      configSnapshot: null,
+      transcriptCoverage: null,
       candidates: status === 'SUCCEEDED'
         ? [
             {
@@ -1158,6 +1200,17 @@ describe('Content', () => {
               reason: 'Deterministic Phase 7A candidate',
               rank: 1,
               createdAt: '2026-09-10T08:01:10Z',
+              hookScore: null,
+              completenessScore: null,
+              informationDensityScore: null,
+              speechDensityScore: null,
+              boundaryScore: null,
+              coverageScore: null,
+              sceneScore: null,
+              audioBoundaryScore: null,
+              repetitionPenalty: null,
+              explanationLabels: null,
+              transcriptExcerpt: null,
             },
           ]
         : [],

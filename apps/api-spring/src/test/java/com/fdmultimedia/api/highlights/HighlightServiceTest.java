@@ -195,6 +195,150 @@ class HighlightServiceTest {
     }
 
     @Test
+    void v2AnalysisRequiresSucceededTranscript() {
+        when(assets.findByWorkspaceAndId(workspace, asset.getId())).thenReturn(Optional.of(asset));
+        when(transcripts.findByWorkspaceAndAssetOrderByCreatedAtDesc(workspace, asset)).thenReturn(List.of());
+
+        assertThatThrownBy(() -> service.createAnalysis(
+                user, asset.getId(), new CreateHighlightAnalysisRequest("DETERMINISTIC_V2")))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting("reason")
+                .isEqualTo("TRANSCRIPT_REQUIRED");
+    }
+
+    @Test
+    void createsV2AnalysisWithConfigFingerprintAndSnapshot() {
+        MediaTranscript transcript = succeededTranscript();
+        when(assets.findByWorkspaceAndId(workspace, asset.getId())).thenReturn(Optional.of(asset));
+        when(transcripts.findByWorkspaceAndAssetOrderByCreatedAtDesc(workspace, asset)).thenReturn(List.of(transcript));
+        when(transcriptSegments.findByTranscriptOrderBySequenceAsc(transcript)).thenReturn(segments(transcript));
+        when(jobService.createForWorkspace(any(), any())).thenReturn(jobSummary(analysisJob));
+        when(jobService.getJobEntityForWorkspace(workspace, analysisJob.getId())).thenReturn(Optional.of(analysisJob));
+        when(analyses.save(any(HighlightAnalysis.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(analyses.findByWorkspaceAndAssetOrderByCreatedAtDesc(workspace, asset)).thenReturn(List.of());
+        when(candidates.findByAnalysisOrderByRankAsc(any())).thenReturn(List.of());
+
+        HighlightAnalysisSummary summary = service.createAnalysis(
+                user, asset.getId(), new CreateHighlightAnalysisRequest("DETERMINISTIC_V2"));
+
+        assertThat(summary.analyzerType()).isEqualTo("DETERMINISTIC_V2");
+        assertThat(summary.configFingerprint()).isNotBlank();
+        assertThat(summary.configSnapshot()).isNotEmpty();
+        ArgumentCaptor<JobCreateRequest> request = ArgumentCaptor.forClass(JobCreateRequest.class);
+        verify(jobService).createForWorkspace(any(), request.capture());
+        assertThat(request.getValue().payload()).containsEntry("transcriptId", transcript.getId().toString());
+    }
+
+    @Test
+    void reusesAnIdenticalPendingV2AnalysisInsteadOfCreatingADuplicateJob() {
+        MediaTranscript transcript = succeededTranscript();
+        when(assets.findByWorkspaceAndId(workspace, asset.getId())).thenReturn(Optional.of(asset));
+        when(transcripts.findByWorkspaceAndAssetOrderByCreatedAtDesc(workspace, asset)).thenReturn(List.of(transcript));
+        when(transcriptSegments.findByTranscriptOrderBySequenceAsc(transcript)).thenReturn(segments(transcript));
+        when(jobService.createForWorkspace(any(), any())).thenReturn(jobSummary(analysisJob));
+        when(jobService.getJobEntityForWorkspace(workspace, analysisJob.getId())).thenReturn(Optional.of(analysisJob));
+        when(analyses.save(any(HighlightAnalysis.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(candidates.findByAnalysisOrderByRankAsc(any())).thenReturn(List.of());
+        when(analyses.findByWorkspaceAndAssetOrderByCreatedAtDesc(workspace, asset)).thenReturn(List.of());
+
+        HighlightAnalysisSummary first = service.createAnalysis(
+                user, asset.getId(), new CreateHighlightAnalysisRequest("DETERMINISTIC_V2"));
+
+        when(analyses.findByWorkspaceAndAssetOrderByCreatedAtDesc(workspace, asset)).thenReturn(List.of(
+                new HighlightAnalysis(workspace, asset, analysisJob, "DETERMINISTIC_V2", "2",
+                        first.configFingerprint(), first.configSnapshot(), NOW)));
+
+        HighlightAnalysisSummary second = service.createAnalysis(
+                user, asset.getId(), new CreateHighlightAnalysisRequest("DETERMINISTIC_V2"));
+
+        assertThat(second.configFingerprint()).isEqualTo(first.configFingerprint());
+        verify(jobService, org.mockito.Mockito.times(1)).createForWorkspace(any(), any());
+    }
+
+    @Test
+    void authorizesV2AnalysisWithTranscriptSegmentsAndEffectiveConfig() {
+        MediaTranscript transcript = succeededTranscript();
+        Job v2Job = new Job(
+                workspace,
+                JobType.ANALYZE_HIGHLIGHTS,
+                Map.of(
+                        "assetId", asset.getId().toString(),
+                        "analyzerType", "DETERMINISTIC_V2",
+                        "transcriptId", transcript.getId().toString()),
+                3,
+                NOW);
+        HighlightAnalysis v2 = new HighlightAnalysis(workspace, asset, v2Job, "DETERMINISTIC_V2", "2", NOW);
+        v2Job.claim(worker, NOW.minusSeconds(1), NOW.plusSeconds(20));
+        when(jobService.requireOnlineWorker(workerPrincipal, "machine-1")).thenReturn(worker);
+        when(jobService.requireJobForWorkerWorkspace(worker, v2Job.getId())).thenReturn(v2Job);
+        when(analyses.findByAnalysisJobId(v2Job.getId())).thenReturn(Optional.of(v2));
+        when(transcripts.findByWorkspaceAndId(workspace, transcript.getId())).thenReturn(Optional.of(transcript));
+        when(transcriptSegments.findByTranscriptOrderBySequenceAsc(transcript)).thenReturn(segments(transcript));
+
+        WorkerHighlightAuthorizationResponse response = service.authorizeWorkerAnalysis(workerPrincipal, v2Job.getId(), "machine-1");
+
+        assertThat(response.analyzerType()).isEqualTo("DETERMINISTIC_V2");
+        assertThat(response.transcriptSegments()).hasSize(2);
+        assertThat(response.v2Config()).isNotNull();
+        assertThat(response.v2Config().minDurationMs()).isEqualTo(properties.getV2MinDurationMs());
+        assertThat(v2.getStatus()).isEqualTo(HighlightAnalysisStatus.RUNNING);
+    }
+
+    @Test
+    void completesV2AnalysisPersistingEvidenceAndTranscriptCoverage() {
+        MediaTranscript transcript = succeededTranscript();
+        Job v2Job = new Job(
+                workspace,
+                JobType.ANALYZE_HIGHLIGHTS,
+                Map.of(
+                        "assetId", asset.getId().toString(),
+                        "analyzerType", "DETERMINISTIC_V2",
+                        "transcriptId", transcript.getId().toString()),
+                3,
+                NOW);
+        HighlightAnalysis v2 = new HighlightAnalysis(workspace, asset, v2Job, "DETERMINISTIC_V2", "2", NOW);
+        v2.markRunning(NOW);
+        v2Job.claim(worker, NOW.minusSeconds(1), NOW.plusSeconds(20));
+        v2Job.start(worker, NOW, NOW.plusSeconds(20));
+        when(jobService.requireOnlineWorker(workerPrincipal, "machine-1")).thenReturn(worker);
+        when(jobService.requireJobForWorkerWorkspace(worker, v2Job.getId())).thenReturn(v2Job);
+        when(analyses.findByAnalysisJobId(v2Job.getId())).thenReturn(Optional.of(v2));
+        when(transcripts.findByWorkspaceAndId(workspace, transcript.getId())).thenReturn(Optional.of(transcript));
+        when(transcriptSegments.findByTranscriptOrderBySequenceAsc(transcript)).thenReturn(segments(transcript));
+        when(candidates.findByAnalysisOrderByRankAsc(v2)).thenAnswer(invocation -> List.of(
+                new HighlightCandidate(v2, 0, 5_000, new BigDecimal("0.9000"), "Deterministic V2: hook 0.80", 1,
+                        new HighlightCandidate.HighlightCandidateEvidence(
+                                new BigDecimal("0.8000"), new BigDecimal("1.0000"), new BigDecimal("0.6000"),
+                                new BigDecimal("0.7000"), new BigDecimal("0.9000"), new BigDecimal("1.0000"),
+                                null, null, BigDecimal.ZERO, List.of("CLEAN_OPENING"), "Bun venit pe platforma multimedia."),
+                        NOW)));
+
+        ArgumentCaptor<List<HighlightCandidate>> saved = ArgumentCaptor.forClass(List.class);
+
+        HighlightAnalysisSummary summary = service.completeWorkerAnalysis(
+                workerPrincipal,
+                v2Job.getId(),
+                new WorkerHighlightCompletionRequest(
+                        "machine-1",
+                        v2.getId(),
+                        asset.getId(),
+                        List.of(new WorkerHighlightCandidateRequest(
+                                0L, 5_000L, new BigDecimal("0.9"), "Deterministic V2: hook 0.80",
+                                new BigDecimal("0.80"), new BigDecimal("1.0"), new BigDecimal("0.60"),
+                                new BigDecimal("0.70"), new BigDecimal("0.90"), new BigDecimal("1.0"),
+                                null, null, BigDecimal.ZERO, List.of("CLEAN_OPENING"), "Bun venit pe platforma multimedia.")),
+                        new BigDecimal("0.85")));
+
+        assertThat(summary.status()).isEqualTo(HighlightAnalysisStatus.SUCCEEDED);
+        assertThat(summary.transcriptCoverage()).isEqualByComparingTo(new BigDecimal("0.8500"));
+        verify(candidates).saveAll(saved.capture());
+        HighlightCandidate persisted = saved.getValue().get(0);
+        assertThat(persisted.getHookScore()).isEqualByComparingTo(new BigDecimal("0.80"));
+        assertThat(persisted.getExplanationLabels()).containsExactly("CLEAN_OPENING");
+        assertThat(persisted.getTranscriptExcerpt()).isEqualTo("Bun venit pe platforma multimedia.");
+    }
+
+    @Test
     void completesAnalysisWithValidatedRankedCandidates() {
         analysis.markRunning(NOW);
         analysisJob.claim(worker, NOW.minusSeconds(1), NOW.plusSeconds(20));

@@ -611,6 +611,26 @@ The semantic provider receives transcript windows only. Do not send media URLs,
 storage keys, credentials, or arbitrary prompt material from browser input to a
 model provider.
 
+Manual Semantic Highlights V2 check:
+
+1. No extra setup needed — `DETERMINISTIC_V2` is deterministic Java on the
+   Worker (no Ollama, no network calls) and is always registered, unlike
+   `TRANSCRIPT_SEMANTIC_V1` above.
+2. Use a READY + INSPECTED video asset with a `SUCCEEDED` transcript (same
+   prerequisite as Transcript AI).
+3. In Content, click **Semantic Highlights V2**. The API should create an
+   `ANALYZE_HIGHLIGHTS` job with analyzer `DETERMINISTIC_V2`.
+4. Confirm the job reaches `SUCCEEDED` and candidates show a score breakdown
+   under "Why this highlight" (opening, completeness, speech/information
+   density, boundary fit, transcript coverage) plus deterministic explanation
+   labels and a transcript excerpt.
+5. Re-run the exact same analysis request (same asset, no config change) and
+   confirm it reuses the existing analysis (same `configFingerprint`, no
+   second `ANALYZE_HIGHLIGHTS` job) rather than duplicating work.
+6. Confirm re-running the analyzer twice on the same transcript produces
+   byte-identical candidate timestamps, scores, and ranking — this analyzer
+   has no randomness anywhere in its pipeline.
+
 Manual telemetry check:
 
 1. Start the Docker stack and a Java worker.

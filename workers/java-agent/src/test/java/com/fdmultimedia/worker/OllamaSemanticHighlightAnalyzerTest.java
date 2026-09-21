@@ -81,7 +81,8 @@ class OllamaSemanticHighlightAnalyzerTest {
                 UUID.randomUUID(),
                 List.of(
                         new HighlightTranscriptSegment(0, 0, 5_000, "Bun venit pe platforma multimedia."),
-                        new HighlightTranscriptSegment(1, 5_000, 10_000, "Acesta este un test semantic pentru clipuri.")));
+                        new HighlightTranscriptSegment(1, 5_000, 10_000, "Acesta este un test semantic pentru clipuri.")),
+                null);
     }
 
     private record TestOllama(HttpServer server, URI uri) implements AutoCloseable {

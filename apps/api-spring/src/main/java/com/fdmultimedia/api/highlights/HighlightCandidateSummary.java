@@ -2,6 +2,7 @@ package com.fdmultimedia.api.highlights;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 public record HighlightCandidateSummary(
@@ -14,5 +15,16 @@ public record HighlightCandidateSummary(
         BigDecimal score,
         String reason,
         int rank,
-        Instant createdAt) {
+        Instant createdAt,
+        BigDecimal hookScore,
+        BigDecimal completenessScore,
+        BigDecimal informationDensityScore,
+        BigDecimal speechDensityScore,
+        BigDecimal boundaryScore,
+        BigDecimal coverageScore,
+        BigDecimal sceneScore,
+        BigDecimal audioBoundaryScore,
+        BigDecimal repetitionPenalty,
+        List<String> explanationLabels,
+        String transcriptExcerpt) {
 }

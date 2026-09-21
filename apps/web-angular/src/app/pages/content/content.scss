@@ -403,6 +403,35 @@
   }
 }
 
+.content__evidence {
+  font-size: 0.85rem;
+
+  summary {
+    cursor: pointer;
+    color: #374151;
+    font-weight: 600;
+  }
+
+  .detail-grid {
+    margin-top: 0.5rem;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.content__explanations {
+  margin: 0.5rem 0 0;
+  padding-left: 1.1rem;
+  font-size: 0.85rem;
+  color: #374151;
+}
+
+.content__excerpt {
+  margin: 0.5rem 0 0;
+  font-style: italic;
+  color: #6b7280;
+  font-size: 0.85rem;
+}
+
 .content__muted {
   margin: 0;
   color: var(--color-text-muted);

@@ -210,9 +210,17 @@ public class RobotRunOrchestrator {
     private boolean resolveCandidate(RobotRun run, Robot robot, AuthenticatedUser principal, Instant now) {
         MediaAsset sourceAsset = run.getSourceAsset();
         if (run.getHighlightAnalysisId() == null) {
+            // TOP_HIGHLIGHT always targets the deterministic V2 analyzer (see
+            // RobotHighlightStrategy): it is transcript-driven but, unlike
+            // TRANSCRIPT_SEMANTIC_V1, has no optional LLM dependency, so it is
+            // always available and safe for unattended automation. If the
+            // source asset has no completed transcript yet, this deliberately
+            // fails the run with an explicit, actionable reason rather than
+            // silently falling back to the older position-based V1 heuristic.
+            String v2Type = highlightProperties.getV2AnalyzerType();
             List<HighlightAnalysis> existing = analyses.findByWorkspaceAndAssetOrderByCreatedAtDesc(run.getWorkspace(), sourceAsset);
             Optional<HighlightAnalysis> reusable = existing.stream()
-                    .filter(a -> highlightProperties.getDeterministicAnalyzerType().equals(a.getAnalyzerType()))
+                    .filter(a -> v2Type.equals(a.getAnalyzerType()))
                     .filter(a -> a.getStatus() != HighlightAnalysisStatus.FAILED)
                     .findFirst();
             if (reusable.isPresent()) {
@@ -227,7 +235,7 @@ public class RobotRunOrchestrator {
             try {
                 created = highlightService.createAnalysis(
                         principal, sourceAsset.getId(),
-                        new CreateHighlightAnalysisRequest(highlightProperties.getDeterministicAnalyzerType()));
+                        new CreateHighlightAnalysisRequest(v2Type));
             } catch (ResponseStatusException ex) {
                 run.markFailed("SOURCE_UNAVAILABLE", ex.getReason(), now);
                 return false;

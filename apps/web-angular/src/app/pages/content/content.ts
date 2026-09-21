@@ -315,7 +315,38 @@ export class Content implements OnInit, OnDestroy {
     if (analyzerType === 'DETERMINISTIC_V1') {
       return 'Baseline';
     }
+    if (analyzerType === 'DETERMINISTIC_V2') {
+      return 'Semantic Highlights V2';
+    }
     return analyzerType;
+  }
+
+  protected isV2Candidate(candidate: HighlightCandidateSummary): boolean {
+    return candidate.hookScore !== null;
+  }
+
+  /** Friendly, deterministic wording for V2's explanation labels — no AI generation. */
+  protected explanationText(label: string): string {
+    switch (label) {
+      case 'CLEAN_OPENING':
+        return 'Starts at a clean sentence boundary.';
+      case 'QUESTION_OPENING':
+        return 'Opens with a question.';
+      case 'COMPLETE_SENTENCE_BOUNDARIES':
+        return 'Starts and ends at complete sentence boundaries.';
+      case 'HIGH_SPEECH_DENSITY':
+        return 'Well-paced, mostly continuous speech.';
+      case 'HIGH_INFORMATION_DENSITY':
+        return 'Dense with content, few filler words.';
+      case 'LEADING_SILENCE_PENALTY':
+        return 'Has a pause before speech starts.';
+      case 'LOW_TRANSCRIPT_COVERAGE':
+        return 'Limited transcript evidence for this window.';
+      case 'REPETITIVE_CONTENT_PENALTY':
+        return 'Echoes another highlight’s content.';
+      default:
+        return label;
+    }
   }
 
   protected transcriptProviderLabel(transcript: MediaTranscriptSummary): string {
@@ -406,6 +437,11 @@ export class Content implements OnInit, OnDestroy {
   protected canAnalyzeSemanticHighlights(asset: MediaAssetSummary): boolean {
     const transcript = this.transcript(asset);
     return this.canAnalyzeHighlights(asset) && transcript?.status === 'SUCCEEDED' && (transcript.segments?.length ?? 0) > 0;
+  }
+
+  /** SEMANTIC_HIGHLIGHTS_V2 is deterministic (no LLM), but still transcript-driven like TRANSCRIPT_SEMANTIC_V1. */
+  protected canAnalyzeV2Highlights(asset: MediaAssetSummary): boolean {
+    return this.canAnalyzeSemanticHighlights(asset);
   }
 
   protected canTranscribe(asset: MediaAssetSummary): boolean {
@@ -518,9 +554,15 @@ export class Content implements OnInit, OnDestroy {
     this.startHighlightAnalysis(asset, 'TRANSCRIPT_SEMANTIC_V1', 'A completed transcript is required for semantic highlights.', 'Semantic highlight analysis could not be started.');
   }
 
+  /** SEMANTIC_HIGHLIGHTS_V2 — deterministic multimodal candidate ranking, no LLM required. */
+  protected findHighlightsV2(asset: MediaAssetSummary): void {
+    this.startHighlightAnalysis(asset, 'DETERMINISTIC_V2', 'A completed transcript is required for Semantic Highlights V2.', 'Semantic Highlights V2 analysis could not be started.');
+  }
+
   private startHighlightAnalysis(asset: MediaAssetSummary, analyzer: string, validationMessage: string, errorMessage: string): void {
     this.highlightErrors.update((errors) => ({ ...errors, [asset.id]: null }));
-    if (analyzer === 'TRANSCRIPT_SEMANTIC_V1' ? !this.canAnalyzeSemanticHighlights(asset) : !this.canAnalyzeHighlights(asset)) {
+    const transcriptDriven = analyzer === 'TRANSCRIPT_SEMANTIC_V1' || analyzer === 'DETERMINISTIC_V2';
+    if (transcriptDriven ? !this.canAnalyzeSemanticHighlights(asset) : !this.canAnalyzeHighlights(asset)) {
       this.highlightErrors.update((errors) => ({ ...errors, [asset.id]: validationMessage }));
       return;
     }

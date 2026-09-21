@@ -15,10 +15,15 @@ import jakarta.persistence.OneToMany;
 import jakarta.persistence.OrderBy;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 @Entity
 @Table(name = "highlight_analyses")
@@ -64,6 +69,29 @@ public class HighlightAnalysis {
     @Column(name = "completed_at")
     private Instant completedAt;
 
+    /**
+     * Deterministic SHA-256 fingerprint over the analyzer version plus its
+     * effective configuration at the moment this analysis was created. Lets a
+     * repeat request for the same asset/analyzer/config reuse a still-valid
+     * analysis instead of creating a duplicate (see {@code HighlightService}),
+     * and gives every persisted result an auditable "what config produced
+     * this" trail. Null for analyzers that don't populate it (pre-V2 rows).
+     */
+    @Column(name = "config_fingerprint")
+    private String configFingerprint;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "config_snapshot", columnDefinition = "jsonb")
+    private Map<String, Object> configSnapshot;
+
+    /**
+     * Fraction (0..1) of the asset's duration actually spanned by usable
+     * transcript segments, as measured by the analyzer. Only populated by
+     * transcript-driven analyzers (V2); null otherwise.
+     */
+    @Column(name = "transcript_coverage")
+    private BigDecimal transcriptCoverage;
+
     @OneToMany(mappedBy = "analysis")
     @OrderBy("rank ASC")
     private List<HighlightCandidate> candidates = new ArrayList<>();
@@ -72,6 +100,11 @@ public class HighlightAnalysis {
     }
 
     public HighlightAnalysis(Workspace workspace, MediaAsset asset, Job analysisJob, String analyzerType, String analyzerVersion, Instant now) {
+        this(workspace, asset, analysisJob, analyzerType, analyzerVersion, null, null, now);
+    }
+
+    public HighlightAnalysis(Workspace workspace, MediaAsset asset, Job analysisJob, String analyzerType, String analyzerVersion,
+            String configFingerprint, Map<String, Object> configSnapshot, Instant now) {
         this.id = UUID.randomUUID();
         this.workspace = workspace;
         this.asset = asset;
@@ -79,6 +112,8 @@ public class HighlightAnalysis {
         this.analysisJob = analysisJob;
         this.analyzerType = analyzerType;
         this.analyzerVersion = analyzerVersion;
+        this.configFingerprint = configFingerprint;
+        this.configSnapshot = configSnapshot == null ? null : new LinkedHashMap<>(configSnapshot);
         this.createdAt = now;
         this.updatedAt = now;
     }
@@ -116,12 +151,19 @@ public class HighlightAnalysis {
     }
 
     public void markSucceeded(Instant now) {
+        markSucceeded(null, now);
+    }
+
+    public void markSucceeded(BigDecimal transcriptCoverage, Instant now) {
         if (status != HighlightAnalysisStatus.RUNNING && status != HighlightAnalysisStatus.PENDING) {
             throw new IllegalStateException("Analysis is not active");
         }
         status = HighlightAnalysisStatus.SUCCEEDED;
         errorCode = null;
         errorMessage = null;
+        if (transcriptCoverage != null) {
+            this.transcriptCoverage = transcriptCoverage;
+        }
         completedAt = now;
         updatedAt = now;
     }
@@ -153,5 +195,8 @@ public class HighlightAnalysis {
     public Instant getCreatedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
     public Instant getCompletedAt() { return completedAt; }
+    public String getConfigFingerprint() { return configFingerprint; }
+    public Map<String, Object> getConfigSnapshot() { return configSnapshot == null ? null : java.util.Collections.unmodifiableMap(configSnapshot); }
+    public BigDecimal getTranscriptCoverage() { return transcriptCoverage; }
     public List<HighlightCandidate> getCandidates() { return candidates; }
 }

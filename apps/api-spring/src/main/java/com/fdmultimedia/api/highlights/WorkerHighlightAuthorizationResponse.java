@@ -13,5 +13,6 @@ public record WorkerHighlightAuthorizationResponse(
         String analyzerType,
         String analyzerVersion,
         UUID transcriptId,
-        List<WorkerHighlightTranscriptSegmentResponse> transcriptSegments) {
+        List<WorkerHighlightTranscriptSegmentResponse> transcriptSegments,
+        WorkerHighlightV2ConfigResponse v2Config) {
 }
