@@ -627,9 +627,10 @@ public final class WorkerAgent {
         return List.copyOf(types);
     }
 
-    private static List<String> supportedHighlightAnalyzers(boolean semanticHighlightAvailable) {
+    static List<String> supportedHighlightAnalyzers(boolean semanticHighlightAvailable) {
         List<String> analyzers = new ArrayList<>();
         analyzers.add("DETERMINISTIC_V1");
+        analyzers.add("DETERMINISTIC_V2");
         if (semanticHighlightAvailable) {
             analyzers.add("TRANSCRIPT_SEMANTIC_V1");
         }
