@@ -2,6 +2,7 @@ package com.fdmultimedia.api.highlights;
 
 import com.fdmultimedia.api.assets.MediaAsset;
 import com.fdmultimedia.api.jobs.Job;
+import com.fdmultimedia.api.transcripts.MediaTranscript;
 import com.fdmultimedia.api.workspaces.Workspace;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -92,6 +93,19 @@ public class HighlightAnalysis {
     @Column(name = "transcript_coverage")
     private BigDecimal transcriptCoverage;
 
+    @Column(name = "requested_analyzer_type")
+    private String requestedAnalyzerType;
+
+    @Column(name = "effective_analyzer_type")
+    private String effectiveAnalyzerType;
+
+    @Column(name = "fallback_reason")
+    private String fallbackReason;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "transcript_id")
+    private MediaTranscript transcript;
+
     @OneToMany(mappedBy = "analysis")
     @OrderBy("rank ASC")
     private List<HighlightCandidate> candidates = new ArrayList<>();
@@ -116,6 +130,14 @@ public class HighlightAnalysis {
         this.configSnapshot = configSnapshot == null ? null : new LinkedHashMap<>(configSnapshot);
         this.createdAt = now;
         this.updatedAt = now;
+    }
+
+    public void setExecutionProvenance(String requestedAnalyzerType, String effectiveAnalyzerType,
+            String fallbackReason, MediaTranscript transcript) {
+        this.requestedAnalyzerType = requestedAnalyzerType;
+        this.effectiveAnalyzerType = effectiveAnalyzerType;
+        this.fallbackReason = fallbackReason;
+        this.transcript = transcript;
     }
 
     @PrePersist
@@ -198,5 +220,9 @@ public class HighlightAnalysis {
     public String getConfigFingerprint() { return configFingerprint; }
     public Map<String, Object> getConfigSnapshot() { return configSnapshot == null ? null : java.util.Collections.unmodifiableMap(configSnapshot); }
     public BigDecimal getTranscriptCoverage() { return transcriptCoverage; }
+    public String getRequestedAnalyzerType() { return requestedAnalyzerType; }
+    public String getEffectiveAnalyzerType() { return effectiveAnalyzerType; }
+    public String getFallbackReason() { return fallbackReason; }
+    public MediaTranscript getTranscript() { return transcript; }
     public List<HighlightCandidate> getCandidates() { return candidates; }
 }

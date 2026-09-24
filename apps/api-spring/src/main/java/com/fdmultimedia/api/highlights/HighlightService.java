@@ -116,13 +116,43 @@ public class HighlightService {
         MediaAsset asset = assets.findByWorkspaceAndId(workspace, assetId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Asset not found"));
         String analyzerType = requestedAnalyzer(request);
+        String requestedAnalyzerType = analyzerType;
+        String fallbackReason = null;
+        MediaTranscript provenanceTranscript = null;
         String analyzerVersion;
         String configFingerprint = null;
         Map<String, Object> configSnapshot = null;
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("assetId", asset.getId().toString());
         payload.put("analyzerType", analyzerType);
-        if (isSemanticAnalyzer(analyzerType)) {
+        if (isDeterministicV3Analyzer(analyzerType)) {
+            validateSourceForV2Analysis(asset);
+            Optional<MediaTranscript> latest = latestSucceededTranscript(workspace, asset);
+            if (latest.isEmpty()) {
+                analyzerType = properties.getDeterministicAnalyzerType();
+                analyzerVersion = properties.getDeterministicAnalyzerVersion();
+                fallbackReason = "TRANSCRIPT_MISSING";
+            } else {
+                MediaTranscript transcript = latest.get();
+                String reason = v3FallbackReason(asset, transcript);
+                provenanceTranscript = transcript;
+                if (reason == null) {
+                    payload.put("transcriptId", transcript.getId().toString());
+                    analyzerVersion = properties.getV3AnalyzerVersion();
+                    configSnapshot = v2ConfigSnapshot();
+                } else {
+                    analyzerType = properties.getV2AnalyzerType();
+                    analyzerVersion = properties.getV2AnalyzerVersion();
+                    fallbackReason = reason;
+                    payload.put("transcriptId", transcript.getId().toString());
+                    configSnapshot = v2ConfigSnapshot();
+                }
+            }
+            payload.put("analyzerType", analyzerType);
+            configFingerprint = fingerprint(List.of(requestedAnalyzerType, analyzerType, analyzerVersion,
+                    asset.getId(), provenanceTranscript == null ? "none" : provenanceTranscript.getId(),
+                    configSnapshot == null ? "none" : configSnapshot.toString(), fallbackReason == null ? "none" : fallbackReason));
+        } else if (isSemanticAnalyzer(analyzerType)) {
             validateSourceForSemanticAnalysis(asset);
             MediaTranscript transcript = requireSucceededTranscript(workspace, asset);
             validateTranscriptContext(asset, transcript);
@@ -138,8 +168,9 @@ public class HighlightService {
             configFingerprint = fingerprint(List.of(
                     analyzerType, analyzerVersion, asset.getId(), transcript.getId(), configSnapshot.toString()));
             String finalFingerprint = configFingerprint;
+            String finalAnalyzerType = analyzerType;
             Optional<HighlightAnalysis> reusable = analyses.findByWorkspaceAndAssetOrderByCreatedAtDesc(workspace, asset).stream()
-                    .filter(a -> analyzerType.equals(a.getAnalyzerType()))
+                    .filter(a -> finalAnalyzerType.equals(a.getAnalyzerType()))
                     .filter(a -> finalFingerprint.equals(a.getConfigFingerprint()))
                     .filter(a -> a.getStatus() != HighlightAnalysisStatus.FAILED)
                     .findFirst();
@@ -168,6 +199,7 @@ public class HighlightService {
                 configFingerprint,
                 configSnapshot,
                 now));
+        analysis.setExecutionProvenance(requestedAnalyzerType, analyzerType, fallbackReason, provenanceTranscript);
         return toSummary(analysis);
     }
 
@@ -257,8 +289,9 @@ public class HighlightService {
         List<WorkerHighlightTranscriptSegmentResponse> transcriptContext = List.of();
         UUID transcriptId = null;
         boolean v2 = isDeterministicV2Analyzer(analysis.getAnalyzerType());
-        if (isSemanticAnalyzer(analysis.getAnalyzerType()) || v2) {
-            if (v2) {
+        boolean v3 = isDeterministicV3Analyzer(analysis.getAnalyzerType());
+        if (isSemanticAnalyzer(analysis.getAnalyzerType()) || v2 || v3) {
+            if (v2 || v3) {
                 validateSourceForV2Analysis(asset);
             } else {
                 validateSourceForSemanticAnalysis(asset);
@@ -272,6 +305,7 @@ public class HighlightService {
             transcriptId = transcript.getId();
             transcriptContext = transcriptSegments.findByTranscriptOrderBySequenceAsc(transcript).stream()
                     .map(segment -> new WorkerHighlightTranscriptSegmentResponse(
+                            segment.getId(),
                             segment.getSequence(),
                             segment.getStartMs(),
                             segment.getEndMs(),
@@ -293,7 +327,7 @@ public class HighlightService {
                 analysis.getAnalyzerVersion(),
                 transcriptId,
                 transcriptContext,
-                v2 ? v2Config() : null);
+                (v2 || v3) ? v2Config() : null);
     }
 
     private WorkerHighlightV2ConfigResponse v2Config() {
@@ -331,8 +365,9 @@ public class HighlightService {
         }
         validateJobReferencesAsset(job, asset);
         boolean v2 = isDeterministicV2Analyzer(analysis.getAnalyzerType());
-        if (isSemanticAnalyzer(analysis.getAnalyzerType()) || v2) {
-            if (v2) {
+        boolean v3 = isDeterministicV3Analyzer(analysis.getAnalyzerType());
+        if (isSemanticAnalyzer(analysis.getAnalyzerType()) || v2 || v3) {
+            if (v2 || v3) {
                 validateSourceForV2Analysis(asset);
             } else {
                 validateSourceForSemanticAnalysis(asset);
@@ -356,7 +391,7 @@ public class HighlightService {
                         now))
                 .toList();
         candidates.saveAll(rows);
-        BigDecimal transcriptCoverage = v2 ? clampUnit(request.transcriptCoverage()) : null;
+        BigDecimal transcriptCoverage = (v2 || v3) ? clampUnit(request.transcriptCoverage()) : null;
         analysis.markSucceeded(transcriptCoverage, now);
         jobService.completeOwnedJob(job, worker, Map.of(
                 "analysisId", analysis.getId().toString(),
@@ -509,7 +544,8 @@ public class HighlightService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Too many highlight candidates");
         }
         long sourceDuration = asset.getDurationMs();
-        boolean transcriptDriven = isSemanticAnalyzer(analysis.getAnalyzerType()) || isDeterministicV2Analyzer(analysis.getAnalyzerType());
+        boolean transcriptDriven = isSemanticAnalyzer(analysis.getAnalyzerType())
+                || isDeterministicV2Analyzer(analysis.getAnalyzerType()) || isDeterministicV3Analyzer(analysis.getAnalyzerType());
         List<TranscriptSegment> groundingSegments = transcriptDriven
                 ? transcriptSegments.findByTranscriptOrderBySequenceAsc(requireTranscriptFromJob(job, asset))
                 : List.of();
@@ -561,6 +597,7 @@ public class HighlightService {
         if (reason.isBlank() || reason.length() > properties.getMaxReasonLength()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Candidate reason is invalid");
         }
+        validateV3Evidence(candidate, groundingSegments);
         HighlightCandidate.HighlightCandidateEvidence evidence = new HighlightCandidate.HighlightCandidateEvidence(
                 clampUnit(candidate.hookScore()),
                 clampUnit(candidate.completenessScore()),
@@ -572,8 +609,32 @@ public class HighlightService {
                 clampUnit(candidate.audioBoundaryScore()),
                 clampUnit(candidate.repetitionPenalty()),
                 boundedExplanationLabels(candidate.explanationLabels()),
-                boundedExcerpt(candidate.transcriptExcerpt()));
+                boundedExcerpt(candidate.transcriptExcerpt()),
+                clampUnit(candidate.baseScore()), clampUnit(candidate.lexicalScore()), clampUnit(candidate.emphasisScore()),
+                clampUnit(candidate.selfContainedScore()), clampUnit(candidate.semanticScore()),
+                candidate.wordCount() == null ? null : Math.max(0, candidate.wordCount()),
+                candidate.firstTranscriptSegmentId(), candidate.lastTranscriptSegmentId(),
+                candidate.boundaryStartAdjustmentMs(), candidate.boundaryEndAdjustmentMs());
         return new CandidateValue(startMs, endMs, score.setScale(4, RoundingMode.HALF_UP), reason, 0, evidence);
+    }
+
+    private void validateV3Evidence(WorkerHighlightCandidateRequest candidate, List<TranscriptSegment> groundingSegments) {
+        if (candidate.wordCount() != null && (candidate.wordCount() < 0 || candidate.wordCount() > 10_000)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Candidate word count is invalid");
+        }
+        if (isBoundaryAdjustmentInvalid(candidate.boundaryStartAdjustmentMs())
+                || isBoundaryAdjustmentInvalid(candidate.boundaryEndAdjustmentMs())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Candidate boundary adjustment is invalid");
+        }
+        java.util.Set<UUID> segmentIds = groundingSegments.stream().map(TranscriptSegment::getId).collect(java.util.stream.Collectors.toSet());
+        if (candidate.firstTranscriptSegmentId() != null && !segmentIds.contains(candidate.firstTranscriptSegmentId())
+                || candidate.lastTranscriptSegmentId() != null && !segmentIds.contains(candidate.lastTranscriptSegmentId())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Candidate transcript provenance is invalid");
+        }
+    }
+
+    private boolean isBoundaryAdjustmentInvalid(Long adjustmentMs) {
+        return adjustmentMs != null && (adjustmentMs < -3_000 || adjustmentMs > 3_000);
     }
 
     private static final int MAX_EXPLANATION_LABELS = 12;
@@ -615,6 +676,33 @@ public class HighlightService {
 
     private boolean isDeterministicV2Analyzer(String analyzerType) {
         return properties.getV2AnalyzerType().equals(analyzerType);
+    }
+
+    private boolean isDeterministicV3Analyzer(String analyzerType) {
+        return properties.getV3AnalyzerType().equals(analyzerType);
+    }
+
+    private Optional<MediaTranscript> latestSucceededTranscript(Workspace workspace, MediaAsset asset) {
+        return transcripts.findByWorkspaceAndAssetOrderByCreatedAtDesc(workspace, asset).stream()
+                .filter(transcript -> transcript.getStatus() == TranscriptStatus.SUCCEEDED)
+                .findFirst();
+    }
+
+    private String v3FallbackReason(MediaAsset asset, MediaTranscript transcript) {
+        String language = transcript.getDetectedLanguage();
+        if (language != null && !language.isBlank() && !language.toLowerCase(java.util.Locale.ROOT).startsWith("en")) {
+            return "TRANSCRIPT_LANGUAGE_UNSUPPORTED";
+        }
+        List<TranscriptSegment> segments = transcriptSegments.findByTranscriptOrderBySequenceAsc(transcript);
+        if (segments.isEmpty() || segments.stream().allMatch(s -> s.getText() == null || s.getText().isBlank())) {
+            return "TRANSCRIPT_EMPTY";
+        }
+        if (segments.stream().anyMatch(s -> s.getStartMs() < 0 || s.getEndMs() <= s.getStartMs()
+                || s.getStartMs() >= asset.getDurationMs() || s.getEndMs() > asset.getDurationMs() + 1000)) {
+            return "TRANSCRIPT_INVALID_TIMESTAMPS";
+        }
+        long words = segments.stream().flatMap(s -> java.util.Arrays.stream(s.getText().trim().split("\\s+"))).filter(w -> !w.isBlank()).count();
+        return words < 6 ? "TRANSCRIPT_INSUFFICIENT_SPEECH" : null;
     }
 
     private MediaTranscript requireSucceededTranscript(Workspace workspace, MediaAsset asset) {
@@ -723,6 +811,10 @@ public class HighlightService {
                 analysis.getConfigFingerprint(),
                 analysis.getConfigSnapshot(),
                 analysis.getTranscriptCoverage(),
+                analysis.getRequestedAnalyzerType(),
+                analysis.getEffectiveAnalyzerType(),
+                analysis.getFallbackReason(),
+                analysis.getTranscript() == null ? null : analysis.getTranscript().getId(),
                 candidates.findByAnalysisOrderByRankAsc(analysis).stream()
                         .map(this::toSummary)
                         .toList());
@@ -750,7 +842,10 @@ public class HighlightService {
                 candidate.getAudioBoundaryScore(),
                 candidate.getRepetitionPenalty(),
                 candidate.getExplanationLabels(),
-                candidate.getTranscriptExcerpt());
+                candidate.getTranscriptExcerpt(), candidate.getBaseScore(), candidate.getLexicalScore(),
+                candidate.getEmphasisScore(), candidate.getSelfContainedScore(), candidate.getSemanticScore(),
+                candidate.getWordCount(), candidate.getFirstTranscriptSegmentId(), candidate.getLastTranscriptSegmentId(),
+                candidate.getBoundaryStartAdjustmentMs(), candidate.getBoundaryEndAdjustmentMs());
     }
 
     private Workspace currentWorkspace(AuthenticatedUser principal) {

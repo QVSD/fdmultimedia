@@ -613,6 +613,16 @@ model provider.
 
 Manual Semantic Highlights V2 check:
 
+Manual Transcript-aware V3 check:
+
+1. Import and inspect English speech media, then run real transcription.
+2. Confirm the Worker heartbeat advertises `DETERMINISTIC_V3`.
+3. In Content choose **Transcript-aware V3** and inspect transcript provenance, excerpt, component scores and rank.
+4. Create a clip and 9:16 derivative from rank 1; both must become `READY + INSPECTED` and remain private.
+5. `TOP_HIGHLIGHT` prefers V3. No Ollama or cloud AI runtime is required.
+
+Manual Semantic Highlights V2 check (legacy compatibility):
+
 1. No extra setup needed — `DETERMINISTIC_V2` is deterministic Java on the
    Worker (no Ollama, no network calls) and is always registered, unlike
    `TRANSCRIPT_SEMANTIC_V1` above.

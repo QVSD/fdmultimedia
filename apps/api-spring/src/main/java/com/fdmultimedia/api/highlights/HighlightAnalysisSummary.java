@@ -21,12 +21,16 @@ public record HighlightAnalysisSummary(
         String configFingerprint,
         Map<String, Object> configSnapshot,
         BigDecimal transcriptCoverage,
+        String requestedAnalyzerType,
+        String effectiveAnalyzerType,
+        String fallbackReason,
+        UUID transcriptId,
         List<HighlightCandidateSummary> candidates) {
 
     public HighlightAnalysisSummary(UUID id, UUID assetId, HighlightAnalysisStatus status, UUID analysisJobId,
             String analyzerType, String analyzerVersion, String errorCode, String errorMessage,
             Instant createdAt, Instant updatedAt, Instant completedAt, List<HighlightCandidateSummary> candidates) {
         this(id, assetId, status, analysisJobId, analyzerType, analyzerVersion, errorCode, errorMessage,
-                createdAt, updatedAt, completedAt, null, null, null, candidates);
+                createdAt, updatedAt, completedAt, null, null, null, null, null, null, null, candidates);
     }
 }

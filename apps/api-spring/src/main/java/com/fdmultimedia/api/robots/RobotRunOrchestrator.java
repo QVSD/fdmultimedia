@@ -210,19 +210,25 @@ public class RobotRunOrchestrator {
     private boolean resolveCandidate(RobotRun run, Robot robot, AuthenticatedUser principal, Instant now) {
         MediaAsset sourceAsset = run.getSourceAsset();
         if (run.getHighlightAnalysisId() == null) {
-            // TOP_HIGHLIGHT always targets the deterministic V2 analyzer (see
-            // RobotHighlightStrategy): it is transcript-driven but, unlike
-            // TRANSCRIPT_SEMANTIC_V1, has no optional LLM dependency, so it is
-            // always available and safe for unattended automation. If the
-            // source asset has no completed transcript yet, this deliberately
-            // fails the run with an explicit, actionable reason rather than
-            // silently falling back to the older position-based V1 heuristic.
-            String v2Type = highlightProperties.getV2AnalyzerType();
+            // TOP_HIGHLIGHT prefers deterministic transcript-aware V3. The
+            // HighlightService records an explicit effective analyzer and
+            // fallback reason when the transcript cannot support V3.
+            String v2Type = highlightProperties.getV3AnalyzerType();
+            if (v2Type == null || v2Type.isBlank()) {
+                v2Type = highlightProperties.getV2AnalyzerType();
+            }
+            String preferredType = v2Type;
             List<HighlightAnalysis> existing = analyses.findByWorkspaceAndAssetOrderByCreatedAtDesc(run.getWorkspace(), sourceAsset);
             Optional<HighlightAnalysis> reusable = existing.stream()
-                    .filter(a -> v2Type.equals(a.getAnalyzerType()))
+                    .filter(a -> preferredType.equals(a.getRequestedAnalyzerType()) || preferredType.equals(a.getAnalyzerType()))
                     .filter(a -> a.getStatus() != HighlightAnalysisStatus.FAILED)
                     .findFirst();
+            if (reusable.isEmpty() && !preferredType.equals(highlightProperties.getV2AnalyzerType())) {
+                reusable = existing.stream()
+                        .filter(a -> highlightProperties.getV2AnalyzerType().equals(a.getAnalyzerType()))
+                        .filter(a -> a.getStatus() != HighlightAnalysisStatus.FAILED)
+                        .findFirst();
+            }
             if (reusable.isPresent()) {
                 HighlightAnalysis analysis = reusable.get();
                 run.setHighlightAnalysisId(analysis.getId());

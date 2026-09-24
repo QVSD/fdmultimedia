@@ -26,5 +26,15 @@ public record HighlightCandidateSummary(
         BigDecimal audioBoundaryScore,
         BigDecimal repetitionPenalty,
         List<String> explanationLabels,
-        String transcriptExcerpt) {
+        String transcriptExcerpt,
+        BigDecimal baseScore,
+        BigDecimal lexicalScore,
+        BigDecimal emphasisScore,
+        BigDecimal selfContainedScore,
+        BigDecimal semanticScore,
+        Integer wordCount,
+        UUID firstTranscriptSegmentId,
+        UUID lastTranscriptSegmentId,
+        Long boundaryStartAdjustmentMs,
+        Long boundaryEndAdjustmentMs) {
 }

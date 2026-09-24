@@ -2,7 +2,8 @@ package com.fdmultimedia.api.robots;
 
 /**
  * TOP_HIGHLIGHT: select the highest-ranked candidate from a completed
- * {@code DETERMINISTIC_V2} highlight analysis (see {@code HighlightService},
+ * preferred deterministic highlight analysis (V3 when transcript evidence is usable,
+ * with an audited fallback; see {@code HighlightService}),
  * {@code DeterministicMultimodalHighlightAnalyzer} on the Worker — Phase 17A,
  * "SEMANTIC_HIGHLIGHTS_V2"). V2 is transcript-driven (deterministic
  * candidate generation, feature scoring, and non-maximum suppression over

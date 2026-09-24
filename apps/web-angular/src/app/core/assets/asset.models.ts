@@ -69,6 +69,16 @@ export interface HighlightCandidateSummary {
   repetitionPenalty: number | null;
   explanationLabels: string[] | null;
   transcriptExcerpt: string | null;
+  baseScore?: number | null;
+  lexicalScore?: number | null;
+  emphasisScore?: number | null;
+  selfContainedScore?: number | null;
+  semanticScore?: number | null;
+  wordCount?: number | null;
+  firstTranscriptSegmentId?: string | null;
+  lastTranscriptSegmentId?: string | null;
+  boundaryStartAdjustmentMs?: number | null;
+  boundaryEndAdjustmentMs?: number | null;
 }
 
 export interface HighlightAnalysisSummary {
@@ -86,6 +96,10 @@ export interface HighlightAnalysisSummary {
   configFingerprint: string | null;
   configSnapshot: Record<string, unknown> | null;
   transcriptCoverage: number | null;
+  requestedAnalyzerType?: string | null;
+  effectiveAnalyzerType?: string | null;
+  fallbackReason?: string | null;
+  transcriptId?: string | null;
   candidates: HighlightCandidateSummary[];
 }
 

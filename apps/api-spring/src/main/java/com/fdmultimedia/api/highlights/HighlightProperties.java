@@ -25,6 +25,8 @@ public class HighlightProperties {
     // provider involved, so — unlike TRANSCRIPT_SEMANTIC_V1 — it has no
     // optional-runtime gate and is always available.
     private String v2AnalyzerType = "DETERMINISTIC_V2";
+    private String v3AnalyzerType = "DETERMINISTIC_V3";
+    private String v3AnalyzerVersion = "TRANSCRIPT_SEMANTIC_V3";
     private String v2AnalyzerVersion = "2";
     private long v2MinDurationMs = Duration.ofSeconds(15).toMillis();
     private long v2PreferredMinDurationMs = Duration.ofSeconds(25).toMillis();
@@ -106,6 +108,10 @@ public class HighlightProperties {
 
     public String getV2AnalyzerType() { return v2AnalyzerType; }
     public void setV2AnalyzerType(String v2AnalyzerType) { this.v2AnalyzerType = v2AnalyzerType; }
+    public String getV3AnalyzerType() { return v3AnalyzerType; }
+    public void setV3AnalyzerType(String v3AnalyzerType) { this.v3AnalyzerType = v3AnalyzerType; }
+    public String getV3AnalyzerVersion() { return v3AnalyzerVersion; }
+    public void setV3AnalyzerVersion(String v3AnalyzerVersion) { this.v3AnalyzerVersion = v3AnalyzerVersion; }
     public String getV2AnalyzerVersion() { return v2AnalyzerVersion; }
     public void setV2AnalyzerVersion(String v2AnalyzerVersion) { this.v2AnalyzerVersion = v2AnalyzerVersion; }
     public long getV2MinDurationMs() { return v2MinDurationMs; }

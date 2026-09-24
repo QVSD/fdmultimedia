@@ -82,6 +82,17 @@ public class HighlightCandidate {
     @Column(name = "transcript_excerpt")
     private String transcriptExcerpt;
 
+    @Column(name = "base_score") private BigDecimal baseScore;
+    @Column(name = "lexical_score") private BigDecimal lexicalScore;
+    @Column(name = "emphasis_score") private BigDecimal emphasisScore;
+    @Column(name = "self_contained_score") private BigDecimal selfContainedScore;
+    @Column(name = "semantic_score") private BigDecimal semanticScore;
+    @Column(name = "word_count") private Integer wordCount;
+    @Column(name = "first_transcript_segment_id") private UUID firstTranscriptSegmentId;
+    @Column(name = "last_transcript_segment_id") private UUID lastTranscriptSegmentId;
+    @Column(name = "boundary_start_adjustment_ms") private Long boundaryStartAdjustmentMs;
+    @Column(name = "boundary_end_adjustment_ms") private Long boundaryEndAdjustmentMs;
+
     protected HighlightCandidate() {
     }
 
@@ -113,6 +124,16 @@ public class HighlightCandidate {
             this.repetitionPenalty = evidence.repetitionPenalty();
             this.explanationLabels = evidence.explanationLabels() == null ? null : List.copyOf(evidence.explanationLabels());
             this.transcriptExcerpt = evidence.transcriptExcerpt();
+            this.baseScore = evidence.baseScore();
+            this.lexicalScore = evidence.lexicalScore();
+            this.emphasisScore = evidence.emphasisScore();
+            this.selfContainedScore = evidence.selfContainedScore();
+            this.semanticScore = evidence.semanticScore();
+            this.wordCount = evidence.wordCount();
+            this.firstTranscriptSegmentId = evidence.firstTranscriptSegmentId();
+            this.lastTranscriptSegmentId = evidence.lastTranscriptSegmentId();
+            this.boundaryStartAdjustmentMs = evidence.boundaryStartAdjustmentMs();
+            this.boundaryEndAdjustmentMs = evidence.boundaryEndAdjustmentMs();
         }
     }
 
@@ -147,6 +168,16 @@ public class HighlightCandidate {
     public BigDecimal getRepetitionPenalty() { return repetitionPenalty; }
     public List<String> getExplanationLabels() { return explanationLabels == null ? null : List.copyOf(explanationLabels); }
     public String getTranscriptExcerpt() { return transcriptExcerpt; }
+    public BigDecimal getBaseScore() { return baseScore; }
+    public BigDecimal getLexicalScore() { return lexicalScore; }
+    public BigDecimal getEmphasisScore() { return emphasisScore; }
+    public BigDecimal getSelfContainedScore() { return selfContainedScore; }
+    public BigDecimal getSemanticScore() { return semanticScore; }
+    public Integer getWordCount() { return wordCount; }
+    public UUID getFirstTranscriptSegmentId() { return firstTranscriptSegmentId; }
+    public UUID getLastTranscriptSegmentId() { return lastTranscriptSegmentId; }
+    public Long getBoundaryStartAdjustmentMs() { return boundaryStartAdjustmentMs; }
+    public Long getBoundaryEndAdjustmentMs() { return boundaryEndAdjustmentMs; }
 
     /** Decomposable V2 scoring evidence for one candidate; every field is optional so this doubles as the "no evidence" case for non-V2 analyzers. */
     public record HighlightCandidateEvidence(
@@ -160,6 +191,25 @@ public class HighlightCandidate {
             BigDecimal audioBoundaryScore,
             BigDecimal repetitionPenalty,
             List<String> explanationLabels,
-            String transcriptExcerpt) {
+            String transcriptExcerpt,
+            BigDecimal baseScore,
+            BigDecimal lexicalScore,
+            BigDecimal emphasisScore,
+            BigDecimal selfContainedScore,
+            BigDecimal semanticScore,
+            Integer wordCount,
+            UUID firstTranscriptSegmentId,
+            UUID lastTranscriptSegmentId,
+            Long boundaryStartAdjustmentMs,
+            Long boundaryEndAdjustmentMs) {
+
+        public HighlightCandidateEvidence(BigDecimal hookScore, BigDecimal completenessScore,
+                BigDecimal informationDensityScore, BigDecimal speechDensityScore, BigDecimal boundaryScore,
+                BigDecimal coverageScore, BigDecimal sceneScore, BigDecimal audioBoundaryScore,
+                BigDecimal repetitionPenalty, List<String> explanationLabels, String transcriptExcerpt) {
+            this(hookScore, completenessScore, informationDensityScore, speechDensityScore, boundaryScore,
+                    coverageScore, sceneScore, audioBoundaryScore, repetitionPenalty, explanationLabels,
+                    transcriptExcerpt, null, null, null, null, null, null, null, null, null, null);
+        }
     }
 }

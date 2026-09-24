@@ -318,11 +318,18 @@ export class Content implements OnInit, OnDestroy {
     if (analyzerType === 'DETERMINISTIC_V2') {
       return 'Semantic Highlights V2';
     }
+    if (analyzerType === 'DETERMINISTIC_V3') {
+      return 'Transcript-aware V3';
+    }
     return analyzerType;
   }
 
   protected isV2Candidate(candidate: HighlightCandidateSummary): boolean {
     return candidate.hookScore !== null;
+  }
+
+  protected isV3Candidate(candidate: HighlightCandidateSummary): boolean {
+    return candidate.semanticScore != null;
   }
 
   /** Friendly, deterministic wording for V2's explanation labels — no AI generation. */
@@ -344,6 +351,10 @@ export class Content implements OnInit, OnDestroy {
         return 'Limited transcript evidence for this window.';
       case 'REPETITIVE_CONTENT_PENALTY':
         return 'Echoes another highlight’s content.';
+      case 'SEMANTIC_HOOK': return 'Contains a deterministic hook or question signal.';
+      case 'EMPHASIS_OR_CONTRAST': return 'Contains emphasis, contrast, or numeric specificity.';
+      case 'SELF_CONTAINED_THOUGHT': return 'Looks like a self-contained spoken thought.';
+      case 'REPETITION_PENALTY': return 'Repeated language reduced this score.';
       default:
         return label;
     }
@@ -557,6 +568,10 @@ export class Content implements OnInit, OnDestroy {
   /** SEMANTIC_HIGHLIGHTS_V2 — deterministic multimodal candidate ranking, no LLM required. */
   protected findHighlightsV2(asset: MediaAssetSummary): void {
     this.startHighlightAnalysis(asset, 'DETERMINISTIC_V2', 'A completed transcript is required for Semantic Highlights V2.', 'Semantic Highlights V2 analysis could not be started.');
+  }
+
+  protected findHighlightsV3(asset: MediaAssetSummary): void {
+    this.startHighlightAnalysis(asset, 'DETERMINISTIC_V3', 'An inspected asset is required; V3 uses a completed English transcript when available.', 'Transcript-aware V3 analysis could not be started.');
   }
 
   private startHighlightAnalysis(asset: MediaAssetSummary, analyzer: string, validationMessage: string, errorMessage: string): void {

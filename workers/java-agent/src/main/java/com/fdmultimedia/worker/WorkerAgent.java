@@ -28,6 +28,7 @@ public final class WorkerAgent {
         // SEMANTIC_HIGHLIGHTS_V2: deterministic, transcript-driven, no LLM
         // dependency, so — unlike TRANSCRIPT_SEMANTIC_V1 below — always on.
         highlightAnalyzers.put("DETERMINISTIC_V2", new DeterministicMultimodalHighlightAnalyzer());
+        highlightAnalyzers.put("DETERMINISTIC_V3", new TranscriptSemanticHighlightAnalyzer());
         HighlightAnalyzer semanticAnalyzer = semanticHighlightAnalyzer(config);
         boolean semanticHighlightAvailable = semanticAnalyzer != null;
         if (semanticHighlightAvailable) {
@@ -631,6 +632,7 @@ public final class WorkerAgent {
         List<String> analyzers = new ArrayList<>();
         analyzers.add("DETERMINISTIC_V1");
         analyzers.add("DETERMINISTIC_V2");
+        analyzers.add("DETERMINISTIC_V3");
         if (semanticHighlightAvailable) {
             analyzers.add("TRANSCRIPT_SEMANTIC_V1");
         }

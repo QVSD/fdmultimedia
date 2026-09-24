@@ -11,14 +11,14 @@ class WorkerAgentCapabilitiesTest {
     @Test
     void deterministicV2IsAlwaysAdvertised() {
         assertEquals(
-                List.of("DETERMINISTIC_V1", "DETERMINISTIC_V2"),
+                List.of("DETERMINISTIC_V1", "DETERMINISTIC_V2", "DETERMINISTIC_V3"),
                 WorkerAgent.supportedHighlightAnalyzers(false));
     }
 
     @Test
     void semanticAnalyzerIsAdvertisedWhenAvailable() {
         assertEquals(
-                List.of("DETERMINISTIC_V1", "DETERMINISTIC_V2", "TRANSCRIPT_SEMANTIC_V1"),
+                List.of("DETERMINISTIC_V1", "DETERMINISTIC_V2", "DETERMINISTIC_V3", "TRANSCRIPT_SEMANTIC_V1"),
                 WorkerAgent.supportedHighlightAnalyzers(true));
     }
 }

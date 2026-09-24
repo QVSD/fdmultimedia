@@ -644,6 +644,9 @@
                       <button type="button" (click)="findHighlightsV2(asset)" [disabled]="highlightBusy()[asset.id]">
                         {{ highlightBusy()[asset.id] ? 'Finding...' : 'Semantic Highlights V2' }}
                       </button>
+                      <button type="button" (click)="findHighlightsV3(asset)" [disabled]="highlightBusy()[asset.id]">
+                        {{ highlightBusy()[asset.id] ? 'Finding...' : 'Transcript-aware V3' }}
+                      </button>
                     }
                     @if (canAnalyzeSemanticHighlights(asset)) {
                       <button type="button" (click)="findSemanticHighlights(asset)" [disabled]="highlightBusy()[asset.id]">
@@ -762,6 +765,9 @@
                         @if (analysis.transcriptCoverage !== null) {
                           <p class="content__muted">Transcript coverage: {{ score(analysis.transcriptCoverage) }} of media duration.</p>
                         }
+                        @if (analysis.fallbackReason) {
+                          <p class="content__muted">Requested {{ analysis.requestedAnalyzerType }}, used {{ analysis.effectiveAnalyzerType }}: {{ analysis.fallbackReason }}.</p>
+                        }
                         <div class="candidate-grid">
                           @for (candidate of analysis.candidates; track candidate.id) {
                             <div class="content__candidate">
@@ -771,6 +777,12 @@
                                 <details class="content__evidence">
                                   <summary>Why this highlight</summary>
                                   <dl class="detail-grid">
+                                    @if (candidate.baseScore != null) { <div><dt>V2 base</dt><dd>{{ score(candidate.baseScore) }}</dd></div> }
+                                    @if (candidate.semanticScore != null) { <div><dt>Semantic heuristics</dt><dd>{{ score(candidate.semanticScore) }}</dd></div> }
+                                    @if (candidate.lexicalScore != null) { <div><dt>Lexical density</dt><dd>{{ score(candidate.lexicalScore) }}</dd></div> }
+                                    @if (candidate.emphasisScore != null) { <div><dt>Emphasis / contrast</dt><dd>{{ score(candidate.emphasisScore) }}</dd></div> }
+                                    @if (candidate.selfContainedScore != null) { <div><dt>Self-containedness</dt><dd>{{ score(candidate.selfContainedScore) }}</dd></div> }
+                                    @if (candidate.wordCount != null) { <div><dt>Words</dt><dd>{{ candidate.wordCount }}</dd></div> }
                                     @if (candidate.hookScore !== null) { <div><dt>Opening</dt><dd>{{ score(candidate.hookScore) }}</dd></div> }
                                     @if (candidate.completenessScore !== null) { <div><dt>Completeness</dt><dd>{{ score(candidate.completenessScore) }}</dd></div> }
                                     @if (candidate.speechDensityScore !== null) { <div><dt>Speech density</dt><dd>{{ score(candidate.speechDensityScore) }}</dd></div> }
