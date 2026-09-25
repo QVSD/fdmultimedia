@@ -17,9 +17,11 @@ import org.springframework.web.bind.annotation.RestController;
 public class HighlightController {
 
     private final HighlightService highlightService;
+    private final HighlightSelectionService selectionService;
 
-    public HighlightController(HighlightService highlightService) {
+    public HighlightController(HighlightService highlightService, HighlightSelectionService selectionService) {
         this.highlightService = highlightService;
+        this.selectionService = selectionService;
     }
 
     @PostMapping("/assets/{assetId}/highlight-analyses")
@@ -49,5 +51,29 @@ public class HighlightController {
             @AuthenticationPrincipal AuthenticatedUser principal,
             @PathVariable UUID candidateId) {
         return highlightService.createClipFromCandidate(principal, candidateId);
+    }
+
+    @PostMapping("/highlight-analyses/{analysisId}/selections")
+    public HighlightSelectionSummary createSelection(@AuthenticationPrincipal AuthenticatedUser principal,
+            @PathVariable UUID analysisId, @RequestBody(required = false) CreateHighlightSelectionRequest request) {
+        return selectionService.create(principal, analysisId, request);
+    }
+
+    @GetMapping("/highlight-analyses/{analysisId}/selections")
+    public List<HighlightSelectionSummary> listSelections(@AuthenticationPrincipal AuthenticatedUser principal,
+            @PathVariable UUID analysisId) {
+        return selectionService.list(principal, analysisId);
+    }
+
+    @GetMapping("/highlight-selections/{selectionId}")
+    public HighlightSelectionSummary getSelection(@AuthenticationPrincipal AuthenticatedUser principal,
+            @PathVariable UUID selectionId) {
+        return selectionService.get(principal, selectionId);
+    }
+
+    @PostMapping("/highlight-selections/{selectionId}/clips")
+    public HighlightSelectionSummary createSelectionClips(@AuthenticationPrincipal AuthenticatedUser principal,
+            @PathVariable UUID selectionId) {
+        return selectionService.createClips(principal, selectionId);
     }
 }

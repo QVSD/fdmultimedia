@@ -370,3 +370,10 @@ TikTok becomes a real publishable provider alongside Instagram, using only TikTo
 # Phase 17B: Transcript-aware Semantic Highlighting V3
 
 V3 adds deterministic transcript-semantic reranking over V2 windows, immutable transcript provenance, bounded explainable evidence and explicit fallback. Phase 17C, LLM/embedding ranking, generative editing and analytics-trained optimization remain unstarted.
+### Phase 17C — Multi-highlight diversity selection (implemented)
+
+- Immutable `DIVERSITY_SELECTOR_V1` selections over successful V3 candidate pools.
+- Versioned temporal overlap, minimum-gap, and lexical Jaccard rules with durable exclusion evidence.
+- Selection order remains distinct from immutable V3 source rank and score.
+- Idempotent bulk clip creation delegates to the existing distributed media pipeline.
+- Multi-output Robot fan-out remains a Phase 17D architecture decision; `TOP_HIGHLIGHT` is unchanged.

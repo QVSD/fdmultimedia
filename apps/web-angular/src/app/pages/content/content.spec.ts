@@ -2,7 +2,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { of, throwError } from 'rxjs';
 
 import { AssetsService } from '../../core/assets/assets.service';
-import { HighlightAnalysisSummary, MediaAssetSummary, MediaAssetStatus, MediaTranscriptSummary } from '../../core/assets/asset.models';
+import { HighlightAnalysisSummary, HighlightSelectionSummary, MediaAssetSummary, MediaAssetStatus, MediaTranscriptSummary } from '../../core/assets/asset.models';
 import { PublishingService } from '../../core/publishing/publishing.service';
 import { PublicationSummary } from '../../core/publishing/publishing.models';
 import { SocialAccountsService } from '../../core/social-accounts/social-accounts.service';
@@ -31,6 +31,9 @@ describe('Content', () => {
     | 'createHighlightAnalysis'
     | 'listHighlightAnalyses'
     | 'createClipFromHighlightCandidate'
+    | 'createHighlightSelection'
+    | 'listHighlightSelections'
+    | 'createClipsForSelection'
     | 'createTranscript'
     | 'listTranscripts'
   >;
@@ -60,6 +63,9 @@ describe('Content', () => {
       createHighlightAnalysis: vi.fn().mockReturnValue(of(analysis('PENDING'))),
       listHighlightAnalyses: vi.fn().mockReturnValue(of([analysis('SUCCEEDED')])),
       createClipFromHighlightCandidate: vi.fn().mockReturnValue(of({ asset: clipAsset() })),
+      createHighlightSelection: vi.fn().mockReturnValue(of(selection())),
+      listHighlightSelections: vi.fn().mockReturnValue(of([])),
+      createClipsForSelection: vi.fn().mockReturnValue(of(selection(true))),
       createTranscript: vi.fn().mockReturnValue(of(transcript('PENDING'))),
       listTranscripts: vi.fn().mockReturnValue(of([transcript('SUCCEEDED')])),
     };
@@ -125,6 +131,28 @@ describe('Content', () => {
 
   it('should create', () => {
     expect(component).toBeTruthy();
+  });
+
+  it('creates and renders a diverse V3 selection with exclusion evidence', () => {
+    const v3 = { ...analysis('SUCCEEDED'), analyzerType: 'DETERMINISTIC_V3' };
+    component['createDiverseSelection'](v3);
+    expect(assetsService.createHighlightSelection).toHaveBeenCalledWith(v3.id, 3);
+    expect(component['selectionFor'](v3)?.selectedCount).toBe(2);
+    component['expandedSelectionExclusions'].set({ 'selection-1': true });
+    component['highlightAnalyses'].set({ [asset('READY').id]: v3 });
+    component['toggleAsset'](component['assets']().find((item) => item.status === 'READY')!);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('2 of 3');
+    expect(fixture.nativeElement.textContent).toContain('Temporal overlap');
+  });
+
+  it('validates selection count and bulk-creates clips', () => {
+    const v3 = { ...analysis('SUCCEEDED'), analyzerType: 'DETERMINISTIC_V3' };
+    component['setSelectionCount'](v3, 6);
+    component['createDiverseSelection'](v3);
+    expect(component['selectionErrors']()[v3.id]).toContain('between 1 and 5');
+    component['createSelectionClips'](selection());
+    expect(assetsService.createClipsForSelection).toHaveBeenCalledWith('selection-1');
   });
 
   it('renders media asset states and metadata', () => {
@@ -1214,6 +1242,20 @@ describe('Content', () => {
             },
           ]
         : [],
+    };
+  }
+
+  function selection(withClip = false): HighlightSelectionSummary {
+    return {
+      id: 'selection-1', mediaAssetId: 'READY-asset', highlightAnalysisId: 'analysis-1',
+      selectorVersion: 'DIVERSITY_SELECTOR_V1', requestedCount: 3, selectedCount: 2, status: 'PARTIAL',
+      createdAt: '2026-09-10T08:02:00Z',
+      items: [{ id: 'item-1', candidateId: 'candidate-1', selectionOrder: 1, sourceRank: 1,
+        startMs: 1000, endMs: 6000, score: 0.82, transcriptExcerpt: 'A distinct useful moment.',
+        clipAssetId: withClip ? 'clip-asset' : null, clipAssetStatus: withClip ? 'PROCESSING' : null,
+        clipJobId: withClip ? 'clip-job' : null, clipJobStatus: withClip ? 'QUEUED' : null }],
+      exclusions: [{ candidateId: 'candidate-2', sourceRank: 2, reason: 'TEMPORAL_OVERLAP',
+        conflictingCandidateId: 'candidate-1', conflictingSourceRank: 1, temporalOverlapRatio: 0.75, lexicalSimilarity: null }],
     };
   }
 

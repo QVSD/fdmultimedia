@@ -103,6 +103,49 @@ export interface HighlightAnalysisSummary {
   candidates: HighlightCandidateSummary[];
 }
 
+export type HighlightSelectionStatus = 'COMPLETE' | 'PARTIAL' | 'EMPTY';
+export type HighlightSelectionExclusionReason = 'TEMPORAL_OVERLAP' | 'INSUFFICIENT_TEMPORAL_GAP' | 'LEXICAL_DUPLICATE' | 'BELOW_QUALITY_FLOOR' | 'SELECTION_LIMIT_REACHED';
+
+export interface HighlightSelectionItemSummary {
+  id: string;
+  candidateId: string;
+  selectionOrder: number;
+  sourceRank: number;
+  startMs: number;
+  endMs: number;
+  score: number;
+  transcriptExcerpt?: string | null;
+  clipAssetId?: string | null;
+  clipAssetStatus?: MediaAssetStatus | null;
+  clipJobId?: string | null;
+  clipJobStatus?: string | null;
+  clipFailureCode?: string | null;
+  clipFailureMessage?: string | null;
+}
+
+export interface HighlightSelectionExclusionSummary {
+  candidateId: string;
+  sourceRank: number;
+  reason: HighlightSelectionExclusionReason;
+  conflictingCandidateId?: string | null;
+  conflictingSourceRank?: number | null;
+  temporalOverlapRatio?: number | null;
+  lexicalSimilarity?: number | null;
+}
+
+export interface HighlightSelectionSummary {
+  id: string;
+  mediaAssetId: string;
+  highlightAnalysisId: string;
+  selectorVersion: string;
+  requestedCount: number;
+  selectedCount: number;
+  status: HighlightSelectionStatus;
+  createdAt: string;
+  items: HighlightSelectionItemSummary[];
+  exclusions: HighlightSelectionExclusionSummary[];
+}
+
 export interface TranscriptSegmentSummary {
   id: string;
   sequence: number;

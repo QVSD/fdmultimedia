@@ -834,6 +834,60 @@
                             </div>
                           }
                         </div>
+                        @if (analysis.analyzerType === 'DETERMINISTIC_V3') {
+                          <section class="content__selection" aria-label="Diverse highlight selection">
+                            <h4>Diverse selection</h4>
+                            <p class="content__muted">Select distinct moments using deterministic temporal and lexical diversity rules.</p>
+                            <form class="content__clip-form" (ngSubmit)="createDiverseSelection(analysis)">
+                              <label>
+                                <span>Highlights</span>
+                                <input type="number" min="1" max="5" name="selection-count-{{ analysis.id }}"
+                                  [ngModel]="selectionCountFor(analysis)" (ngModelChange)="setSelectionCount(analysis, $event)" />
+                              </label>
+                              <button type="submit" [disabled]="selectionBusy()[analysis.id]">
+                                {{ selectionBusy()[analysis.id] ? 'Selecting...' : 'Create diverse selection' }}
+                              </button>
+                            </form>
+                            @if (selectionErrors()[analysis.id]) { <p class="content__error">{{ selectionErrors()[analysis.id] }}</p> }
+                            @if (selectionFor(analysis); as selection) {
+                              <p><strong>{{ selection.selectedCount }} of {{ selection.requestedCount }}</strong> requested highlights met the current diversity rules.</p>
+                              <p class="content__muted">{{ selection.selectorVersion }} · Selected by diversity rules, not predicted performance.</p>
+                              <div class="candidate-grid">
+                                @for (item of selection.items; track item.id) {
+                                  <div class="content__candidate">
+                                    <strong>Selection #{{ item.selectionOrder }} · V3 source rank #{{ item.sourceRank }}</strong>
+                                    <span>{{ timeMs(item.startMs) }} - {{ timeMs(item.endMs) }} · {{ score(item.score) }}</span>
+                                    @if (item.transcriptExcerpt) { <p class="content__excerpt">&ldquo;{{ item.transcriptExcerpt }}&rdquo;</p> }
+                                    <span class="content__muted">Clip: {{ item.clipAssetStatus ?? (item.clipJobId ? item.clipJobStatus : 'Not requested') }}</span>
+                                    @if (item.clipFailureMessage) { <span class="content__error">{{ item.clipFailureMessage }}</span> }
+                                  </div>
+                                }
+                              </div>
+                              <button type="button" (click)="createSelectionClips(selection)" [disabled]="selectionClipBusy()[selection.id]">
+                                {{ selectionClipBusy()[selection.id] ? 'Creating clips...' : 'Create clips for selection' }}
+                              </button>
+                              @if (selection.exclusions.length > 0) {
+                                <button class="button-secondary" type="button" (click)="toggleSelectionExclusions(selection)"
+                                  [attr.aria-expanded]="selectionExclusionsExpanded(selection)">Why candidates were skipped</button>
+                                @if (selectionExclusionsExpanded(selection)) {
+                                  <table>
+                                    <thead><tr><th>Source rank</th><th>Reason</th><th>Conflicts with</th><th>Temporal</th><th>Lexical</th></tr></thead>
+                                    <tbody>
+                                      @for (excluded of selection.exclusions; track excluded.candidateId) {
+                                        <tr>
+                                          <td>#{{ excluded.sourceRank }}</td><td>{{ exclusionLabel(excluded.reason) }}</td>
+                                          <td>{{ excluded.conflictingSourceRank ? ('#' + excluded.conflictingSourceRank) : '—' }}</td>
+                                          <td>{{ excluded.temporalOverlapRatio == null ? '—' : score(excluded.temporalOverlapRatio) }}</td>
+                                          <td>{{ excluded.lexicalSimilarity == null ? '—' : score(excluded.lexicalSimilarity) }}</td>
+                                        </tr>
+                                      }
+                                    </tbody>
+                                  </table>
+                                }
+                              }
+                            }
+                          </section>
+                        }
                       </div>
                     } @else if (canAnalyzeHighlights(asset)) {
                       <p class="content__muted">No highlight analysis yet.</p>

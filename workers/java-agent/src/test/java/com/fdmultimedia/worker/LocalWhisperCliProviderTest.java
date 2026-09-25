@@ -30,6 +30,25 @@ class LocalWhisperCliProviderTest {
     }
 
     @Test
+    void buildsControlledWhisperCppCommandWithoutShell() {
+        LocalWhisperCliProvider provider = new LocalWhisperCliProvider(
+                "C:\\tools\\whisper-cli.exe", "C:\\models\\ggml-base.bin", Duration.ofSeconds(1));
+        Path audio = Path.of("audio.wav; --translate");
+        Path output = Path.of("out dir");
+
+        List<String> command = provider.command(audio, output);
+
+        assertEquals("C:\\tools\\whisper-cli.exe", command.get(0));
+        assertEquals("C:\\models\\ggml-base.bin", command.get(command.indexOf("--model") + 1));
+        assertEquals(audio.toString(), command.get(command.indexOf("--file") + 1));
+        assertEquals(output.resolve("transcript").toString(), command.get(command.indexOf("--output-file") + 1));
+        assertTrue(command.contains("--output-json"));
+        assertTrue(command.contains("--no-prints"));
+        assertTrue(command.stream().noneMatch(argument -> argument.equals("sh")
+                || argument.equals("cmd") || argument.equals("powershell")));
+    }
+
+    @Test
     void parsesStructuredWhisperJson() throws Exception {
         LocalWhisperCliProvider provider = new LocalWhisperCliProvider("whisper", "base", Duration.ofSeconds(1));
 
@@ -47,6 +66,27 @@ class LocalWhisperCliProviderTest {
         assertEquals(2, result.segments().size());
         assertEquals(1500, result.segments().get(0).endMs());
         assertEquals("Bun venit", result.segments().get(0).text());
+    }
+
+    @Test
+    void parsesStructuredWhisperCppJson() throws Exception {
+        LocalWhisperCliProvider provider = new LocalWhisperCliProvider(
+                "whisper-cli.exe", "ggml-base.bin", Duration.ofSeconds(1));
+
+        TranscriptionResult result = provider.parse("""
+                {
+                  "result": { "language": "ro" },
+                  "transcription": [
+                    { "offsets": { "from": 0, "to": 1520 }, "text": " Bun venit " },
+                    { "offsets": { "from": 1520, "to": 3040 }, "text": " platforma multimedia " }
+                  ]
+                }
+                """, authorization(10_000, 10, 100, 1_000));
+
+        assertEquals("ro", result.detectedLanguage());
+        assertEquals(2, result.segments().size());
+        assertEquals(1520, result.segments().get(0).endMs());
+        assertEquals("platforma multimedia", result.segments().get(1).text());
     }
 
     @Test

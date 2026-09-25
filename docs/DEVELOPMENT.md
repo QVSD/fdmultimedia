@@ -861,3 +861,12 @@ Use `/experiments` to inspect Phase 14B evidence, both readiness populations, an
 ## Decision applications (Phase 15A)
 
 Use the SELECT_VARIANT decision row in `/experiments`, select a Robot linked to that Experiment, and request a preview. Apply sends only Robot intent, preview fingerprint, opaque idempotency key, and the three explicit warning confirmations; target/previous Persona, user, time, and evidence are server-derived. Preview remains available when `EXPERIMENT_DECISION_APPLICATION_ENABLED=false`, while apply and rollback return `DECISION_APPLICATION_DISABLED`. Histories are bounded to 100 rows. A rollback is allowed only while the Robot still carries the Persona set by the original application and the previous Persona is still ACTIVE (null is supported). Never reuse an old preview after editing the Robot or archiving/restoring a Persona.
+## Testing diverse highlight selection
+
+1. Import and inspect a spoken source, create a transcript, then complete a `DETERMINISTIC_V3` analysis with several candidates.
+2. In Content details choose 1–5 highlights and select **Create diverse selection**.
+3. Inspect selection order, original V3 source rank, excerpts, and **Why candidates were skipped**.
+4. Select **Create clips for selection**. Repeating the action reuses item clip/job references rather than creating duplicates.
+5. Let the Worker process `CREATE_CLIP` and automatic `INSPECT_MEDIA`; vertical derivatives remain explicit per clip.
+
+The selector is content-derived only. Lexical Jaccard is not semantic understanding: paraphrases may evade it, different wording can express the same idea, and Whisper errors affect comparison. Diversity predicts neither engagement nor performance. A partial selection is expected when fewer candidates satisfy the versioned rules.

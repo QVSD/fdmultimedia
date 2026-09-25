@@ -5,7 +5,7 @@ import { RouterLink } from '@angular/router';
 import { EMPTY, Subscription, catchError, finalize, interval, startWith, switchMap } from 'rxjs';
 
 import { AssetsService } from '../../core/assets/assets.service';
-import { HighlightAnalysisSummary, HighlightCandidateSummary, MediaAssetSummary, MediaTranscriptSummary } from '../../core/assets/asset.models';
+import { HighlightAnalysisSummary, HighlightCandidateSummary, HighlightSelectionExclusionReason, HighlightSelectionSummary, MediaAssetSummary, MediaTranscriptSummary } from '../../core/assets/asset.models';
 import { PublishingService } from '../../core/publishing/publishing.service';
 import { PublicationSummary } from '../../core/publishing/publishing.models';
 import { SocialAccountsService } from '../../core/social-accounts/social-accounts.service';
@@ -46,6 +46,12 @@ export class Content implements OnInit, OnDestroy {
   protected readonly highlightErrors = signal<Record<string, string | null>>({});
   protected readonly candidateClipBusy = signal<Record<string, boolean>>({});
   protected readonly candidateClipErrors = signal<Record<string, string | null>>({});
+  protected readonly highlightSelections = signal<Record<string, HighlightSelectionSummary | null>>({});
+  protected readonly selectionCounts = signal<Record<string, number>>({});
+  protected readonly selectionBusy = signal<Record<string, boolean>>({});
+  protected readonly selectionErrors = signal<Record<string, string | null>>({});
+  protected readonly selectionClipBusy = signal<Record<string, boolean>>({});
+  protected readonly expandedSelectionExclusions = signal<Record<string, boolean>>({});
   protected readonly transcripts = signal<Record<string, MediaTranscriptSummary | null>>({});
   protected readonly transcriptBusy = signal<Record<string, boolean>>({});
   protected readonly transcriptErrors = signal<Record<string, string | null>>({});
@@ -608,6 +614,61 @@ export class Content implements OnInit, OnDestroy {
       });
   }
 
+  protected selectionFor(analysis: HighlightAnalysisSummary): HighlightSelectionSummary | null {
+    return this.highlightSelections()[analysis.id] ?? null;
+  }
+
+  protected selectionCountFor(analysis: HighlightAnalysisSummary): number {
+    return this.selectionCounts()[analysis.id] ?? 3;
+  }
+
+  protected setSelectionCount(analysis: HighlightAnalysisSummary, value: number): void {
+    const count = Number(value);
+    this.selectionCounts.update((values) => ({ ...values, [analysis.id]: count }));
+  }
+
+  protected createDiverseSelection(analysis: HighlightAnalysisSummary): void {
+    const count = this.selectionCountFor(analysis);
+    if (!Number.isInteger(count) || count < 1 || count > 5) {
+      this.selectionErrors.update((errors) => ({ ...errors, [analysis.id]: 'Choose between 1 and 5 highlights.' }));
+      return;
+    }
+    this.selectionErrors.update((errors) => ({ ...errors, [analysis.id]: null }));
+    this.selectionBusy.update((busy) => ({ ...busy, [analysis.id]: true }));
+    this.assetsService.createHighlightSelection(analysis.id, count)
+      .pipe(finalize(() => this.selectionBusy.update((busy) => ({ ...busy, [analysis.id]: false }))))
+      .subscribe({
+        next: (selection) => this.highlightSelections.update((values) => ({ ...values, [analysis.id]: selection })),
+        error: () => this.selectionErrors.update((errors) => ({ ...errors, [analysis.id]: 'Diverse selection could not be created.' })),
+      });
+  }
+
+  protected createSelectionClips(selection: HighlightSelectionSummary): void {
+    this.selectionClipBusy.update((busy) => ({ ...busy, [selection.id]: true }));
+    this.assetsService.createClipsForSelection(selection.id)
+      .pipe(finalize(() => this.selectionClipBusy.update((busy) => ({ ...busy, [selection.id]: false }))))
+      .subscribe({
+        next: (updated) => {
+          this.highlightSelections.update((values) => ({ ...values, [updated.highlightAnalysisId]: updated }));
+        },
+        error: () => this.selectionErrors.update((errors) => ({ ...errors, [selection.highlightAnalysisId]: 'Selection clips could not be created.' })),
+      });
+  }
+
+  protected toggleSelectionExclusions(selection: HighlightSelectionSummary): void {
+    this.expandedSelectionExclusions.update((values) => ({ ...values, [selection.id]: !values[selection.id] }));
+  }
+
+  protected selectionExclusionsExpanded(selection: HighlightSelectionSummary): boolean {
+    return this.expandedSelectionExclusions()[selection.id] ?? false;
+  }
+
+  protected exclusionLabel(reason: HighlightSelectionExclusionReason): string {
+    return ({ TEMPORAL_OVERLAP: 'Temporal overlap', INSUFFICIENT_TEMPORAL_GAP: 'Too close in time',
+      LEXICAL_DUPLICATE: 'Lexical duplicate', BELOW_QUALITY_FLOOR: 'Below quality floor',
+      SELECTION_LIMIT_REACHED: 'Selection limit reached' })[reason];
+  }
+
   protected transcribe(asset: MediaAssetSummary): void {
     this.transcriptErrors.update((errors) => ({ ...errors, [asset.id]: null }));
     if (!this.canTranscribe(asset)) {
@@ -768,13 +829,24 @@ export class Content implements OnInit, OnDestroy {
       }
       const current = this.highlightAnalyses()[asset.id];
       if (current && current.status !== 'PENDING' && current.status !== 'RUNNING') {
+        if (current.analyzerType === 'DETERMINISTIC_V3') {
+          this.assetsService.listHighlightSelections(current.id).pipe(catchError(() => EMPTY)).subscribe((selections) => {
+            this.highlightSelections.update((values) => ({ ...values, [current.id]: selections[0] ?? null }));
+          });
+        }
         continue;
       }
       this.assetsService
         .listHighlightAnalyses(asset.id)
         .pipe(catchError(() => EMPTY))
         .subscribe((analyses) => {
-          this.highlightAnalyses.update((currentAnalyses) => ({ ...currentAnalyses, [asset.id]: analyses[0] ?? null }));
+          const latest = analyses[0] ?? null;
+          this.highlightAnalyses.update((currentAnalyses) => ({ ...currentAnalyses, [asset.id]: latest }));
+          if (latest?.analyzerType === 'DETERMINISTIC_V3') {
+            this.assetsService.listHighlightSelections(latest.id).pipe(catchError(() => EMPTY)).subscribe((selections) => {
+              this.highlightSelections.update((values) => ({ ...values, [latest.id]: selections[0] ?? null }));
+            });
+          }
         });
     }
   }

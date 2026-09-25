@@ -101,6 +101,17 @@ final class LocalWhisperCliProvider implements TranscriptionProvider {
     }
 
     List<String> command(Path audioFile, Path outputDir) {
+        if (isWhisperCppCommand()) {
+            Path outputBase = outputDir.resolve("transcript");
+            return List.of(
+                    commandPath,
+                    "--model", model,
+                    "--file", audioFile.toString(),
+                    "--language", "auto",
+                    "--output-json",
+                    "--output-file", outputBase.toString(),
+                    "--no-prints");
+        }
         List<String> command = new ArrayList<>();
         command.add(commandPath);
         command.add(audioFile.toString());
@@ -118,6 +129,9 @@ final class LocalWhisperCliProvider implements TranscriptionProvider {
     TranscriptionResult parse(String json, TranscriptionAuthorization authorization) throws ImportFailureException {
         try {
             JsonNode root = objectMapper.readTree(json);
+            if (root.path("transcription").isArray()) {
+                return parseWhisperCpp(root, authorization);
+            }
             String language = text(root, "language");
             JsonNode segmentsNode = root.path("segments");
             if (!segmentsNode.isArray()) {
@@ -150,6 +164,44 @@ final class LocalWhisperCliProvider implements TranscriptionProvider {
         } catch (Exception ex) {
             throw new ImportFailureException("TRANSCRIPTION_INVALID_OUTPUT", "Transcription provider returned invalid JSON", true);
         }
+    }
+
+    private TranscriptionResult parseWhisperCpp(JsonNode root, TranscriptionAuthorization authorization)
+            throws ImportFailureException {
+        String language = text(root.path("result"), "language");
+        List<TranscriptSegmentResult> segments = new ArrayList<>();
+        int totalText = 0;
+        for (JsonNode node : root.path("transcription")) {
+            JsonNode offsets = node.path("offsets");
+            if (!offsets.hasNonNull("from") || !offsets.hasNonNull("to")) {
+                throw new ImportFailureException(
+                        "TRANSCRIPTION_INVALID_OUTPUT", "Transcription output has invalid offsets", true);
+            }
+            long startMs = offsets.path("from").longValue();
+            long endMs = offsets.path("to").longValue();
+            String segmentText = text(node, "text");
+            if (segmentText == null) {
+                segmentText = "";
+            }
+            segmentText = segmentText.trim().replaceAll("\\s+", " ");
+            totalText += segmentText.length();
+            if (segments.size() >= authorization.maxSegments()
+                    || segmentText.length() > authorization.maxSegmentTextLength()
+                    || totalText > authorization.maxTotalTextLength()) {
+                throw new ImportFailureException(
+                        "TRANSCRIPTION_OUTPUT_TOO_LARGE", "Transcription output exceeded limits", true);
+            }
+            segments.add(new TranscriptSegmentResult(startMs, endMs, segmentText, null));
+        }
+        if (segments.isEmpty()) {
+            throw new ImportFailureException("TRANSCRIPTION_EMPTY", "No speech segments were detected", true);
+        }
+        return new TranscriptionResult(language, authorization.sourceDurationMs(), segments);
+    }
+
+    private boolean isWhisperCppCommand() {
+        String executable = Path.of(commandPath).getFileName().toString().toLowerCase(java.util.Locale.ROOT);
+        return executable.equals("whisper-cli") || executable.equals("whisper-cli.exe");
     }
 
     private void runWhisper(List<String> command, Path audioFile, Path outputDir)

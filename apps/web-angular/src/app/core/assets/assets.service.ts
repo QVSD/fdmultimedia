@@ -3,7 +3,7 @@ import { Injectable } from '@angular/core';
 import { Observable } from 'rxjs';
 
 import { environment } from '../../../environments/environment';
-import { CreateClipResponse, HighlightAnalysisSummary, MediaAssetSummary, MediaImportResponse, MediaTranscriptSummary } from './asset.models';
+import { CreateClipResponse, HighlightAnalysisSummary, HighlightSelectionSummary, MediaAssetSummary, MediaImportResponse, MediaTranscriptSummary } from './asset.models';
 
 @Injectable({ providedIn: 'root' })
 export class AssetsService {
@@ -69,5 +69,20 @@ export class AssetsService {
       {},
       { withCredentials: true },
     );
+  }
+
+  createHighlightSelection(analysisId: string, count: number): Observable<HighlightSelectionSummary> {
+    return this.http.post<HighlightSelectionSummary>(
+      `${environment.apiBaseUrl}/highlight-analyses/${analysisId}/selections`, { count }, { withCredentials: true });
+  }
+
+  listHighlightSelections(analysisId: string): Observable<HighlightSelectionSummary[]> {
+    return this.http.get<HighlightSelectionSummary[]>(
+      `${environment.apiBaseUrl}/highlight-analyses/${analysisId}/selections`, { withCredentials: true });
+  }
+
+  createClipsForSelection(selectionId: string): Observable<HighlightSelectionSummary> {
+    return this.http.post<HighlightSelectionSummary>(
+      `${environment.apiBaseUrl}/highlight-selections/${selectionId}/clips`, {}, { withCredentials: true });
   }
 }
