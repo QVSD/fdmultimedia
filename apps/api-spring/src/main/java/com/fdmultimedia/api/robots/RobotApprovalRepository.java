@@ -20,6 +20,8 @@ public interface RobotApprovalRepository extends JpaRepository<RobotApproval, UU
 
     Optional<RobotApproval> findByRobotRun(RobotRun robotRun);
 
+    Optional<RobotApproval> findByRobotRunOutputId(UUID robotRunOutputId);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select a from RobotApproval a where a.workspace = :workspace and a.id = :id")
     Optional<RobotApproval> findByWorkspaceAndIdForUpdate(@Param("workspace") Workspace workspace, @Param("id") UUID id);

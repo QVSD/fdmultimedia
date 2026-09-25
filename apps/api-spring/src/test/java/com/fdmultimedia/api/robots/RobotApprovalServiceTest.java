@@ -49,8 +49,10 @@ class RobotApprovalServiceTest {
     private final ContentDraftRepository contentDrafts = mock(ContentDraftRepository.class);
     private final SocialAccountRepository socialAccounts = mock(SocialAccountRepository.class);
     private final PublishScheduleService publishScheduleService = mock(PublishScheduleService.class);
+    private final RobotRunOutputRepository outputs = mock(RobotRunOutputRepository.class);
     private final RobotApprovalService service = new RobotApprovalService(
-            authService, approvals, contentDrafts, socialAccounts, publishScheduleService, Clock.fixed(NOW, ZoneOffset.UTC));
+            authService, approvals, contentDrafts, socialAccounts, publishScheduleService, outputs,
+            Clock.fixed(NOW, ZoneOffset.UTC));
 
     private Workspace workspace;
     private AppUser owner;
@@ -60,6 +62,40 @@ class RobotApprovalServiceTest {
     private Robot robot;
     private RobotRun run;
     private RobotApproval approval;
+
+    @Test
+    void approvingOutputSchedulesOnlyThatOutput() {
+        RobotRunOutput output = mock(RobotRunOutput.class);
+        UUID draftId = draft.getId();
+        RobotApproval outputApproval = new RobotApproval(
+                workspace, run, output, draftId, account.getId(), NOW.plusSeconds(60), NOW);
+        when(approvals.findByWorkspaceAndIdForUpdate(workspace, outputApproval.getId()))
+                .thenReturn(Optional.of(outputApproval));
+        when(socialAccounts.findByWorkspaceAndId(workspace, account.getId())).thenReturn(Optional.of(account));
+        when(contentDrafts.findByWorkspaceAndId(workspace, draftId)).thenReturn(Optional.of(draft));
+        UUID scheduleId = UUID.randomUUID();
+        when(publishScheduleService.create(eq(user), eq(draftId), any()))
+                .thenReturn(publishScheduleSummary(scheduleId));
+
+        service.approve(user, outputApproval.getId(), null);
+
+        verify(output).scheduled(scheduleId, NOW);
+        assertThat(run.getStatus()).isNotEqualTo(RobotRunStatus.SUCCEEDED);
+    }
+
+    @Test
+    void rejectingOutputDoesNotFailTheParent() {
+        RobotRunOutput output = mock(RobotRunOutput.class);
+        RobotApproval outputApproval = new RobotApproval(
+                workspace, run, output, draft.getId(), account.getId(), NOW.plusSeconds(60), NOW);
+        when(approvals.findByWorkspaceAndIdForUpdate(workspace, outputApproval.getId()))
+                .thenReturn(Optional.of(outputApproval));
+
+        service.reject(user, outputApproval.getId());
+
+        verify(output).failed("APPROVAL_REJECTED", "The proposed publication was rejected", NOW);
+        assertThat(run.getStatus()).isNotEqualTo(RobotRunStatus.FAILED);
+    }
 
     @BeforeEach
     void setUp() {

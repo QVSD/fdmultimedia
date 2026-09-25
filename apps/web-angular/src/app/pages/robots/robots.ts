@@ -19,6 +19,7 @@ import {
   RobotSourcePolicy,
   RobotSummary,
   RobotApprovalSummary,
+  RobotHighlightStrategy,
 } from '../../core/robots/robot.models';
 import { ContentSourcesService } from '../../core/content-sources/content-sources.service';
 import { ContentSourceSummary } from '../../core/content-sources/content-source.models';
@@ -74,6 +75,9 @@ export class Robots implements OnInit, OnDestroy {
   protected readonly createAiLanguageOverride = signal<SuggestionLanguage | ''>('');
   protected readonly createAiToneOverride = signal<SuggestionTone | ''>('');
   protected readonly createExperimentId = signal('');
+  protected readonly createHighlightStrategy = signal<RobotHighlightStrategy>('TOP_HIGHLIGHT');
+  protected readonly createHighlightCount = signal(3);
+  protected readonly createOutputSpacingMinutes = signal(60);
   protected readonly createBusy = signal(false);
   protected readonly createError = signal<string | null>(null);
 
@@ -295,6 +299,11 @@ export class Robots implements OnInit, OnDestroy {
       return;
     }
     const aiPolicy = this.createAiPolicy();
+    if (this.createHighlightStrategy() === 'TOP_DIVERSE_HIGHLIGHTS'
+        && (this.createHighlightCount() < 1 || this.createHighlightCount() > 5)) {
+      this.createError.set('Highlight count must be between 1 and 5.');
+      return;
+    }
     this.createBusy.set(true);
     this.robotsService
       .create({
@@ -315,6 +324,9 @@ export class Robots implements OnInit, OnDestroy {
         aiLanguageOverride: this.requiresAiConfig(aiPolicy) && this.createAiLanguageOverride() ? this.createAiLanguageOverride() as SuggestionLanguage : null,
         aiToneOverride: this.requiresAiConfig(aiPolicy) && this.createAiToneOverride() ? this.createAiToneOverride() as SuggestionTone : null,
         experimentId: this.requiresAiConfig(aiPolicy) && this.createExperimentId() ? this.createExperimentId() : null,
+        highlightStrategy: this.createHighlightStrategy(),
+        highlightCount: this.createHighlightStrategy() === 'TOP_DIVERSE_HIGHLIGHTS' ? this.createHighlightCount() : 1,
+        outputSpacingMinutes: this.createOutputSpacingMinutes(),
       })
       .pipe(finalize(() => this.createBusy.set(false)))
       .subscribe({
@@ -376,6 +388,8 @@ export class Robots implements OnInit, OnDestroy {
         return 'Waiting for publishing approval';
       case 'SUCCEEDED':
         return 'Succeeded';
+      case 'PARTIALLY_SUCCEEDED':
+        return 'Partially succeeded';
       case 'FAILED':
         return 'Failed';
       case 'CANCELLED':
@@ -409,7 +423,11 @@ export class Robots implements OnInit, OnDestroy {
   }
 
   private isRunTerminal(status: RobotRunSummary['status']): boolean {
-    return status === 'SUCCEEDED' || status === 'FAILED' || status === 'CANCELLED';
+    return status === 'SUCCEEDED' || status === 'PARTIALLY_SUCCEEDED' || status === 'FAILED' || status === 'CANCELLED';
+  }
+
+  protected outputDuration(startMs: number, endMs: number): string {
+    return `${((endMs - startMs) / 1000).toFixed(1)}s`;
   }
 
   protected runNow(robot: RobotSummary): void {

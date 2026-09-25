@@ -36,6 +36,10 @@ public class RobotApproval {
     @JoinColumn(name = "robot_run_id", nullable = false)
     private RobotRun robotRun;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "robot_run_output_id")
+    private RobotRunOutput robotRunOutput;
+
     @Column(name = "content_draft_id", nullable = false)
     private UUID contentDraftId;
 
@@ -64,9 +68,16 @@ public class RobotApproval {
     public RobotApproval(
             Workspace workspace, RobotRun robotRun, UUID contentDraftId, UUID socialAccountId,
             Instant proposedScheduledFor, Instant now) {
+        this(workspace, robotRun, null, contentDraftId, socialAccountId, proposedScheduledFor, now);
+    }
+
+    public RobotApproval(
+            Workspace workspace, RobotRun robotRun, RobotRunOutput robotRunOutput,
+            UUID contentDraftId, UUID socialAccountId, Instant proposedScheduledFor, Instant now) {
         this.id = UUID.randomUUID();
         this.workspace = workspace;
         this.robotRun = robotRun;
+        this.robotRunOutput = robotRunOutput;
         this.contentDraftId = contentDraftId;
         this.socialAccountId = socialAccountId;
         this.proposedScheduledFor = proposedScheduledFor;
@@ -105,6 +116,7 @@ public class RobotApproval {
     public UUID getId() { return id; }
     public Workspace getWorkspace() { return workspace; }
     public RobotRun getRobotRun() { return robotRun; }
+    public RobotRunOutput getRobotRunOutput() { return robotRunOutput; }
     public UUID getContentDraftId() { return contentDraftId; }
     public UUID getSocialAccountId() { return socialAccountId; }
     public Instant getProposedScheduledFor() { return proposedScheduledFor; }

@@ -3,6 +3,7 @@ package com.fdmultimedia.api.robots;
 import com.fdmultimedia.api.experiments.ExperimentVariantKey;
 import java.time.Instant;
 import java.util.UUID;
+import java.util.List;
 
 public record RobotRunSummary(
         UUID id,
@@ -29,5 +30,11 @@ public record RobotRunSummary(
         UUID publishScheduleId,
         String failureCode,
         String failureMessage,
-        Instant createdAt) {
+        Instant createdAt,
+        RobotHighlightStrategy highlightStrategySnapshot,
+        int requestedOutputCount,
+        Integer actualOutputCount,
+        int outputSpacingMinutes,
+        UUID highlightSelectionId,
+        List<RobotRunOutputSummary> outputs) {
 }

@@ -377,3 +377,10 @@ V3 adds deterministic transcript-semantic reranking over V2 windows, immutable t
 - Selection order remains distinct from immutable V3 source rank and score.
 - Idempotent bulk clip creation delegates to the existing distributed media pipeline.
 - Multi-output Robot fan-out remains a Phase 17D architecture decision; `TOP_HIGHLIGHT` is unchanged.
+
+### Phase 17D — Multi-output Robot fan-out (implemented)
+
+- `TOP_DIVERSE_HIGHLIGHTS` binds one parent run to one immutable V3 selection and 1–5 ordered child outputs.
+- Each child independently owns its Draft, AI/review state, staggered TEST schedule, publication provenance, and failure outcome.
+- Parent runs remain the source-consumption, daily-limit, active-run, and Experiment-assignment unit; mixed terminal outcomes are explicit partial success.
+- Historical single-output runs remain valid without backfill. Cross-output campaign planning, adaptive cadence, multi-account publishing, and performance-driven selection remain outside this phase and Phase 17E has not started.

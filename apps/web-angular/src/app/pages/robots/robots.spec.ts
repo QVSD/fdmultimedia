@@ -89,6 +89,41 @@ describe('Robots', () => {
     expect(fixture.nativeElement.textContent).toContain('No robots yet.');
   });
 
+  it('renders independent outputs for a multi-output run', async () => {
+    const multiRobot = { ...robot('ACTIVE', 'DRAFT_ONLY'), highlightStrategy: 'TOP_DIVERSE_HIGHLIGHTS' as const,
+      highlightCount: 3, outputSpacingMinutes: 60 };
+    const multiRun: RobotRunSummary = {
+      ...run('PARTIALLY_SUCCEEDED'),
+      highlightStrategySnapshot: 'TOP_DIVERSE_HIGHLIGHTS', requestedOutputCount: 3,
+      actualOutputCount: 3, outputSpacingMinutes: 60, highlightSelectionId: 'selection-1',
+      outputs: [
+        { id: 'output-1', selectionOrder: 1, sourceRank: 1, highlightCandidateId: 'candidate-1',
+          startMs: 1000, endMs: 9000, transcriptExcerpt: 'First distinct moment', status: 'SUCCEEDED',
+          contentDraftId: 'draft-1', contentSuggestionId: null, robotApprovalId: null,
+          publishScheduleId: null, failureCode: null, failureMessage: null,
+          createdAt: '2026-09-18T08:05:00Z', updatedAt: '2026-09-18T08:06:00Z', completedAt: '2026-09-18T08:06:00Z' },
+        { id: 'output-2', selectionOrder: 2, sourceRank: 3, highlightCandidateId: 'candidate-3',
+          startMs: 20000, endMs: 31000, transcriptExcerpt: 'Another topic', status: 'FAILED',
+          contentDraftId: null, contentSuggestionId: null, robotApprovalId: null,
+          publishScheduleId: null, failureCode: 'OUTPUT_CLIP_FAILED', failureMessage: 'Clip failed',
+          createdAt: '2026-09-18T08:05:00Z', updatedAt: '2026-09-18T08:07:00Z', completedAt: '2026-09-18T08:07:00Z' },
+      ],
+    };
+    vi.mocked(robotsService.list).mockReturnValue(of([multiRobot]));
+    vi.mocked(robotsService.allRuns).mockReturnValue(of([multiRun]));
+    fixture = TestBed.createComponent(Robots);
+    component = fixture.componentInstance;
+    await fixture.whenStable();
+    component['toggleExpanded'](multiRobot);
+    fixture.detectChanges();
+
+    const text = fixture.nativeElement.textContent;
+    expect(text).toContain('Partially succeeded');
+    expect(text).toContain('Output 1');
+    expect(text).toContain('V3 rank 3');
+    expect(text).toContain('Clip failed');
+  });
+
   it('shows an error state when robots fail to load', async () => {
     vi.mocked(robotsService.list).mockReturnValue(throwError(() => new Error('Network failure')));
     fixture = TestBed.createComponent(Robots);

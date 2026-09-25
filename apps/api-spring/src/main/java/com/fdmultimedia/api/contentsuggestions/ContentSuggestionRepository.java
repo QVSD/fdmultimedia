@@ -23,4 +23,6 @@ public interface ContentSuggestionRepository extends JpaRepository<ContentSugges
     Optional<ContentSuggestion> findByWorkspaceAndIdForUpdate(@Param("workspace") Workspace workspace, @Param("id") UUID id);
 
     Optional<ContentSuggestion> findByGenerationJob(Job generationJob);
+
+    Optional<ContentSuggestion> findByRobotRunOutputId(UUID robotRunOutputId);
 }

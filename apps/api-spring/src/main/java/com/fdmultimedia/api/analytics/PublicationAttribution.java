@@ -16,5 +16,7 @@ public record PublicationAttribution(
         UUID experimentVariantId, String experimentVariantKey, String experimentVariantLabelSnapshot,
         UUID experimentFactorValueId, String experimentFactorValueNameSnapshot, UUID experimentAssignmentId,
         Boolean protocolDeviation, String protocolDeviationReason,
+        UUID robotRunOutputId, UUID highlightSelectionId, UUID highlightSelectionItemId,
+        UUID highlightCandidateId, Integer selectionOrder, Integer sourceRank,
         Instant createdAt) {
 }

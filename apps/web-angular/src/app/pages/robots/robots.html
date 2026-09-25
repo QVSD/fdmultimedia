@@ -76,6 +76,25 @@
           </select>
           <p class="robots__muted">{{ autonomyModeExplanation(createAutonomyMode()) }}</p>
         </label>
+        <label>
+          <span>Highlight strategy</span>
+          <select [ngModel]="createHighlightStrategy()" (ngModelChange)="createHighlightStrategy.set($event)" name="highlightStrategy">
+            <option value="TOP_HIGHLIGHT">Top highlight</option>
+            <option value="TOP_DIVERSE_HIGHLIGHTS">Top diverse highlights</option>
+          </select>
+        </label>
+        @if (createHighlightStrategy() === 'TOP_DIVERSE_HIGHLIGHTS') {
+          <label>
+            <span>Highlight count (1&ndash;5)</span>
+            <input type="number" min="1" max="5" [ngModel]="createHighlightCount()" (ngModelChange)="createHighlightCount.set($event)" name="highlightCount" />
+          </label>
+          @if (createAutonomyMode() === 'AUTO_SCHEDULE') {
+            <label>
+              <span>Output spacing (minutes)</span>
+              <input type="number" min="1" max="1440" [ngModel]="createOutputSpacingMinutes()" (ngModelChange)="createOutputSpacingMinutes.set($event)" name="outputSpacingMinutes" />
+            </label>
+          }
+        }
         @if (requiresAccount(createAutonomyMode())) {
           <label>
             <span>Target account</span>
@@ -197,6 +216,9 @@
                   <div class="robot-card__meta">
                     <span [class]="'robots__badge robots__badge--' + robot.status.toLowerCase()">{{ robotStatusLabel(robot.status) }}</span>
                     <span class="robots__badge">{{ robot.autonomyMode }}</span>
+                    @if (robot.highlightStrategy === 'TOP_DIVERSE_HIGHLIGHTS') {
+                      <span>{{ robot.highlightCount || 3 }} diverse outputs</span>
+                    }
                     <span>{{ robotSourceLabel(robot) }}</span>
                     <span>{{ robot.cadenceType === 'INTERVAL' ? 'Every ' + robot.cadenceIntervalHours + 'h' : 'Manual only' }}</span>
                     @if (robot.targetSocialAccountDisplayName) {
@@ -269,6 +291,28 @@
                             <span class="robots__error">{{ run.failureCode }}: {{ run.failureMessage }}</span>
                           }
                         </div>
+                        @if (run.outputs?.length) {
+                          <div class="run-outputs" [attr.aria-label]="'Outputs for run ' + run.id">
+                            <p class="robots__muted">
+                              {{ run.actualOutputCount || run.outputs!.length }} outputs
+                              @if (run.requestedOutputCount && run.actualOutputCount !== run.requestedOutputCount) {
+                                of {{ run.requestedOutputCount }} requested
+                              }
+                            </p>
+                            @for (output of run.outputs!; track output.id) {
+                              <article class="run-output">
+                                <strong>Output {{ output.selectionOrder }}</strong>
+                                <span>V3 rank {{ output.sourceRank }}</span>
+                                <span>{{ outputDuration(output.startMs, output.endMs) }}</span>
+                                <span>{{ output.status }}</span>
+                                @if (output.transcriptExcerpt) { <p>{{ output.transcriptExcerpt }}</p> }
+                                @if (output.contentDraftId) { <a routerLink="/content">Draft {{ output.contentDraftId.slice(0, 8) }}</a> }
+                                @if (output.publishScheduleId) { <span>Schedule {{ output.publishScheduleId.slice(0, 8) }}</span> }
+                                @if (output.failureMessage) { <span class="robots__error">{{ output.failureCode }}: {{ output.failureMessage }}</span> }
+                              </article>
+                            }
+                          </div>
+                        }
                       }
                     }
                   </div>

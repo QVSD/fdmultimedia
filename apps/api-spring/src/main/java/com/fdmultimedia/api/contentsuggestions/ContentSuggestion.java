@@ -61,6 +61,9 @@ public class ContentSuggestion {
     @Column(name = "robot_run_id")
     private UUID robotRunId;
 
+    @Column(name = "robot_run_output_id")
+    private UUID robotRunOutputId;
+
     /**
      * Phase 14A provenance (item 29): set only when this suggestion was
      * generated under a frozen experiment treatment (see
@@ -300,11 +303,23 @@ public class ContentSuggestion {
             UUID experimentId,
             UUID experimentAssignmentId,
             UUID experimentVariantId) {
+        return forRobot(workspace, contentDraft, generationJob, provider, model, promptVersion, language, tone,
+                promptText, inputFingerprint, transcriptUsed, transcriptId, personaSnapshot, robotRunId, null,
+                createdByUser, now, experimentId, experimentAssignmentId, experimentVariantId);
+    }
+
+    public static ContentSuggestion forRobot(
+            Workspace workspace, ContentDraft contentDraft, Job generationJob, String provider, String model,
+            String promptVersion, SuggestionLanguage language, SuggestionTone tone, String promptText,
+            String inputFingerprint, boolean transcriptUsed, UUID transcriptId, PersonaSnapshot personaSnapshot,
+            UUID robotRunId, UUID robotRunOutputId, AppUser createdByUser, Instant now,
+            UUID experimentId, UUID experimentAssignmentId, UUID experimentVariantId) {
         ContentSuggestion suggestion = new ContentSuggestion(
                 workspace, contentDraft, generationJob, provider, model, promptVersion, language, tone, promptText,
                 inputFingerprint, transcriptUsed, transcriptId, personaSnapshot, createdByUser, now);
         suggestion.origin = ContentSuggestionOrigin.ROBOT;
         suggestion.robotRunId = robotRunId;
+        suggestion.robotRunOutputId = robotRunOutputId;
         suggestion.experimentId = experimentId;
         suggestion.experimentAssignmentId = experimentAssignmentId;
         suggestion.experimentVariantId = experimentVariantId;
@@ -401,6 +416,7 @@ public class ContentSuggestion {
     public ContentDraft getContentDraft() { return contentDraft; }
     public ContentSuggestionOrigin getOrigin() { return origin; }
     public UUID getRobotRunId() { return robotRunId; }
+    public UUID getRobotRunOutputId() { return robotRunOutputId; }
     public UUID getExperimentId() { return experimentId; }
     public UUID getExperimentAssignmentId() { return experimentAssignmentId; }
     public UUID getExperimentVariantId() { return experimentVariantId; }

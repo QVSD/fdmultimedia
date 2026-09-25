@@ -100,6 +100,8 @@ public class RobotService {
                 account, request.cadenceType(), cadenceHours, delayMinutes, maxRunsPerDay,
                 aiConfig.policy(), aiConfig.persona(), aiConfig.languageOverride(), aiConfig.toneOverride(),
                 request.experimentId(), membership.getUser(), now);
+        HighlightConfig highlight = validateHighlightConfig(request.highlightStrategy(), request.highlightCount(), request.outputSpacingMinutes());
+        robot.configureHighlightStrategy(highlight.strategy(), highlight.count(), highlight.spacingMinutes(), now);
         return toSummary(robots.save(robot));
     }
 
@@ -204,6 +206,8 @@ public class RobotService {
         Instant now = Instant.now(clock);
         robot.update(name, description, request.autonomyMode(), account, request.cadenceType(), cadenceHours, delayMinutes, maxRunsPerDay,
                 aiConfig.policy(), aiConfig.persona(), aiConfig.languageOverride(), aiConfig.toneOverride(), request.experimentId(), now);
+        HighlightConfig highlight = validateHighlightConfig(request.highlightStrategy(), request.highlightCount(), request.outputSpacingMinutes());
+        robot.configureHighlightStrategy(highlight.strategy(), highlight.count(), highlight.spacingMinutes(), now);
         return toSummary(robot);
     }
 
@@ -311,6 +315,21 @@ public class RobotService {
         return value;
     }
 
+    private HighlightConfig validateHighlightConfig(RobotHighlightStrategy strategy, Integer count, Integer spacing) {
+        RobotHighlightStrategy resolved = strategy == null ? RobotHighlightStrategy.TOP_HIGHLIGHT : strategy;
+        int resolvedCount = resolved == RobotHighlightStrategy.TOP_DIVERSE_HIGHLIGHTS ? (count == null ? 3 : count) : 1;
+        if (resolvedCount < 1 || resolvedCount > 5) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "highlightCount must be between 1 and 5");
+        }
+        int resolvedSpacing = spacing == null ? 60 : spacing;
+        if (resolvedSpacing < 1 || resolvedSpacing > 1440) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "outputSpacingMinutes must be between 1 and 1440");
+        }
+        return new HighlightConfig(resolved, resolvedCount, resolvedSpacing);
+    }
+
+    private record HighlightConfig(RobotHighlightStrategy strategy, int count, int spacingMinutes) {}
+
     private String validateName(String name) {
         if (name == null || name.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "name is required");
@@ -352,6 +371,8 @@ public class RobotService {
                 robot.getStatus(),
                 robot.getAutonomyMode(),
                 robot.getHighlightStrategy(),
+                robot.getHighlightCount(),
+                robot.getOutputSpacingMinutes(),
                 robot.getSourcePolicy(),
                 sourceAsset == null ? null : sourceAsset.getId(),
                 sourceAsset == null ? null : sourceAsset.getOriginalFilename(),

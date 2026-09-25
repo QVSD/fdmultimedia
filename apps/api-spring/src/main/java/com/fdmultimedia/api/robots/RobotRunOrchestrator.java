@@ -80,6 +80,8 @@ public class RobotRunOrchestrator {
     private final ContentSuggestionRepository contentSuggestions;
     private final PersonaRepository personas;
     private final ExperimentService experiments;
+    private final RobotMultiOutputOrchestrator multiOutputOrchestrator;
+    private final RobotRunOutputRepository outputs;
     private final Clock clock;
 
     public RobotRunOrchestrator(
@@ -99,6 +101,8 @@ public class RobotRunOrchestrator {
             ContentSuggestionRepository contentSuggestions,
             PersonaRepository personas,
             ExperimentService experiments,
+            RobotMultiOutputOrchestrator multiOutputOrchestrator,
+            RobotRunOutputRepository outputs,
             Clock clock) {
         this.authService = authService;
         this.robotRepository = robotRepository;
@@ -116,6 +120,8 @@ public class RobotRunOrchestrator {
         this.contentSuggestions = contentSuggestions;
         this.personas = personas;
         this.experiments = experiments;
+        this.multiOutputOrchestrator = multiOutputOrchestrator;
+        this.outputs = outputs;
         this.clock = clock;
     }
 
@@ -162,6 +168,8 @@ public class RobotRunOrchestrator {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Run is already terminal");
         }
         run.markCancelled(Instant.now(clock));
+        outputs.findByRobotRunOrderBySelectionOrderAsc(run)
+                .forEach(output -> output.cancelled(Instant.now(clock)));
         return toSummary(run);
     }
 
@@ -172,6 +180,10 @@ public class RobotRunOrchestrator {
         AuthenticatedUser principal = new AuthenticatedUser(run.getRobot().getCreatedByUser());
         Instant now = Instant.now(clock);
         try {
+            if (run.getHighlightStrategySnapshot() == RobotHighlightStrategy.TOP_DIVERSE_HIGHLIGHTS) {
+                multiOutputOrchestrator.advance(run, principal, now);
+                return;
+            }
             switch (run.getStatus()) {
                 case RUNNING -> advanceRunning(run, principal, now);
                 case WAITING_FOR_DRAFT -> advanceWaitingForDraft(run, principal, now);
@@ -523,6 +535,24 @@ public class RobotRunOrchestrator {
                 run.getPublishScheduleId(),
                 run.getFailureCode(),
                 run.getFailureMessage(),
-                run.getCreatedAt());
+                run.getCreatedAt(),
+                run.getHighlightStrategySnapshot(),
+                run.getRequestedOutputCount(),
+                run.getActualOutputCount(),
+                run.getOutputSpacingMinutesSnapshot(),
+                run.getHighlightSelectionId(),
+                outputs.findByRobotRunOrderBySelectionOrderAsc(run).stream()
+                        .map(this::toOutputSummary)
+                        .toList());
+    }
+
+    private RobotRunOutputSummary toOutputSummary(RobotRunOutput output) {
+        HighlightCandidate candidate = output.getCandidate();
+        return new RobotRunOutputSummary(
+                output.getId(), output.getSelectionOrder(), output.getSourceRank(), candidate.getId(),
+                candidate.getStartMs(), candidate.getEndMs(), candidate.getTranscriptExcerpt(),
+                output.getStatus(), output.getContentDraftId(), output.getContentSuggestionId(),
+                output.getRobotApprovalId(), output.getPublishScheduleId(), output.getFailureCode(),
+                output.getFailureMessage(), output.getCreatedAt(), output.getUpdatedAt(), output.getCompletedAt());
     }
 }

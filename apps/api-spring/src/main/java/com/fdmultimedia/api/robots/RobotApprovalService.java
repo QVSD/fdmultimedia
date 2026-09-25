@@ -28,6 +28,7 @@ public class RobotApprovalService {
     private final ContentDraftRepository contentDrafts;
     private final SocialAccountRepository socialAccounts;
     private final PublishScheduleService publishScheduleService;
+    private final RobotRunOutputRepository outputs;
     private final Clock clock;
 
     public RobotApprovalService(
@@ -36,12 +37,14 @@ public class RobotApprovalService {
             ContentDraftRepository contentDrafts,
             SocialAccountRepository socialAccounts,
             PublishScheduleService publishScheduleService,
+            RobotRunOutputRepository outputs,
             Clock clock) {
         this.authService = authService;
         this.approvals = approvals;
         this.contentDrafts = contentDrafts;
         this.socialAccounts = socialAccounts;
         this.publishScheduleService = publishScheduleService;
+        this.outputs = outputs;
         this.clock = clock;
     }
 
@@ -88,8 +91,12 @@ public class RobotApprovalService {
         Instant now = Instant.now(clock);
         approval.approve(membership.getUser().getId(), now);
         RobotRun run = approval.getRobotRun();
-        run.setPublishScheduleId(schedule.id());
-        run.markSucceeded(now);
+        if (approval.getRobotRunOutput() == null) {
+            run.setPublishScheduleId(schedule.id());
+            run.markSucceeded(now);
+        } else {
+            approval.getRobotRunOutput().scheduled(schedule.id(), now);
+        }
         return toSummary(approval);
     }
 
@@ -104,7 +111,12 @@ public class RobotApprovalService {
         }
         Instant now = Instant.now(clock);
         approval.reject(membership.getUser().getId(), now);
-        approval.getRobotRun().markFailed("APPROVAL_REJECTED", "The proposed publication was rejected", now);
+        if (approval.getRobotRunOutput() == null) {
+            approval.getRobotRun().markFailed("APPROVAL_REJECTED", "The proposed publication was rejected", now);
+        } else {
+            approval.getRobotRunOutput().failed(
+                    "APPROVAL_REJECTED", "The proposed publication was rejected", now);
+        }
         return toSummary(approval);
     }
 
@@ -131,6 +143,8 @@ public class RobotApprovalService {
                 approval.getCreatedAt(),
                 approval.getDecidedAt(),
                 approval.getDecidedByUserId(),
-                run.getPublishScheduleId());
+                approval.getRobotRunOutput() == null
+                        ? run.getPublishScheduleId()
+                        : approval.getRobotRunOutput().getPublishScheduleId());
     }
 }

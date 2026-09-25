@@ -39,6 +39,21 @@ class ExperimentAnalysisStoreTest {
     }
 
     @Test
+    void multiOutputRunPublicationsRemainOneExperimentStatisticalUnit() {
+        when(jdbc.query(anyString(), any(MapSqlParameterSource.class), any(RowMapper.class))).thenReturn(List.of());
+
+        store.fetch(UUID.randomUUID(), Window.H72, Metric.VIEWS, now);
+
+        String sql = capturedSql();
+        assertThat(sql).contains(
+                "PARTITION BY ea.id",
+                "a.experiment_assignment_id = ea.id",
+                "ORDER BY p.published_at ASC NULLS LAST, p.id ASC",
+                "WHERE rn = 1");
+        assertThat(sql).doesNotContain("robot_run_output_id");
+    }
+
+    @Test
     void fetchJoinsPublicationAttributionsByExperimentAssignmentIdNotByRobotRunId() {
         when(jdbc.query(anyString(), any(MapSqlParameterSource.class), any(RowMapper.class))).thenReturn(List.of());
 

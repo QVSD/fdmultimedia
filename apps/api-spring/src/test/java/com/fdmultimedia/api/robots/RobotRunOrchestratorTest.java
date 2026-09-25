@@ -85,10 +85,13 @@ class RobotRunOrchestratorTest {
     private final ContentSuggestionRepository contentSuggestions = mock(ContentSuggestionRepository.class);
     private final PersonaRepository personaRepository = mock(PersonaRepository.class);
     private final ExperimentService experiments = mock(ExperimentService.class);
+    private final RobotMultiOutputOrchestrator multiOutputOrchestrator = mock(RobotMultiOutputOrchestrator.class);
+    private final RobotRunOutputRepository outputs = mock(RobotRunOutputRepository.class);
     private final RobotRunOrchestrator orchestrator = new RobotRunOrchestrator(
             authService, robotRepository, runs, analyses, candidates, highlightService, highlightProperties,
             contentDraftService, contentDrafts, approvals, publishScheduleService, contentSources,
-            contentSuggestionService, contentSuggestions, personaRepository, experiments, Clock.fixed(NOW, ZoneOffset.UTC));
+            contentSuggestionService, contentSuggestions, personaRepository, experiments,
+            multiOutputOrchestrator, outputs, Clock.fixed(NOW, ZoneOffset.UTC));
 
     private Workspace workspace;
     private AppUser owner;
@@ -102,6 +105,7 @@ class RobotRunOrchestratorTest {
         ownerPrincipal = new AuthenticatedUser(owner);
         sourceAsset = readyInspectedVideoAsset();
         when(approvals.findByRobotRun(any())).thenReturn(Optional.empty());
+        when(outputs.findByRobotRunOrderBySelectionOrderAsc(any())).thenReturn(List.of());
     }
 
     @Test

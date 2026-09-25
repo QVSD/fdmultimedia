@@ -25,6 +25,4 @@ package com.fdmultimedia.api.robots;
  * a `SEMANTIC_TOP` value once that dependency is a first-class, always-on
  * part of the stack.
  */
-public enum RobotHighlightStrategy {
-    TOP_HIGHLIGHT
-}
+public enum RobotHighlightStrategy { TOP_HIGHLIGHT, TOP_DIVERSE_HIGHLIGHTS }

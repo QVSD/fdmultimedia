@@ -13,6 +13,7 @@ import com.fdmultimedia.api.auth.security.AuthenticatedUser;
 import com.fdmultimedia.api.highlights.HighlightAnalysisStatus;
 import com.fdmultimedia.api.highlights.HighlightCandidate;
 import com.fdmultimedia.api.highlights.HighlightCandidateRepository;
+import com.fdmultimedia.api.highlights.HighlightSelectionItem;
 import com.fdmultimedia.api.jobs.Job;
 import com.fdmultimedia.api.jobs.JobService;
 import com.fdmultimedia.api.publishing.Publication;
@@ -101,6 +102,27 @@ public class ContentDraftService {
         Instant now = Instant.now(clock);
         ContentDraft draft = ContentDraft.fromHighlightCandidate(workspace, candidate, clipAsset, clipJob, membership.getUser(), now);
         return toSummary(drafts.save(draft), workspace);
+    }
+
+    @Transactional
+    public ContentDraftSummary createForRobotOutput(AuthenticatedUser principal, HighlightSelectionItem item, UUID outputId, UUID runId) {
+        WorkspaceMembership membership = authService.currentMembershipFor(principal);
+        HighlightCandidate candidate = item.getCandidate();
+        MediaAsset clipAsset;
+        Job clipJob;
+        if (item.getClipAsset() != null && item.getClipJob() != null) {
+            clipAsset = item.getClipAsset(); clipJob = item.getClipJob();
+        } else {
+            CreateClipResponse response = mediaAssetService.createClip(principal, candidate.getAsset().getId(),
+                    new CreateClipRequest(candidate.getStartMs(), candidate.getEndMs() - candidate.getStartMs()));
+            clipAsset = assets.findByWorkspaceAndId(membership.getWorkspace(), response.asset().id()).orElseThrow();
+            clipJob = jobService.getJobEntityForWorkspace(membership.getWorkspace(), response.job().id()).orElseThrow();
+            item.attachClip(clipAsset, clipJob);
+        }
+        ContentDraft draft = ContentDraft.fromHighlightCandidate(membership.getWorkspace(), candidate, clipAsset, clipJob,
+                membership.getUser(), Instant.now(clock));
+        draft.attachRobotRunOutput(runId, outputId);
+        return toSummary(drafts.save(draft), membership.getWorkspace());
     }
 
     @Transactional

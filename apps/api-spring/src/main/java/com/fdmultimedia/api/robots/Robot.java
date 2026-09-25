@@ -57,6 +57,12 @@ public class Robot {
     @Column(name = "highlight_strategy", nullable = false)
     private RobotHighlightStrategy highlightStrategy;
 
+    @Column(name = "highlight_count", nullable = false)
+    private int highlightCount;
+
+    @Column(name = "output_spacing_minutes", nullable = false)
+    private int outputSpacingMinutes;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "source_policy", nullable = false)
     private RobotSourcePolicy sourcePolicy;
@@ -232,6 +238,8 @@ public class Robot {
         this.status = RobotStatus.ACTIVE;
         this.autonomyMode = autonomyMode;
         this.highlightStrategy = RobotHighlightStrategy.TOP_HIGHLIGHT;
+        this.highlightCount = 1;
+        this.outputSpacingMinutes = 60;
         this.sourcePolicy = sourcePolicy;
         this.sourceAsset = sourceAsset;
         this.contentSource = contentSource;
@@ -306,6 +314,13 @@ public class Robot {
         this.updatedAt = now;
     }
 
+    public void configureHighlightStrategy(RobotHighlightStrategy strategy, int count, int spacingMinutes, Instant now) {
+        this.highlightStrategy = strategy;
+        this.highlightCount = strategy == RobotHighlightStrategy.TOP_DIVERSE_HIGHLIGHTS ? count : 1;
+        this.outputSpacingMinutes = spacingMinutes;
+        this.updatedAt = now;
+    }
+
     public void pause(Instant now) {
         this.status = RobotStatus.PAUSED;
         this.updatedAt = now;
@@ -353,6 +368,8 @@ public class Robot {
     public RobotStatus getStatus() { return status; }
     public RobotAutonomyMode getAutonomyMode() { return autonomyMode; }
     public RobotHighlightStrategy getHighlightStrategy() { return highlightStrategy; }
+    public int getHighlightCount() { return highlightCount; }
+    public int getOutputSpacingMinutes() { return outputSpacingMinutes; }
     public RobotSourcePolicy getSourcePolicy() { return sourcePolicy; }
     public MediaAsset getSourceAsset() { return sourceAsset; }
     public ContentSource getContentSource() { return contentSource; }

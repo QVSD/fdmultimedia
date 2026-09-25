@@ -697,6 +697,12 @@ infra/
 └── docker/        Shared Docker resources
 docs/              Architecture, development, and roadmap docs
 ```
+
+## Phase 17D: multi-output Robot campaigns
+
+`TOP_DIVERSE_HIGHLIGHTS` turns one immutable V3 diversity selection into 1–5 independently tracked `RobotRunOutput` rows. The parent `RobotRun` remains the automation, Experiment, and source-consumption unit; each child owns one selection item and at most one Draft, AI suggestion, publishing approval, and Schedule. Existing `TOP_HIGHLIGHT` runs retain their historical direct one-Draft shape.
+
+Fan-out materialization is idempotent and bounded. Child failures are isolated and the parent reports partial success when successful siblings coexist with terminal failures. `AUTO_SCHEDULE` remains TEST-only and staggers outputs by the configured 1–1440 minute spacing. No Worker capability, ranking model, analytics feedback loop, or cross-output LLM planning is introduced.
 # Phase 14C: Experiment decisions
 
 Experiments now accept a positive minimum practical effect (absolute primary-metric units) while DRAFT; it freezes at activation. Legacy experiments keep a null threshold. `/api/experiments/{id}/decision-readiness` evaluates deterministic guardrails for assigned-observed and per-protocol evidence. A human can append a reasoned, idempotent decision through `/decisions`; the evidence snapshot and SHA-256 fingerprint remain historical. Decisions never deploy a variant, stop an experiment, or change a Robot, Persona, schedule, or allocation. See [architecture](docs/ARCHITECTURE.md) and [development](docs/DEVELOPMENT.md).

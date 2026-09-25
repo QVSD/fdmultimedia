@@ -13,6 +13,8 @@ import com.fdmultimedia.api.experiments.ExperimentVariantRepository;
 import com.fdmultimedia.api.publishing.Publication;
 import com.fdmultimedia.api.robots.RobotRun;
 import com.fdmultimedia.api.robots.RobotRunRepository;
+import com.fdmultimedia.api.robots.RobotRunOutput;
+import com.fdmultimedia.api.robots.RobotRunOutputRepository;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
@@ -31,11 +33,12 @@ public class PublicationAttributionService {
     private final ContentSourceRepository sources;
     private final ExperimentRepository experiments;
     private final ExperimentVariantRepository experimentVariants;
+    private final RobotRunOutputRepository runOutputs;
 
     public PublicationAttributionService(JdbcTemplate jdbc, ContentDraftRepository drafts,
             ContentSuggestionRepository suggestions, RobotRunRepository runs,
             ContentSourceRepository sources, ExperimentRepository experiments,
-            ExperimentVariantRepository experimentVariants) {
+            ExperimentVariantRepository experimentVariants, RobotRunOutputRepository runOutputs) {
         this.jdbc = jdbc;
         this.drafts = drafts;
         this.suggestions = suggestions;
@@ -43,6 +46,7 @@ public class PublicationAttributionService {
         this.sources = sources;
         this.experiments = experiments;
         this.experimentVariants = experimentVariants;
+        this.runOutputs = runOutputs;
     }
 
     public void capture(Publication publication, UUID scheduleId, UUID scheduledSuggestionId, Instant now) {
@@ -50,6 +54,8 @@ public class PublicationAttributionService {
                 : drafts.findByWorkspaceAndId(publication.getWorkspace(), publication.getContentDraftId()).orElse(null);
         RobotRun run = draft == null || draft.getRobotRunId() == null ? null
                 : runs.findByWorkspaceAndId(publication.getWorkspace(), draft.getRobotRunId()).orElse(null);
+        RobotRunOutput output = draft == null || draft.getRobotRunOutputId() == null ? null
+                : runOutputs.findByWorkspaceAndId(publication.getWorkspace(), draft.getRobotRunOutputId()).orElse(null);
         UUID suggestionId = scheduleId == null
                 ? draft == null ? null : draft.getAppliedContentSuggestionId()
                 : scheduledSuggestionId;
@@ -110,8 +116,10 @@ public class PublicationAttributionService {
                     experiment_variant_id, experiment_variant_key, experiment_variant_label_snapshot,
                     experiment_factor_value_id, experiment_factor_value_name_snapshot, experiment_assignment_id,
                     protocol_deviation, protocol_deviation_reason,
+                    robot_run_output_id, highlight_selection_id, highlight_selection_item_id,
+                    highlight_candidate_id, selection_order, source_rank,
                     created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 publication.getId(), publication.getWorkspace().getId(), draft == null ? null : draft.getId(), scheduleId,
                 run == null ? null : run.getId(), run == null ? null : run.getRobot().getId(),
@@ -134,6 +142,12 @@ public class PublicationAttributionService {
                 experimentVariantLabelSnapshot, experimentFactorValueId, experimentFactorValueNameSnapshot,
                 run == null ? null : run.getExperimentAssignmentId(),
                 protocolDeviation, protocolDeviationReason,
+                output == null ? null : output.getId(),
+                output == null ? null : output.getHighlightSelection().getId(),
+                output == null ? null : output.getSelectionItem().getId(),
+                output == null ? null : output.getCandidate().getId(),
+                output == null ? null : output.getSelectionOrder(),
+                output == null ? null : output.getSourceRank(),
                 java.sql.Timestamp.from(now));
     }
 
@@ -160,6 +174,9 @@ public class PublicationAttributionService {
                 rs.getString("experiment_variant_label_snapshot"), rs.getObject("experiment_factor_value_id", UUID.class),
                 rs.getString("experiment_factor_value_name_snapshot"), rs.getObject("experiment_assignment_id", UUID.class),
                 protocolDeviation, rs.getString("protocol_deviation_reason"),
+                rs.getObject("robot_run_output_id", UUID.class), rs.getObject("highlight_selection_id", UUID.class),
+                rs.getObject("highlight_selection_item_id", UUID.class), rs.getObject("highlight_candidate_id", UUID.class),
+                (Integer) rs.getObject("selection_order"), (Integer) rs.getObject("source_rank"),
                 rs.getTimestamp("created_at").toInstant());
     }
 }

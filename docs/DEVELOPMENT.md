@@ -870,3 +870,13 @@ Use the SELECT_VARIANT decision row in `/experiments`, select a Robot linked to 
 5. Let the Worker process `CREATE_CLIP` and automatic `INSPECT_MEDIA`; vertical derivatives remain explicit per clip.
 
 The selector is content-derived only. Lexical Jaccard is not semantic understanding: paraphrases may evade it, different wording can express the same idea, and Whisper errors affect comparison. Diversity predicts neither engagement nor performance. A partial selection is expected when fewer candidates satisfy the versioned rules.
+
+## Testing multi-output Robot runs
+
+1. Configure a Robot with `TOP_DIVERSE_HIGHLIGHTS`, highlight count 1–5, and a source that can complete a strict V3 analysis.
+2. For `DRAFT_ONLY`, run it and verify one frozen selection, one ordered child per selected item, and one Draft per child.
+3. For `REVIEW_REQUIRED`, approve or reject children independently; sibling state must not change.
+4. For `AUTO_SCHEDULE`, use a TEST account and verify `scheduledFor = base + (selectionOrder - 1) * outputSpacingMinutes`.
+5. Restart the API during reconciliation and confirm IDs are reused. Repeated reconciliation must not duplicate outputs, clips, Drafts, suggestions, approvals, schedules, or publications.
+
+Current limits: five outputs maximum, one source asset and one policy, Persona, and Experiment treatment per parent, no campaign-level narrative, no multi-account fan-out, and no rollback/deletion of already published content. More outputs increase media and AI compute cost.

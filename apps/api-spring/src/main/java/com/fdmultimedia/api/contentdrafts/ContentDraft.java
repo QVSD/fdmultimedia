@@ -86,6 +86,9 @@ public class ContentDraft {
     @Column(name = "robot_run_id")
     private UUID robotRunId;
 
+    @Column(name = "robot_run_output_id")
+    private UUID robotRunOutputId;
+
     @Column(name = "applied_content_suggestion_id")
     private UUID appliedContentSuggestionId;
 
@@ -220,6 +223,11 @@ public class ContentDraft {
         this.robotRunId = robotRunId;
     }
 
+    public void attachRobotRunOutput(UUID robotRunId, UUID outputId) {
+        this.robotRunId = robotRunId;
+        this.robotRunOutputId = outputId;
+    }
+
     public void applyPublishingDisplayState(ContentDraftStatus derived, Instant publishedAt, Instant now) {
         if (this.status == derived && (publishedAt == null || publishedAt.equals(this.publishedAt))) {
             return;
@@ -252,5 +260,6 @@ public class ContentDraft {
     public Instant getUpdatedAt() { return updatedAt; }
     public Instant getPublishedAt() { return publishedAt; }
     public UUID getRobotRunId() { return robotRunId; }
+    public UUID getRobotRunOutputId() { return robotRunOutputId; }
     public UUID getAppliedContentSuggestionId() { return appliedContentSuggestionId; }
 }

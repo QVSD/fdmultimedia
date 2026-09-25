@@ -36,10 +36,11 @@ public enum RobotRunStatus {
     WAITING_FOR_AI_REVIEW,
     WAITING_FOR_REVIEW,
     SUCCEEDED,
+    PARTIALLY_SUCCEEDED,
     FAILED,
     CANCELLED;
 
-    private static final List<RobotRunStatus> TERMINAL = List.of(SUCCEEDED, FAILED, CANCELLED);
+    private static final List<RobotRunStatus> TERMINAL = List.of(SUCCEEDED, PARTIALLY_SUCCEEDED, FAILED, CANCELLED);
 
     public static List<RobotRunStatus> terminalStatuses() {
         return TERMINAL;

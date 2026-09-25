@@ -136,6 +136,14 @@ public class RobotRun {
     @Column(name = "publish_schedule_id")
     private UUID publishScheduleId;
 
+    @Enumerated(EnumType.STRING) @Column(name="highlight_strategy_snapshot",nullable=false)
+    private RobotHighlightStrategy highlightStrategySnapshot;
+    @Column(name="requested_output_count",nullable=false) private int requestedOutputCount;
+    @Column(name="actual_output_count") private Integer actualOutputCount;
+    @Column(name="output_spacing_minutes_snapshot",nullable=false) private int outputSpacingMinutesSnapshot;
+    @Column(name="highlight_selection_id") private UUID highlightSelectionId;
+    @Column(name="output_schedule_base_at") private Instant outputScheduleBaseAt;
+
     @Column(name = "failure_code")
     private String failureCode;
 
@@ -177,6 +185,10 @@ public class RobotRun {
         this.personaIdSnapshot = robot.getPersona() == null ? null : robot.getPersona().getId();
         this.aiLanguageOverrideSnapshot = robot.getAiLanguageOverride();
         this.aiToneOverrideSnapshot = robot.getAiToneOverride();
+        this.highlightStrategySnapshot = robot.getHighlightStrategy();
+        this.requestedOutputCount = robot.getHighlightStrategy() == RobotHighlightStrategy.TOP_DIVERSE_HIGHLIGHTS
+                ? robot.getHighlightCount() : 1;
+        this.outputSpacingMinutesSnapshot = robot.getOutputSpacingMinutes();
     }
 
     @PrePersist
@@ -190,7 +202,7 @@ public class RobotRun {
     }
 
     public boolean isTerminal() {
-        return status == RobotRunStatus.SUCCEEDED || status == RobotRunStatus.FAILED || status == RobotRunStatus.CANCELLED;
+        return RobotRunStatus.terminalStatuses().contains(status);
     }
 
     public void setHighlightAnalysisId(UUID highlightAnalysisId) {
@@ -241,6 +253,21 @@ public class RobotRun {
         this.finishedAt = now;
     }
 
+    public void bindSelection(UUID selectionId, int actualCount) {
+        if (highlightSelectionId != null && !highlightSelectionId.equals(selectionId)) throw new IllegalStateException("Run selection is immutable");
+        highlightSelectionId=selectionId; actualOutputCount=actualCount;
+    }
+    public Instant outputScheduleBase(Instant now, int delayMinutes) {
+        if (outputScheduleBaseAt == null) {
+            outputScheduleBaseAt = now.plus(delayMinutes, java.time.temporal.ChronoUnit.MINUTES);
+        }
+        return outputScheduleBaseAt;
+    }
+
+    public void markPartiallySucceeded(Instant now) {
+        status=RobotRunStatus.PARTIALLY_SUCCEEDED; finishedAt=now;
+    }
+
     public void markFailed(String failureCode, String failureMessage, Instant now) {
         this.status = RobotRunStatus.FAILED;
         this.failureCode = failureCode;
@@ -284,6 +311,12 @@ public class RobotRun {
     public ExperimentVariantKey getExperimentVariantKey() { return experimentVariantKey; }
     public ExperimentFactor getExperimentFactor() { return experimentFactor; }
     public UUID getPublishScheduleId() { return publishScheduleId; }
+    public RobotHighlightStrategy getHighlightStrategySnapshot(){return highlightStrategySnapshot;}
+    public int getRequestedOutputCount(){return requestedOutputCount;}
+    public Integer getActualOutputCount(){return actualOutputCount;}
+    public int getOutputSpacingMinutesSnapshot(){return outputSpacingMinutesSnapshot;}
+    public UUID getHighlightSelectionId(){return highlightSelectionId;}
+    public Instant getOutputScheduleBaseAt(){return outputScheduleBaseAt;}
     public String getFailureCode() { return failureCode; }
     public String getFailureMessage() { return failureMessage; }
     public Instant getCreatedAt() { return createdAt; }

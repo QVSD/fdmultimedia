@@ -12,6 +12,8 @@ public record RobotSummary(
         RobotStatus status,
         RobotAutonomyMode autonomyMode,
         RobotHighlightStrategy highlightStrategy,
+        int highlightCount,
+        int outputSpacingMinutes,
         RobotSourcePolicy sourcePolicy,
         UUID sourceAssetId,
         String sourceAssetFilename,

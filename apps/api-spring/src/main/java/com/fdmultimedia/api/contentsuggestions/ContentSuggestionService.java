@@ -80,7 +80,8 @@ public class ContentSuggestionService {
         Workspace workspace = membership.getWorkspace();
         ContentDraft draft = drafts.findByWorkspaceAndId(workspace, draftId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Content draft not found"));
-        return generate(workspace, draft, request.personaId(), request.language(), request.tone(), null, membership.getUser(), null);
+        return generate(workspace, draft, request.personaId(), request.language(), request.tone(),
+                null, null, membership.getUser(), null);
     }
 
     /**
@@ -116,13 +117,27 @@ public class ContentSuggestionService {
             Workspace workspace, ContentDraft draft, UUID personaId,
             SuggestionLanguage languageOverride, SuggestionTone toneOverride, UUID robotRunId, AppUser initiatingUser,
             ExperimentTreatment treatment) {
-        return generate(workspace, draft, personaId, languageOverride, toneOverride, robotRunId, initiatingUser, treatment);
+        return generate(workspace, draft, personaId, languageOverride, toneOverride, robotRunId, null,
+                initiatingUser, treatment);
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public ContentSuggestionSummary createForRobotOutput(
+            Workspace workspace, ContentDraft draft, UUID personaId,
+            SuggestionLanguage languageOverride, SuggestionTone toneOverride, UUID robotRunId,
+            UUID robotRunOutputId, AppUser initiatingUser, ExperimentTreatment treatment) {
+        ContentSuggestion existing = suggestions.findByRobotRunOutputId(robotRunOutputId).orElse(null);
+        if (existing != null) {
+            return toSummary(existing, draft);
+        }
+        return generate(workspace, draft, personaId, languageOverride, toneOverride, robotRunId,
+                robotRunOutputId, initiatingUser, treatment);
     }
 
     private ContentSuggestionSummary generate(
             Workspace workspace, ContentDraft draft, UUID personaId,
-            SuggestionLanguage languageOverride, SuggestionTone toneOverride, UUID robotRunId, AppUser initiatingUser,
-            ExperimentTreatment treatment) {
+            SuggestionLanguage languageOverride, SuggestionTone toneOverride, UUID robotRunId,
+            UUID robotRunOutputId, AppUser initiatingUser, ExperimentTreatment treatment) {
         if (!properties.isEnabled()) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "AI_DISABLED");
         }
@@ -171,7 +186,8 @@ public class ContentSuggestionService {
                 : ContentSuggestion.forRobot(
                         workspace, draft, job, provider, model, SocialCopyPromptBuilder.VERSION_V2,
                         language, tone, prompt, fingerprint,
-                        context.transcriptUsed(), context.transcriptId(), personaSnapshot, robotRunId, initiatingUser, now,
+                        context.transcriptUsed(), context.transcriptId(), personaSnapshot, robotRunId,
+                        robotRunOutputId, initiatingUser, now,
                         treatment == null ? null : treatment.experimentId(),
                         treatment == null ? null : treatment.experimentAssignmentId(),
                         treatment == null ? null : treatment.experimentVariantId());

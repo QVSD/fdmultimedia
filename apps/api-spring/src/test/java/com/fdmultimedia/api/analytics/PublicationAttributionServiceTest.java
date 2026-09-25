@@ -25,6 +25,7 @@ import com.fdmultimedia.api.robots.RobotAiPolicy;
 import com.fdmultimedia.api.robots.RobotAutonomyMode;
 import com.fdmultimedia.api.robots.RobotRun;
 import com.fdmultimedia.api.robots.RobotRunRepository;
+import com.fdmultimedia.api.robots.RobotRunOutputRepository;
 import com.fdmultimedia.api.robots.RobotSelectionPolicy;
 import com.fdmultimedia.api.users.AppUser;
 import com.fdmultimedia.api.workspaces.Workspace;
@@ -43,8 +44,9 @@ class PublicationAttributionServiceTest {
     private final ContentSourceRepository sources = mock(ContentSourceRepository.class);
     private final ExperimentRepository experiments = mock(ExperimentRepository.class);
     private final ExperimentVariantRepository experimentVariants = mock(ExperimentVariantRepository.class);
+    private final RobotRunOutputRepository runOutputs = mock(RobotRunOutputRepository.class);
     private final PublicationAttributionService service = new PublicationAttributionService(
-            jdbc, drafts, suggestions, runs, sources, experiments, experimentVariants);
+            jdbc, drafts, suggestions, runs, sources, experiments, experimentVariants, runOutputs);
     private final Workspace workspace = new Workspace("Media", "media");
     private final MediaAsset media = mock(MediaAsset.class);
 

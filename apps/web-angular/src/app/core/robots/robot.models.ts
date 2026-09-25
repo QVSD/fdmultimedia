@@ -2,7 +2,7 @@ import { SuggestionLanguage, SuggestionTone } from '../content-suggestions/conte
 
 export type RobotStatus = 'ACTIVE' | 'PAUSED' | 'DISABLED';
 export type RobotAutonomyMode = 'DRAFT_ONLY' | 'REVIEW_REQUIRED' | 'AUTO_SCHEDULE';
-export type RobotHighlightStrategy = 'TOP_HIGHLIGHT';
+export type RobotHighlightStrategy = 'TOP_HIGHLIGHT' | 'TOP_DIVERSE_HIGHLIGHTS';
 export type RobotSourcePolicy = 'EXISTING_ASSET' | 'CONTENT_SOURCE';
 export type RobotSelectionPolicy = 'OLDEST_UNPROCESSED' | 'NEWEST_UNPROCESSED';
 export type RobotCadenceType = 'MANUAL_ONLY' | 'INTERVAL';
@@ -16,6 +16,7 @@ export type RobotRunStatus =
   | 'WAITING_FOR_AI_REVIEW'
   | 'WAITING_FOR_REVIEW'
   | 'SUCCEEDED'
+  | 'PARTIALLY_SUCCEEDED'
   | 'FAILED'
   | 'CANCELLED';
 export type RobotApprovalStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
@@ -28,6 +29,8 @@ export interface RobotSummary {
   status: RobotStatus;
   autonomyMode: RobotAutonomyMode;
   highlightStrategy: RobotHighlightStrategy;
+  highlightCount?: number;
+  outputSpacingMinutes?: number;
   sourcePolicy: RobotSourcePolicy;
   sourceAssetId: string | null;
   sourceAssetFilename: string | null;
@@ -78,6 +81,36 @@ export interface RobotRunSummary {
   failureCode: string | null;
   failureMessage: string | null;
   createdAt: string;
+  highlightStrategySnapshot?: RobotHighlightStrategy;
+  requestedOutputCount?: number;
+  actualOutputCount?: number | null;
+  outputSpacingMinutes?: number;
+  highlightSelectionId?: string | null;
+  outputs?: RobotRunOutputSummary[];
+}
+
+export type RobotRunOutputStatus =
+  | 'CREATED' | 'WAITING_FOR_DRAFT' | 'WAITING_FOR_AI' | 'WAITING_FOR_AI_REVIEW'
+  | 'WAITING_FOR_REVIEW' | 'SCHEDULED' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED';
+
+export interface RobotRunOutputSummary {
+  id: string;
+  selectionOrder: number;
+  sourceRank: number;
+  highlightCandidateId: string;
+  startMs: number;
+  endMs: number;
+  transcriptExcerpt: string | null;
+  status: RobotRunOutputStatus;
+  contentDraftId: string | null;
+  contentSuggestionId: string | null;
+  robotApprovalId: string | null;
+  publishScheduleId: string | null;
+  failureCode: string | null;
+  failureMessage: string | null;
+  createdAt: string;
+  updatedAt: string;
+  completedAt: string | null;
 }
 
 export interface RobotApprovalSummary {
@@ -117,6 +150,9 @@ export interface CreateRobotRequest {
   aiToneOverride: SuggestionTone | null;
   /** Phase 14A: when set, the Experiment's frozen variant Persona overrides personaId for experimental runs. */
   experimentId: string | null;
+  highlightStrategy?: RobotHighlightStrategy;
+  highlightCount?: number;
+  outputSpacingMinutes?: number;
 }
 
 export type UpdateRobotRequest = Omit<CreateRobotRequest, 'sourcePolicy' | 'sourceAssetId' | 'contentSourceId' | 'selectionPolicy'>;

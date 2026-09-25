@@ -170,6 +170,27 @@ button.button-secondary {
   font-size: 0.85rem;
 }
 
+.run-outputs {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.5rem;
+  width: 100%;
+}
+
+.run-output {
+  display: grid;
+  gap: 0.3rem;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  padding: 0.65rem;
+  font-size: 0.8rem;
+
+  p {
+    margin: 0;
+    overflow-wrap: anywhere;
+  }
+}
+
 .robots__badge {
   display: inline-block;
   min-width: 5.6rem;
