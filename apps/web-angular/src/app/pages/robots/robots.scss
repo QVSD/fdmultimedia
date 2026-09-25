@@ -191,6 +191,41 @@ button.button-secondary {
   }
 }
 
+.campaign-plan {
+  display: grid;
+  gap: 0.4rem;
+  border: 1px solid #c7d2fe;
+  border-radius: 6px;
+  padding: 0.65rem;
+  font-size: 0.85rem;
+  background: #eef2ff;
+
+  p {
+    margin: 0;
+    overflow-wrap: anywhere;
+  }
+}
+
+.campaign-plan__header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.campaign-plan__actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.campaign-plan__history {
+  font-size: 0.8rem;
+
+  summary {
+    cursor: pointer;
+  }
+}
+
 .robots__badge {
   display: inline-block;
   min-width: 5.6rem;

@@ -21,7 +21,20 @@ public record UpdateRobotRequest(
         UUID experimentId,
         RobotHighlightStrategy highlightStrategy,
         Integer highlightCount,
-        Integer outputSpacingMinutes) {
+        Integer outputSpacingMinutes,
+        CampaignPlanningPolicy campaignPlanningPolicy) {
+
+    /** Backward-compatible overload (no campaign planning) — pre-17E call sites keep working unchanged. */
+    public UpdateRobotRequest(
+            String name, String description, RobotAutonomyMode autonomyMode, UUID targetSocialAccountId,
+            RobotCadenceType cadenceType, Integer cadenceIntervalHours, Integer scheduleDelayMinutes,
+            Integer maxRunsPerDay, RobotAiPolicy aiPolicy, UUID personaId, SuggestionLanguage aiLanguageOverride,
+            SuggestionTone aiToneOverride, UUID experimentId, RobotHighlightStrategy highlightStrategy,
+            Integer highlightCount, Integer outputSpacingMinutes) {
+        this(name, description, autonomyMode, targetSocialAccountId, cadenceType, cadenceIntervalHours,
+                scheduleDelayMinutes, maxRunsPerDay, aiPolicy, personaId, aiLanguageOverride, aiToneOverride,
+                experimentId, highlightStrategy, highlightCount, outputSpacingMinutes, null);
+    }
 
     /** Backward-compatible overload (NO_AI, no Persona, no Experiment) — Phase 11C/11D call sites keep working unchanged. */
     public UpdateRobotRequest(

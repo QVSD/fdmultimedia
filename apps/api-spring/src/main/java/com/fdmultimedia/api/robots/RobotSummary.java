@@ -35,5 +35,6 @@ public record RobotSummary(
         Instant nextRunAt,
         Instant lastRunAt,
         Instant createdAt,
-        Instant updatedAt) {
+        Instant updatedAt,
+        CampaignPlanningPolicy campaignPlanningPolicy) {
 }

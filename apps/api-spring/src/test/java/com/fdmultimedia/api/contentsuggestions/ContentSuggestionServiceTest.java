@@ -648,6 +648,124 @@ class ContentSuggestionServiceTest {
                 .isEqualTo("SUGGESTION_STALE");
     }
 
+    // ---- Phase 17E: campaign guidance ----
+
+    @Test
+    void createForRobotOutputWithCampaignGuidanceUsesV3CampaignPromptVersionAndFreezesGuidance() {
+        when(jobService.createForWorkspace(any(), any())).thenReturn(jobSummary(generationJob));
+        when(jobService.getJobEntityForWorkspace(workspace, generationJob.getId())).thenReturn(Optional.of(generationJob));
+        when(suggestions.findByRobotRunOutputId(any())).thenReturn(Optional.empty());
+        UUID robotRunOutputId = UUID.randomUUID();
+        CampaignGuidance guidance = campaignGuidance();
+
+        ContentSuggestionSummary summary = service.createForRobotOutput(
+                workspace, draft, null, null, null, UUID.randomUUID(), robotRunOutputId, owner, null, guidance);
+
+        ArgumentCaptor<ContentSuggestion> captor = ArgumentCaptor.forClass(ContentSuggestion.class);
+        verify(suggestions, times(1)).save(captor.capture());
+        assertThat(captor.getValue().getPromptVersion()).isEqualTo(SocialCopyPromptBuilder.VERSION_V3_CAMPAIGN);
+        assertThat(captor.getValue().getCampaignGuidance()).isEqualTo(guidance);
+        assertThat(summary.campaignPlanId()).isEqualTo(guidance.campaignPlanId());
+        assertThat(summary.campaignPlanRevision()).isEqualTo(guidance.campaignPlanRevision());
+        assertThat(summary.campaignPlanItemId()).isEqualTo(guidance.campaignPlanItemId());
+    }
+
+    @Test
+    void createForRobotOutputWithoutCampaignGuidanceStaysOnV2AndLeavesProvenanceNull() {
+        when(jobService.createForWorkspace(any(), any())).thenReturn(jobSummary(generationJob));
+        when(jobService.getJobEntityForWorkspace(workspace, generationJob.getId())).thenReturn(Optional.of(generationJob));
+        when(suggestions.findByRobotRunOutputId(any())).thenReturn(Optional.empty());
+
+        ContentSuggestionSummary summary = service.createForRobotOutput(
+                workspace, draft, null, null, null, UUID.randomUUID(), UUID.randomUUID(), owner, null, null);
+
+        ArgumentCaptor<ContentSuggestion> captor = ArgumentCaptor.forClass(ContentSuggestion.class);
+        verify(suggestions, times(1)).save(captor.capture());
+        assertThat(captor.getValue().getPromptVersion()).isEqualTo(SocialCopyPromptBuilder.VERSION_V2);
+        assertThat(captor.getValue().getCampaignGuidance()).isNull();
+        assertThat(summary.campaignPlanId()).isNull();
+        assertThat(summary.campaignPlanItemId()).isNull();
+    }
+
+    @Test
+    void createForRobotOutputIsIdempotentPerOutputRegardlessOfCampaignGuidance() {
+        ContentSuggestion existing = readySuggestion();
+        UUID robotRunOutputId = UUID.randomUUID();
+        when(suggestions.findByRobotRunOutputId(robotRunOutputId)).thenReturn(Optional.of(existing));
+
+        service.createForRobotOutput(
+                workspace, draft, null, null, null, UUID.randomUUID(), robotRunOutputId, owner, null, campaignGuidance());
+
+        verify(jobService, never()).createForWorkspace(any(), any());
+        verify(suggestions, never()).save(any(ContentSuggestion.class));
+    }
+
+    @Test
+    void fingerprintDiffersWhenCampaignGuidanceDiffers() {
+        CampaignGuidance guidanceA = campaignGuidance();
+        CampaignGuidance guidanceB = new CampaignGuidance(
+                guidanceA.campaignPlanId(), guidanceA.campaignPlanRevision(), guidanceA.campaignPlanItemId(),
+                guidanceA.role(), "A completely different hook angle", guidanceA.captionGuidance(),
+                guidanceA.ctaGuidance(), guidanceA.avoidRepetitionGuidance());
+
+        String fingerprintA = fingerprintForV3Campaign(draft, guidanceA);
+        String fingerprintB = fingerprintForV3Campaign(draft, guidanceB);
+
+        assertThat(fingerprintA).isNotEqualTo(fingerprintB);
+    }
+
+    @Test
+    void appliedCampaignGuidanceSuggestionStaysApplicableWhenDraftUnchanged() {
+        ContentSuggestion suggestion = readySuggestionWithCampaignGuidance(campaignGuidance());
+        when(suggestions.findByWorkspaceAndIdForUpdate(workspace, suggestion.getId())).thenReturn(Optional.of(suggestion));
+        when(drafts.findByWorkspaceAndIdForUpdate(workspace, draft.getId())).thenReturn(Optional.of(draft));
+
+        ContentSuggestionSummary summary = service.apply(user, suggestion.getId());
+
+        assertThat(summary.status()).isEqualTo(ContentSuggestionStatus.APPLIED);
+    }
+
+    private CampaignGuidance campaignGuidance() {
+        return new CampaignGuidance(UUID.randomUUID(), 1, UUID.randomUUID(), "INTRODUCTION",
+                "Open with the setup", "Set the scene for part one", "Follow for part two", null);
+    }
+
+    /** Mirrors the V3_CAMPAIGN branch of ContentSuggestionService's fingerprint algorithm (V2 fields with a null persona, plus campaign fields). */
+    private String fingerprintForV3Campaign(ContentDraft draft, CampaignGuidance guidance) {
+        return sha256(String.join("|",
+                SocialCopyPromptBuilder.VERSION_V3_CAMPAIGN,
+                draft.getId().toString(),
+                draft.getTitle() == null ? "" : draft.getTitle(),
+                draft.getCaption() == null ? "" : draft.getCaption(),
+                draft.getSourceAsset().getId().toString(),
+                draft.getSourceHighlightCandidate() == null ? "" : draft.getSourceHighlightCandidate().getId().toString(),
+                SuggestionLanguage.AUTO.name(),
+                SuggestionTone.NEUTRAL.name(),
+                "DETERMINISTIC_TEST",
+                "deterministic-v1",
+                "", "", "", "", "", "", "",
+                guidance.campaignPlanItemId().toString(),
+                guidance.role(),
+                guidance.hookGuidance() == null ? "" : guidance.hookGuidance(),
+                guidance.captionGuidance() == null ? "" : guidance.captionGuidance(),
+                guidance.ctaGuidance() == null ? "" : guidance.ctaGuidance(),
+                guidance.avoidRepetitionGuidance() == null ? "" : guidance.avoidRepetitionGuidance()));
+    }
+
+    private ContentSuggestion readySuggestionWithCampaignGuidance(CampaignGuidance guidance) {
+        Job job = new Job(workspace, JobType.GENERATE_SOCIAL_COPY, Map.of("draftId", draft.getId().toString()), 3, NOW);
+        String fingerprint = fingerprintForV3Campaign(draft, guidance);
+        ContentSuggestion suggestion = ContentSuggestion.forRobot(
+                workspace, draft, job, "DETERMINISTIC_TEST", "deterministic-v1", SocialCopyPromptBuilder.VERSION_V3_CAMPAIGN,
+                SuggestionLanguage.AUTO, SuggestionTone.NEUTRAL, "prompt text", fingerprint, false, null,
+                null, UUID.randomUUID(), UUID.randomUUID(), owner, NOW, null, null, null,
+                guidance.campaignPlanId(), guidance.campaignPlanRevision(), guidance.campaignPlanItemId());
+        suggestion.applyCampaignGuidance(guidance);
+        suggestion.markGenerating(NOW);
+        suggestion.markReady("hook", "caption", List.of("tag"), null, null, null, null, null, NOW);
+        return suggestion;
+    }
+
     @Test
     void regenerateWithSamePersonaIdUsesTheCurrentLivePersonaConfiguration() {
         Persona persona = persona("Tech Romania", SuggestionLanguage.AUTO, SuggestionTone.NEUTRAL, "Founders", "Voice version 1.");

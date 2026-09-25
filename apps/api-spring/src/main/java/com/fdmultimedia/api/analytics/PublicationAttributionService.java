@@ -104,6 +104,12 @@ public class PublicationAttributionService {
             }
         }
 
+        // Item 73: only frozen when the applied suggestion actually consumed a campaign plan item's guidance
+        // (promptVersion == SOCIAL_COPY_V3_CAMPAIGN) — never merely because a plan existed for this run.
+        UUID campaignPlanId = suggestion == null ? null : suggestion.getCampaignPlanId();
+        Integer campaignPlanRevision = suggestion == null ? null : suggestion.getCampaignPlanRevision();
+        UUID campaignPlanItemId = suggestion == null ? null : suggestion.getCampaignPlanItemId();
+
         jdbc.update("""
                 INSERT INTO publication_attributions (
                     publication_id, workspace_id, content_draft_id, publish_schedule_id,
@@ -118,8 +124,9 @@ public class PublicationAttributionService {
                     protocol_deviation, protocol_deviation_reason,
                     robot_run_output_id, highlight_selection_id, highlight_selection_item_id,
                     highlight_candidate_id, selection_order, source_rank,
+                    campaign_plan_id, campaign_plan_revision, campaign_plan_item_id,
                     created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 publication.getId(), publication.getWorkspace().getId(), draft == null ? null : draft.getId(), scheduleId,
                 run == null ? null : run.getId(), run == null ? null : run.getRobot().getId(),
@@ -148,6 +155,7 @@ public class PublicationAttributionService {
                 output == null ? null : output.getCandidate().getId(),
                 output == null ? null : output.getSelectionOrder(),
                 output == null ? null : output.getSourceRank(),
+                campaignPlanId, campaignPlanRevision, campaignPlanItemId,
                 java.sql.Timestamp.from(now));
     }
 
@@ -177,6 +185,8 @@ public class PublicationAttributionService {
                 rs.getObject("robot_run_output_id", UUID.class), rs.getObject("highlight_selection_id", UUID.class),
                 rs.getObject("highlight_selection_item_id", UUID.class), rs.getObject("highlight_candidate_id", UUID.class),
                 (Integer) rs.getObject("selection_order"), (Integer) rs.getObject("source_rank"),
+                rs.getObject("campaign_plan_id", UUID.class), (Integer) rs.getObject("campaign_plan_revision"),
+                rs.getObject("campaign_plan_item_id", UUID.class),
                 rs.getTimestamp("created_at").toInstant());
     }
 }

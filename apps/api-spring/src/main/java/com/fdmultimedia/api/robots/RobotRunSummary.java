@@ -36,5 +36,7 @@ public record RobotRunSummary(
         Integer actualOutputCount,
         int outputSpacingMinutes,
         UUID highlightSelectionId,
-        List<RobotRunOutputSummary> outputs) {
+        List<RobotRunOutputSummary> outputs,
+        CampaignPlanningPolicy campaignPlanningPolicySnapshot,
+        UUID campaignPlanId) {
 }

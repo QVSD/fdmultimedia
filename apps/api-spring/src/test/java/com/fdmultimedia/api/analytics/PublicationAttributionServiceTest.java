@@ -181,6 +181,101 @@ class PublicationAttributionServiceTest {
         assertThat(jdbc.args[31]).isEqualTo("DIFFERENT_SUGGESTION_APPLIED");
     }
 
+    // ---- Phase 17E: campaign provenance ----
+
+    @Test
+    void campaignProvenanceIsFrozenOnlyWhenTheAppliedSuggestionActuallyConsumedGuidance() {
+        UUID sourceId = UUID.randomUUID();
+        when(media.getId()).thenReturn(sourceId);
+        ContentDraft draft = ContentDraft.fromExistingAsset(workspace, media, "Title", "AI caption", mock(AppUser.class), NOW);
+        UUID runId = UUID.randomUUID();
+        draft.attachRobotRun(runId);
+        UUID suggestionId = UUID.randomUUID();
+        draft.recordAppliedSuggestion(suggestionId);
+        when(drafts.findByWorkspaceAndId(workspace, draft.getId())).thenReturn(Optional.of(draft));
+        RobotRun run = mock(RobotRun.class);
+        Robot robot = mock(Robot.class);
+        when(run.getId()).thenReturn(runId);
+        when(run.getRobot()).thenReturn(robot);
+        when(run.getAiPolicySnapshot()).thenReturn(RobotAiPolicy.GENERATE_AND_APPLY);
+        when(robot.getAutonomyMode()).thenReturn(RobotAutonomyMode.AUTO_SCHEDULE);
+        when(runs.findByWorkspaceAndId(workspace, runId)).thenReturn(Optional.of(run));
+        ContentSuggestion suggestion = mock(ContentSuggestion.class);
+        UUID campaignPlanId = UUID.randomUUID();
+        UUID campaignPlanItemId = UUID.randomUUID();
+        when(suggestion.getId()).thenReturn(suggestionId);
+        when(suggestion.getStatus()).thenReturn(ContentSuggestionStatus.APPLIED);
+        when(suggestion.getContentDraft()).thenReturn(draft);
+        when(suggestion.getOrigin()).thenReturn(ContentSuggestionOrigin.ROBOT);
+        when(suggestion.getCampaignPlanId()).thenReturn(campaignPlanId);
+        when(suggestion.getCampaignPlanRevision()).thenReturn(2);
+        when(suggestion.getCampaignPlanItemId()).thenReturn(campaignPlanItemId);
+        when(suggestions.findByWorkspaceAndId(workspace, suggestionId)).thenReturn(Optional.of(suggestion));
+        Publication publication = new Publication(workspace, media, mock(SocialAccount.class),
+                "AI caption", mock(AppUser.class), draft.getId(), NOW);
+
+        service.capture(publication, null, null, NOW);
+
+        assertThat(jdbc.args[38]).isEqualTo(campaignPlanId);
+        assertThat(jdbc.args[39]).isEqualTo(2);
+        assertThat(jdbc.args[40]).isEqualTo(campaignPlanItemId);
+    }
+
+    @Test
+    void campaignProvenanceStaysNullWhenNoSuggestionWasApplied() {
+        UUID sourceId = UUID.randomUUID();
+        when(media.getId()).thenReturn(sourceId);
+        Publication publication = new Publication(workspace, media, mock(SocialAccount.class),
+                "Manual caption", mock(AppUser.class), NOW);
+
+        service.capture(publication, null, null, NOW);
+
+        assertThat(jdbc.args[38]).isNull();
+        assertThat(jdbc.args[39]).isNull();
+        assertThat(jdbc.args[40]).isNull();
+    }
+
+    @Test
+    void campaignProvenanceStaysNullWhenTheAppliedSuggestionNeverConsumedCampaignGuidance() {
+        UUID sourceId = UUID.randomUUID();
+        when(media.getId()).thenReturn(sourceId);
+        ContentDraft draft = ContentDraft.fromExistingAsset(workspace, media, "Title", "AI caption", mock(AppUser.class), NOW);
+        UUID runId = UUID.randomUUID();
+        draft.attachRobotRun(runId);
+        UUID suggestionId = UUID.randomUUID();
+        draft.recordAppliedSuggestion(suggestionId);
+        when(drafts.findByWorkspaceAndId(workspace, draft.getId())).thenReturn(Optional.of(draft));
+        RobotRun run = mock(RobotRun.class);
+        Robot robot = mock(Robot.class);
+        when(run.getId()).thenReturn(runId);
+        when(run.getRobot()).thenReturn(robot);
+        when(run.getAiPolicySnapshot()).thenReturn(RobotAiPolicy.GENERATE_AND_APPLY);
+        when(robot.getAutonomyMode()).thenReturn(RobotAutonomyMode.AUTO_SCHEDULE);
+        when(runs.findByWorkspaceAndId(workspace, runId)).thenReturn(Optional.of(run));
+        // This run's Robot had a campaign plan configured, but THIS suggestion's own promptVersion
+        // was plain V2 (no guidance consumed) — its campaign getters return null, exactly like a
+        // suggestion generated before Phase 17E existed. Provenance must stay null either way.
+        ContentSuggestion suggestion = mock(ContentSuggestion.class);
+        when(suggestion.getId()).thenReturn(suggestionId);
+        when(suggestion.getStatus()).thenReturn(ContentSuggestionStatus.APPLIED);
+        when(suggestion.getContentDraft()).thenReturn(draft);
+        when(suggestion.getOrigin()).thenReturn(ContentSuggestionOrigin.ROBOT);
+        // Mockito's default answer returns 0 (not null) for an unstubbed Integer getter,
+        // so stub explicitly — the real entity's field is genuinely null when unset.
+        when(suggestion.getCampaignPlanId()).thenReturn(null);
+        when(suggestion.getCampaignPlanRevision()).thenReturn(null);
+        when(suggestion.getCampaignPlanItemId()).thenReturn(null);
+        when(suggestions.findByWorkspaceAndId(workspace, suggestionId)).thenReturn(Optional.of(suggestion));
+        Publication publication = new Publication(workspace, media, mock(SocialAccount.class),
+                "AI caption", mock(AppUser.class), draft.getId(), NOW);
+
+        service.capture(publication, null, null, NOW);
+
+        assertThat(jdbc.args[38]).isNull();
+        assertThat(jdbc.args[39]).isNull();
+        assertThat(jdbc.args[40]).isNull();
+    }
+
     private RobotRun experimentalRun(UUID experimentId, UUID variantId, UUID assignmentId) {
         RobotRun run = mock(RobotRun.class);
         UUID runId = UUID.randomUUID();

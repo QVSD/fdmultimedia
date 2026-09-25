@@ -94,6 +94,16 @@
               <input type="number" min="1" max="1440" [ngModel]="createOutputSpacingMinutes()" (ngModelChange)="createOutputSpacingMinutes.set($event)" name="outputSpacingMinutes" />
             </label>
           }
+          <label>
+            <span>Campaign planning</span>
+            <select [ngModel]="createCampaignPlanningPolicy()" (ngModelChange)="createCampaignPlanningPolicy.set($event)" name="campaignPlanningPolicy">
+              <option value="NO_CAMPAIGN_PLAN">No campaign plan</option>
+              <option value="DETERMINISTIC_PLAN">Deterministic plan</option>
+              <option value="AI_PLAN_FOR_REVIEW">AI plan (for review)</option>
+              <option value="AI_PLAN_AND_APPLY">AI plan (auto-apply)</option>
+            </select>
+            <p class="robots__muted">{{ campaignPlanningPolicyExplanation(createCampaignPlanningPolicy()) }}</p>
+          </label>
         }
         @if (requiresAccount(createAutonomyMode())) {
           <label>
@@ -218,6 +228,9 @@
                     <span class="robots__badge">{{ robot.autonomyMode }}</span>
                     @if (robot.highlightStrategy === 'TOP_DIVERSE_HIGHLIGHTS') {
                       <span>{{ robot.highlightCount || 3 }} diverse outputs</span>
+                      @if (robot.campaignPlanningPolicy && robot.campaignPlanningPolicy !== 'NO_CAMPAIGN_PLAN') {
+                        <span class="robots__badge">{{ campaignPlanningPolicyLabel(robot.campaignPlanningPolicy) }}</span>
+                      }
                     }
                     <span>{{ robotSourceLabel(robot) }}</span>
                     <span>{{ robot.cadenceType === 'INTERVAL' ? 'Every ' + robot.cadenceIntervalHours + 'h' : 'Manual only' }}</span>
@@ -291,6 +304,51 @@
                             <span class="robots__error">{{ run.failureCode }}: {{ run.failureMessage }}</span>
                           }
                         </div>
+                        @if (run.campaignPlanningPolicySnapshot && run.campaignPlanningPolicySnapshot !== 'NO_CAMPAIGN_PLAN') {
+                          <div class="campaign-plan" [attr.aria-label]="'Campaign plan for run ' + run.id">
+                            @if (campaignPlanBusy()[run.id]) {
+                              <p class="robots__muted">Loading campaign plan...</p>
+                            } @else if (currentCampaignPlan(run); as plan) {
+                              <div class="campaign-plan__header">
+                                <strong>Campaign plan</strong>
+                                <span class="robots__badge">{{ campaignStatusLabel(plan.status) }}</span>
+                                <span class="robots__muted">Revision {{ plan.revision }}</span>
+                                <span class="robots__badge">{{ plan.provider ? 'AI (' + plan.provider + '/' + plan.model + ')' : 'Deterministic' }}</span>
+                                @if (plan.stale) {
+                                  <span class="robots__error">Stale &mdash; regenerate before applying</span>
+                                }
+                              </div>
+                              @if (plan.campaignTitle) { <p><strong>{{ plan.campaignTitle }}</strong></p> }
+                              @if (plan.campaignAngle) { <p class="robots__muted">{{ plan.campaignAngle }}</p> }
+                              @if (plan.failureMessage) { <p class="robots__error">{{ plan.failureCode }}: {{ plan.failureMessage }}</p> }
+                              @if (plan.status === 'READY_FOR_REVIEW') {
+                                <div class="campaign-plan__actions">
+                                  <button type="button" [disabled]="campaignReviewBusy()[plan.id]" (click)="applyCampaignPlan(plan)">Apply</button>
+                                  <button type="button" [disabled]="campaignReviewBusy()[plan.id]" (click)="rejectCampaignPlan(plan)">Reject</button>
+                                </div>
+                                @if (campaignReviewErrors()[plan.id]) {
+                                  <p class="robots__error">{{ campaignReviewErrors()[plan.id] }}</p>
+                                }
+                              }
+                              @if (plan.status === 'APPLIED' || plan.status === 'REJECTED' || plan.status === 'FAILED') {
+                                <button type="button" [disabled]="campaignReviewBusy()[run.id]" (click)="regenerateCampaignPlan(run)">Regenerate</button>
+                                @if (campaignReviewErrors()[run.id]) {
+                                  <p class="robots__error">{{ campaignReviewErrors()[run.id] }}</p>
+                                }
+                              }
+                              @if (historicalCampaignPlans(run).length) {
+                                <details class="campaign-plan__history">
+                                  <summary>{{ historicalCampaignPlans(run).length }} previous revision(s)</summary>
+                                  @for (previous of historicalCampaignPlans(run); track previous.id) {
+                                    <p class="robots__muted">Revision {{ previous.revision }}: {{ campaignStatusLabel(previous.status) }}</p>
+                                  }
+                                </details>
+                              }
+                            } @else {
+                              <p class="robots__muted">No campaign plan yet.</p>
+                            }
+                          </div>
+                        }
                         @if (run.outputs?.length) {
                           <div class="run-outputs" [attr.aria-label]="'Outputs for run ' + run.id">
                             <p class="robots__muted">
@@ -309,6 +367,15 @@
                                 @if (output.contentDraftId) { <a routerLink="/content">Draft {{ output.contentDraftId.slice(0, 8) }}</a> }
                                 @if (output.publishScheduleId) { <span>Schedule {{ output.publishScheduleId.slice(0, 8) }}</span> }
                                 @if (output.failureMessage) { <span class="robots__error">{{ output.failureCode }}: {{ output.failureMessage }}</span> }
+                                @if (currentCampaignPlan(run); as plan) {
+                                  @if (campaignItemForOutput(plan, output.id); as item) {
+                                    <span class="robots__badge">{{ campaignRoleLabel(item.role) }}</span>
+                                    @if (item.hookGuidance) { <p class="robots__muted">Hook: {{ item.hookGuidance }}</p> }
+                                    @if (item.captionGuidance) { <p class="robots__muted">Caption: {{ item.captionGuidance }}</p> }
+                                    @if (item.ctaGuidance) { <p class="robots__muted">CTA: {{ item.ctaGuidance }}</p> }
+                                    @if (item.avoidRepetitionGuidance) { <p class="robots__muted">Avoid: {{ item.avoidRepetitionGuidance }}</p> }
+                                  }
+                                }
                               </article>
                             }
                           </div>

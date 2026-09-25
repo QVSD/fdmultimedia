@@ -2,6 +2,8 @@ package com.fdmultimedia.api.robots;
 
 import com.fdmultimedia.api.accounts.*;
 import com.fdmultimedia.api.auth.security.AuthenticatedUser;
+import com.fdmultimedia.api.campaigns.CampaignContentPlanItem;
+import com.fdmultimedia.api.campaigns.CampaignContentPlanService;
 import com.fdmultimedia.api.contentdrafts.*;
 import com.fdmultimedia.api.contentsuggestions.*;
 import com.fdmultimedia.api.experiments.*;
@@ -21,13 +23,15 @@ class RobotMultiOutputOrchestrator {
     private final RobotRunOutputRepository outputs; private final ContentDraftService draftService; private final ContentDraftRepository drafts;
     private final ContentSuggestionService suggestionService; private final ContentSuggestionRepository suggestions;
     private final RobotApprovalRepository approvals; private final PublishScheduleService schedules; private final ExperimentService experiments;
+    private final CampaignContentPlanService campaignPlanService;
     RobotMultiOutputOrchestrator(HighlightAnalysisRepository analyses,HighlightService highlightService,HighlightProperties properties,
       HighlightSelectionService selectionService,HighlightSelectionRepository selections,HighlightSelectionItemRepository selectionItems,
       RobotRunOutputRepository outputs,ContentDraftService draftService,ContentDraftRepository drafts,
       ContentSuggestionService suggestionService,ContentSuggestionRepository suggestions,RobotApprovalRepository approvals,
-      PublishScheduleService schedules,ExperimentService experiments){this.analyses=analyses;this.highlightService=highlightService;this.properties=properties;
+      PublishScheduleService schedules,ExperimentService experiments,CampaignContentPlanService campaignPlanService){this.analyses=analyses;this.highlightService=highlightService;this.properties=properties;
       this.selectionService=selectionService;this.selections=selections;this.selectionItems=selectionItems;this.outputs=outputs;this.draftService=draftService;
-      this.drafts=drafts;this.suggestionService=suggestionService;this.suggestions=suggestions;this.approvals=approvals;this.schedules=schedules;this.experiments=experiments;}
+      this.drafts=drafts;this.suggestionService=suggestionService;this.suggestions=suggestions;this.approvals=approvals;this.schedules=schedules;this.experiments=experiments;
+      this.campaignPlanService=campaignPlanService;}
 
     void advance(RobotRun run,AuthenticatedUser principal,Instant now){
       if(run.getHighlightSelectionId()==null){ if(!ensureSelection(run,principal,now)) return; }
@@ -39,6 +43,12 @@ class RobotMultiOutputOrchestrator {
       Set<UUID> existingItems=new HashSet<>(); existing.forEach(o->existingItems.add(o.getSelectionItem().getId()));
       for(HighlightSelectionItem item:items) if(!existingItems.contains(item.getId())) outputs.save(new RobotRunOutput(run,selection,item,now));
       List<RobotRunOutput> all=outputs.findByRobotRunOrderBySelectionOrderAsc(run);
+      // Phase 17E: campaign planning starts only once fan-out identity above is
+      // frozen (item 3), and never blocks output/Draft creation below — only
+      // beginAi() (per-output SOCIAL_COPY) waits on it, via isBlockingAiGeneration.
+      campaignPlanService.advance(run,all,principal,now);
+      Optional<String> campaignBlocked=campaignPlanService.blockedFailureCode(run);
+      if(campaignBlocked.isPresent()){run.markFailed(campaignBlocked.get(),"The campaign plan was not applied",now);return;}
       for(RobotRunOutput output:all) if(!output.getStatus().terminal()) try{advanceOutput(run,output,principal,now);}catch(RuntimeException ex){output.failed("OUTPUT_RECONCILIATION_FAILED","Output could not be advanced",now);}
       aggregate(run,all,now);
     }
@@ -64,14 +74,14 @@ class RobotMultiOutputOrchestrator {
     private void advanceOutput(RobotRun run,RobotRunOutput out,AuthenticatedUser principal,Instant now){
       switch(out.getStatus()){
         case CREATED->{var d=draftService.createForRobotOutput(principal,out.getSelectionItem(),out.getId(),run.getId());out.waitingForDraft(d.id(),now);}
-        case WAITING_FOR_DRAFT->{var d=draftService.getFor(principal,out.getContentDraftId()); if(d.status()==ContentDraftStatus.FAILED)out.failed("OUTPUT_DRAFT_FAILED",d.failureMessage(),now); else if(d.status()==ContentDraftStatus.READY){if(run.getAiPolicySnapshot()==RobotAiPolicy.NO_AI)autonomy(run,out,d,principal,now);else beginAi(run,out,d,now);}}
+        case WAITING_FOR_DRAFT->{var d=draftService.getFor(principal,out.getContentDraftId()); if(d.status()==ContentDraftStatus.FAILED)out.failed("OUTPUT_DRAFT_FAILED",d.failureMessage(),now); else if(d.status()==ContentDraftStatus.READY){if(run.getAiPolicySnapshot()==RobotAiPolicy.NO_AI)autonomy(run,out,d,principal,now);else if(!campaignPlanService.isBlockingAiGeneration(run))beginAi(run,out,d,now);}}
         case WAITING_FOR_AI->{ContentSuggestion s=suggestions.findById(out.getContentSuggestionId()).orElse(null); if(s==null){out.failed("OUTPUT_AI_FAILED","Suggestion unavailable",now);break;} switch(s.getStatus()){case FAILED,DISCARDED->out.failed("OUTPUT_AI_FAILED",s.getFailureMessage(),now);case READY->{if(run.getAiPolicySnapshot()==RobotAiPolicy.GENERATE_FOR_REVIEW)out.waitingForAiReview(now);else{suggestionService.apply(principal,s.getId());autonomy(run,out,draftService.getFor(principal,out.getContentDraftId()),principal,now);}}case APPLIED->autonomy(run,out,draftService.getFor(principal,out.getContentDraftId()),principal,now);default->{}}}
         case WAITING_FOR_AI_REVIEW->{ContentSuggestion s=suggestions.findById(out.getContentSuggestionId()).orElse(null);if(s!=null&&s.getStatus()==ContentSuggestionStatus.APPLIED)autonomy(run,out,draftService.getFor(principal,out.getContentDraftId()),principal,now);else if(s!=null&&(s.getStatus()==ContentSuggestionStatus.DISCARDED||s.getStatus()==ContentSuggestionStatus.FAILED))out.failed("OUTPUT_AI_FAILED",s.getFailureMessage(),now);}
         case SCHEDULED->out.succeeded(now);
         default->{}
       }
     }
-    private void beginAi(RobotRun run,RobotRunOutput out,ContentDraftSummary draft,Instant now){ContentDraft entity=drafts.findByWorkspaceAndId(run.getWorkspace(),draft.id()).orElseThrow();ExperimentTreatment treatment=run.getExperimentVariantId()==null?null:experiments.resolveTreatment(run.getExperimentId(),run.getExperimentAssignmentId(),run.getExperimentVariantId());var s=suggestionService.createForRobotOutput(run.getWorkspace(),entity,run.getPersonaIdSnapshot(),run.getAiLanguageOverrideSnapshot(),run.getAiToneOverrideSnapshot(),run.getId(),out.getId(),run.getRobot().getCreatedByUser(),treatment);out.waitingForAi(s.id(),now);}
+    private void beginAi(RobotRun run,RobotRunOutput out,ContentDraftSummary draft,Instant now){ContentDraft entity=drafts.findByWorkspaceAndId(run.getWorkspace(),draft.id()).orElseThrow();ExperimentTreatment treatment=run.getExperimentVariantId()==null?null:experiments.resolveTreatment(run.getExperimentId(),run.getExperimentAssignmentId(),run.getExperimentVariantId());CampaignGuidance guidance=campaignPlanService.findItemFor(run,out).map(item->new CampaignGuidance(item.getPlan().getId(),item.getPlan().getRevision(),item.getId(),item.getRole().name(),item.getHookGuidance(),item.getCaptionGuidance(),item.getCtaGuidance(),item.getAvoidRepetitionGuidance())).orElse(null);var s=suggestionService.createForRobotOutput(run.getWorkspace(),entity,run.getPersonaIdSnapshot(),run.getAiLanguageOverrideSnapshot(),run.getAiToneOverrideSnapshot(),run.getId(),out.getId(),run.getRobot().getCreatedByUser(),treatment,guidance);out.waitingForAi(s.id(),now);}
     private void autonomy(RobotRun run,RobotRunOutput out,ContentDraftSummary draft,AuthenticatedUser principal,Instant now){Robot robot=run.getRobot();switch(robot.getAutonomyMode()){
       case DRAFT_ONLY->out.succeeded(now);
       case REVIEW_REQUIRED->{RobotApproval a=approvals.findByRobotRunOutputId(out.getId()).orElse(null);if(a==null){SocialAccount account=robot.getTargetSocialAccount();if(account==null){out.failed("SOCIAL_ACCOUNT_UNAVAILABLE","Robot has no target account",now);return;}Instant proposed=scheduledFor(run,robot,out,now);a=approvals.save(new RobotApproval(run.getWorkspace(),run,out,draft.id(),account.getId(),proposed,now));}out.waitingForReview(a.getId(),now);}

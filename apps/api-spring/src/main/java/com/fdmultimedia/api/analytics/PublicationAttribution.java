@@ -18,5 +18,6 @@ public record PublicationAttribution(
         Boolean protocolDeviation, String protocolDeviationReason,
         UUID robotRunOutputId, UUID highlightSelectionId, UUID highlightSelectionItemId,
         UUID highlightCandidateId, Integer selectionOrder, Integer sourceRank,
+        UUID campaignPlanId, Integer campaignPlanRevision, UUID campaignPlanItemId,
         Instant createdAt) {
 }

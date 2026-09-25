@@ -164,6 +164,26 @@ class JobServiceTest {
     }
 
     @Test
+    void createsGenerateCampaignPlanJobOnlyWithRunAndPlanReferences() {
+        when(jobs.save(any(Job.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        UUID runId = UUID.randomUUID();
+        UUID planId = UUID.randomUUID();
+
+        JobSummary summary = service.createForWorkspace(
+                workspace,
+                new JobCreateRequest(JobType.GENERATE_CAMPAIGN_PLAN, Map.of(
+                        "robotRunId", runId.toString(), "planId", planId.toString())));
+
+        assertThat(summary.type()).isEqualTo(JobType.GENERATE_CAMPAIGN_PLAN);
+        assertThat(summary.payload()).containsEntry("robotRunId", runId.toString());
+        assertThat(summary.payload()).containsEntry("planId", planId.toString());
+        assertThatThrownBy(() -> service.createForWorkspace(workspace, new JobCreateRequest(JobType.GENERATE_CAMPAIGN_PLAN, Map.of())))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting("statusCode")
+                .isEqualTo(HttpStatus.BAD_REQUEST);
+    }
+
+    @Test
     void listsAndGetsJobsOnlyFromCurrentWorkspace() {
         Job job = job();
         when(jobs.findByWorkspaceOrderByQueuedAtDesc(workspace)).thenReturn(List.of(job));

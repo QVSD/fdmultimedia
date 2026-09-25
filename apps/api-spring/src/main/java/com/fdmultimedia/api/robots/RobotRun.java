@@ -144,6 +144,10 @@ public class RobotRun {
     @Column(name="highlight_selection_id") private UUID highlightSelectionId;
     @Column(name="output_schedule_base_at") private Instant outputScheduleBaseAt;
 
+    @Enumerated(EnumType.STRING) @Column(name="campaign_planning_policy_snapshot",nullable=false)
+    private CampaignPlanningPolicy campaignPlanningPolicySnapshot;
+    @Column(name="campaign_plan_id") private UUID campaignPlanId;
+
     @Column(name = "failure_code")
     private String failureCode;
 
@@ -189,6 +193,7 @@ public class RobotRun {
         this.requestedOutputCount = robot.getHighlightStrategy() == RobotHighlightStrategy.TOP_DIVERSE_HIGHLIGHTS
                 ? robot.getHighlightCount() : 1;
         this.outputSpacingMinutesSnapshot = robot.getOutputSpacingMinutes();
+        this.campaignPlanningPolicySnapshot = robot.getCampaignPlanningPolicy();
     }
 
     @PrePersist
@@ -257,6 +262,11 @@ public class RobotRun {
         if (highlightSelectionId != null && !highlightSelectionId.equals(selectionId)) throw new IllegalStateException("Run selection is immutable");
         highlightSelectionId=selectionId; actualOutputCount=actualCount;
     }
+    /** Always points at the current plan revision for this run (see CampaignContentPlanService.regenerate) — never a stale/superseded revision. */
+    public void bindCampaignPlan(UUID campaignPlanId) {
+        this.campaignPlanId = campaignPlanId;
+    }
+
     public Instant outputScheduleBase(Instant now, int delayMinutes) {
         if (outputScheduleBaseAt == null) {
             outputScheduleBaseAt = now.plus(delayMinutes, java.time.temporal.ChronoUnit.MINUTES);
@@ -317,6 +327,8 @@ public class RobotRun {
     public int getOutputSpacingMinutesSnapshot(){return outputSpacingMinutesSnapshot;}
     public UUID getHighlightSelectionId(){return highlightSelectionId;}
     public Instant getOutputScheduleBaseAt(){return outputScheduleBaseAt;}
+    public CampaignPlanningPolicy getCampaignPlanningPolicySnapshot(){return campaignPlanningPolicySnapshot;}
+    public UUID getCampaignPlanId(){return campaignPlanId;}
     public String getFailureCode() { return failureCode; }
     public String getFailureMessage() { return failureMessage; }
     public Instant getCreatedAt() { return createdAt; }

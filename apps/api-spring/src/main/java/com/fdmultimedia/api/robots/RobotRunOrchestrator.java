@@ -543,7 +543,9 @@ public class RobotRunOrchestrator {
                 run.getHighlightSelectionId(),
                 outputs.findByRobotRunOrderBySelectionOrderAsc(run).stream()
                         .map(this::toOutputSummary)
-                        .toList());
+                        .toList(),
+                run.getCampaignPlanningPolicySnapshot(),
+                run.getCampaignPlanId());
     }
 
     private RobotRunOutputSummary toOutputSummary(RobotRunOutput output) {

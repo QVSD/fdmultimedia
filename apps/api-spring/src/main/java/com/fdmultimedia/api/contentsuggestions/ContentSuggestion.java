@@ -82,6 +82,40 @@ public class ContentSuggestion {
     @Column(name = "experiment_variant_id")
     private UUID experimentVariantId;
 
+    /**
+     * Phase 17E provenance (item 29/41): set only when an applied
+     * {@code CampaignContentPlanItem} was actually folded into this
+     * generation's prompt (promptVersion == {@code SOCIAL_COPY_V3_CAMPAIGN}).
+     * The guidance text below is a frozen snapshot, copied once at
+     * generation time exactly like the Persona snapshot fields — never a
+     * fresh {@code CampaignContentPlanItem} lookup, so a later plan
+     * regeneration can never retroactively change an already-generated
+     * suggestion's history or fingerprint.
+     */
+    @Column(name = "campaign_plan_id")
+    private UUID campaignPlanId;
+
+    @Column(name = "campaign_plan_revision")
+    private Integer campaignPlanRevision;
+
+    @Column(name = "campaign_plan_item_id")
+    private UUID campaignPlanItemId;
+
+    @Column(name = "campaign_role")
+    private String campaignRole;
+
+    @Column(name = "campaign_hook_guidance")
+    private String campaignHookGuidance;
+
+    @Column(name = "campaign_caption_guidance")
+    private String campaignCaptionGuidance;
+
+    @Column(name = "campaign_cta_guidance")
+    private String campaignCtaGuidance;
+
+    @Column(name = "campaign_avoid_repetition_guidance")
+    private String campaignAvoidRepetitionGuidance;
+
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "generation_job_id", nullable = false)
     private Job generationJob;
@@ -314,6 +348,20 @@ public class ContentSuggestion {
             String inputFingerprint, boolean transcriptUsed, UUID transcriptId, PersonaSnapshot personaSnapshot,
             UUID robotRunId, UUID robotRunOutputId, AppUser createdByUser, Instant now,
             UUID experimentId, UUID experimentAssignmentId, UUID experimentVariantId) {
+        return forRobot(workspace, contentDraft, generationJob, provider, model, promptVersion, language, tone,
+                promptText, inputFingerprint, transcriptUsed, transcriptId, personaSnapshot, robotRunId,
+                robotRunOutputId, createdByUser, now, experimentId, experimentAssignmentId, experimentVariantId,
+                null, null, null);
+    }
+
+    /** Phase 17E: campaignPlanId/Revision/ItemId are null whenever no campaign plan was applied for this output. */
+    public static ContentSuggestion forRobot(
+            Workspace workspace, ContentDraft contentDraft, Job generationJob, String provider, String model,
+            String promptVersion, SuggestionLanguage language, SuggestionTone tone, String promptText,
+            String inputFingerprint, boolean transcriptUsed, UUID transcriptId, PersonaSnapshot personaSnapshot,
+            UUID robotRunId, UUID robotRunOutputId, AppUser createdByUser, Instant now,
+            UUID experimentId, UUID experimentAssignmentId, UUID experimentVariantId,
+            UUID campaignPlanId, Integer campaignPlanRevision, UUID campaignPlanItemId) {
         ContentSuggestion suggestion = new ContentSuggestion(
                 workspace, contentDraft, generationJob, provider, model, promptVersion, language, tone, promptText,
                 inputFingerprint, transcriptUsed, transcriptId, personaSnapshot, createdByUser, now);
@@ -323,7 +371,19 @@ public class ContentSuggestion {
         suggestion.experimentId = experimentId;
         suggestion.experimentAssignmentId = experimentAssignmentId;
         suggestion.experimentVariantId = experimentVariantId;
+        suggestion.campaignPlanId = campaignPlanId;
+        suggestion.campaignPlanRevision = campaignPlanRevision;
+        suggestion.campaignPlanItemId = campaignPlanItemId;
         return suggestion;
+    }
+
+    /** Called immediately after either {@code forRobot} overload above, only when campaign guidance was actually folded into the prompt. */
+    void applyCampaignGuidance(CampaignGuidance guidance) {
+        this.campaignRole = guidance.role();
+        this.campaignHookGuidance = guidance.hookGuidance();
+        this.campaignCaptionGuidance = guidance.captionGuidance();
+        this.campaignCtaGuidance = guidance.ctaGuidance();
+        this.campaignAvoidRepetitionGuidance = guidance.avoidRepetitionGuidance();
     }
 
     @PrePersist
@@ -420,6 +480,18 @@ public class ContentSuggestion {
     public UUID getExperimentId() { return experimentId; }
     public UUID getExperimentAssignmentId() { return experimentAssignmentId; }
     public UUID getExperimentVariantId() { return experimentVariantId; }
+    public UUID getCampaignPlanId() { return campaignPlanId; }
+    public Integer getCampaignPlanRevision() { return campaignPlanRevision; }
+    public UUID getCampaignPlanItemId() { return campaignPlanItemId; }
+
+    /** Reconstructed from this suggestion's own stored columns only — never re-reads the live CampaignContentPlanItem. Null when no campaign guidance was used. */
+    public CampaignGuidance getCampaignGuidance() {
+        if (campaignPlanItemId == null) {
+            return null;
+        }
+        return new CampaignGuidance(campaignPlanId, campaignPlanRevision, campaignPlanItemId, campaignRole,
+                campaignHookGuidance, campaignCaptionGuidance, campaignCtaGuidance, campaignAvoidRepetitionGuidance);
+    }
     public Job getGenerationJob() { return generationJob; }
     public ContentSuggestionType getType() { return type; }
     public ContentSuggestionStatus getStatus() { return status; }

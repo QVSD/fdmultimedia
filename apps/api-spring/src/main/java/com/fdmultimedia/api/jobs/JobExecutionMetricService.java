@@ -69,6 +69,8 @@ public class JobExecutionMetricService {
             // No media-asset-shaped hints apply — the payload only carries a
             // ContentDraft reference for observability, not size/duration.
             case GENERATE_SOCIAL_COPY -> new WorkloadHints(null, null, null, null, null, null, null);
+            // Same reasoning: the payload only carries a RobotRun/plan reference, no media-asset shape.
+            case GENERATE_CAMPAIGN_PLAN -> new WorkloadHints(null, null, null, null, null, null, null);
         };
     }
 

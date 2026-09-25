@@ -15,6 +15,8 @@ import { PersonasService } from '../../core/personas/personas.service';
 import { PersonaSummary } from '../../core/personas/persona.models';
 import { ExperimentsService } from '../../core/experiments/experiments.service';
 import { ExperimentSummary } from '../../core/experiments/experiment.models';
+import { CampaignPlansService } from '../../core/campaign-plans/campaign-plans.service';
+import { CampaignContentPlanSummary } from '../../core/campaign-plans/campaign-plan.models';
 import { Robots } from './robots';
 
 describe('Robots', () => {
@@ -27,6 +29,7 @@ describe('Robots', () => {
   let contentSourcesService: Pick<ContentSourcesService, 'list'>;
   let personasService: Pick<PersonasService, 'list'>;
   let experimentsService: Pick<ExperimentsService, 'list'>;
+  let campaignPlansService: Pick<CampaignPlansService, 'listForRun' | 'get' | 'apply' | 'reject' | 'regenerate'>;
 
   beforeEach(async () => {
     robotsService = {
@@ -59,6 +62,13 @@ describe('Robots', () => {
     experimentsService = {
       list: vi.fn().mockReturnValue(of([])),
     };
+    campaignPlansService = {
+      listForRun: vi.fn().mockReturnValue(of([])),
+      get: vi.fn().mockReturnValue(of(campaignPlan('READY_FOR_REVIEW'))),
+      apply: vi.fn().mockReturnValue(of(campaignPlan('APPLIED'))),
+      reject: vi.fn().mockReturnValue(of(campaignPlan('REJECTED'))),
+      regenerate: vi.fn().mockReturnValue(of(campaignPlan('GENERATING', 2))),
+    };
 
     await TestBed.configureTestingModule({
       imports: [Robots],
@@ -71,6 +81,7 @@ describe('Robots', () => {
         { provide: ContentSourcesService, useValue: contentSourcesService },
         { provide: PersonasService, useValue: personasService },
         { provide: ExperimentsService, useValue: experimentsService },
+        { provide: CampaignPlansService, useValue: campaignPlansService },
       ],
     }).compileComponents();
 
@@ -668,4 +679,245 @@ describe('Robots', () => {
   function archivedPersona(): PersonaSummary {
     return { ...activePersona(), id: 'persona-2', name: 'Retired Voice', status: 'ARCHIVED' };
   }
+
+  function campaignPlan(status: CampaignContentPlanSummary['status'], revision = 1): CampaignContentPlanSummary {
+    return {
+      id: 'plan-1',
+      robotRunId: 'run-1',
+      revision,
+      current: true,
+      policy: 'DETERMINISTIC_PLAN',
+      status,
+      plannerVersion: 'DETERMINISTIC_CAMPAIGN_V1',
+      provider: null,
+      model: null,
+      promptVersion: null,
+      campaignTitle: 'Series from keynote.mp4',
+      campaignAngle: 'A 2-part series covering complementary moments from the same source.',
+      inputFingerprint: 'a'.repeat(64),
+      configSnapshot: null,
+      failureCode: null,
+      failureMessage: null,
+      stale: false,
+      createdAt: '2026-09-18T08:05:00Z',
+      updatedAt: '2026-09-18T08:05:00Z',
+      completedAt: '2026-09-18T08:05:00Z',
+      appliedAt: status === 'APPLIED' ? '2026-09-18T08:06:00Z' : null,
+      appliedByUserId: null,
+      rejectedAt: status === 'REJECTED' ? '2026-09-18T08:06:00Z' : null,
+      rejectedByUserId: null,
+      items: [
+        { id: 'item-1', robotRunOutputId: 'output-1', sequence: 1, role: 'INTRODUCTION',
+          hookGuidance: 'Open by introducing the topic.', captionGuidance: 'Set up the topic.',
+          ctaGuidance: null, avoidRepetitionGuidance: 'Avoid reusing the same opening phrase.' },
+        { id: 'item-2', robotRunOutputId: 'output-2', sequence: 2, role: 'CONCLUSION',
+          hookGuidance: 'Signal this wraps up the series.', captionGuidance: 'Summarize with a takeaway.',
+          ctaGuidance: null, avoidRepetitionGuidance: 'Avoid reusing the same opening phrase.' },
+      ],
+    };
+  }
+
+  function multiOutputRunWithCampaignPlan(): RobotRunSummary {
+    return {
+      ...run('PARTIALLY_SUCCEEDED'),
+      highlightStrategySnapshot: 'TOP_DIVERSE_HIGHLIGHTS', requestedOutputCount: 2,
+      actualOutputCount: 2, outputSpacingMinutes: 60, highlightSelectionId: 'selection-1',
+      campaignPlanningPolicySnapshot: 'DETERMINISTIC_PLAN', campaignPlanId: 'plan-1',
+      outputs: [
+        { id: 'output-1', selectionOrder: 1, sourceRank: 1, highlightCandidateId: 'candidate-1',
+          startMs: 1000, endMs: 9000, transcriptExcerpt: 'First distinct moment', status: 'SUCCEEDED',
+          contentDraftId: 'draft-1', contentSuggestionId: null, robotApprovalId: null,
+          publishScheduleId: null, failureCode: null, failureMessage: null,
+          createdAt: '2026-09-18T08:05:00Z', updatedAt: '2026-09-18T08:06:00Z', completedAt: '2026-09-18T08:06:00Z' },
+        { id: 'output-2', selectionOrder: 2, sourceRank: 2, highlightCandidateId: 'candidate-2',
+          startMs: 20000, endMs: 31000, transcriptExcerpt: 'Another topic', status: 'SUCCEEDED',
+          contentDraftId: 'draft-2', contentSuggestionId: null, robotApprovalId: null,
+          publishScheduleId: null, failureCode: null, failureMessage: null,
+          createdAt: '2026-09-18T08:05:00Z', updatedAt: '2026-09-18T08:06:00Z', completedAt: '2026-09-18T08:06:00Z' },
+      ],
+    };
+  }
+
+  // ---- Phase 17E: campaign content planning ----
+
+  it('uses the mandated explanation wording for each campaign planning policy', () => {
+    fixture.detectChanges();
+
+    expect(component['campaignPlanningPolicyExplanation']('NO_CAMPAIGN_PLAN'))
+      .toBe('Each output is generated independently, with no cross-output coordination.');
+    expect(component['campaignPlanningPolicyExplanation']('DETERMINISTIC_PLAN'))
+      .toContain('no AI involved');
+    expect(component['campaignPlanningPolicyExplanation']('AI_PLAN_FOR_REVIEW'))
+      .toContain('for your review');
+    expect(component['campaignPlanningPolicyExplanation']('AI_PLAN_AND_APPLY'))
+      .toContain('applied automatically');
+  });
+
+  it('only sends a non-default campaign planning policy for TOP_DIVERSE_HIGHLIGHTS robots', () => {
+    fixture.detectChanges();
+    component['toggleCreateForm']();
+    component['createName'].set('Single Highlight Robot');
+    component['createSourceAssetId'].set('asset-1');
+    component['createHighlightStrategy'].set('TOP_HIGHLIGHT');
+    component['createCampaignPlanningPolicy'].set('DETERMINISTIC_PLAN');
+
+    component['createRobot']();
+
+    expect(robotsService.create).toHaveBeenCalledWith(expect.objectContaining({
+      highlightStrategy: 'TOP_HIGHLIGHT',
+      campaignPlanningPolicy: 'NO_CAMPAIGN_PLAN',
+    }));
+  });
+
+  it('sends the selected campaign planning policy for a TOP_DIVERSE_HIGHLIGHTS robot', () => {
+    fixture.detectChanges();
+    component['toggleCreateForm']();
+    component['createName'].set('Series Robot');
+    component['createSourceAssetId'].set('asset-1');
+    component['createHighlightStrategy'].set('TOP_DIVERSE_HIGHLIGHTS');
+    component['createCampaignPlanningPolicy'].set('AI_PLAN_FOR_REVIEW');
+
+    component['createRobot']();
+
+    expect(robotsService.create).toHaveBeenCalledWith(expect.objectContaining({
+      highlightStrategy: 'TOP_DIVERSE_HIGHLIGHTS',
+      campaignPlanningPolicy: 'AI_PLAN_FOR_REVIEW',
+    }));
+  });
+
+  it('does not fetch or render a campaign plan for a historical NO_CAMPAIGN_PLAN run', async () => {
+    const multiRobot = { ...robot('ACTIVE', 'DRAFT_ONLY'), highlightStrategy: 'TOP_DIVERSE_HIGHLIGHTS' as const,
+      highlightCount: 2, outputSpacingMinutes: 60 };
+    const noPlanRun: RobotRunSummary = { ...multiOutputRunWithCampaignPlan(), campaignPlanningPolicySnapshot: undefined, campaignPlanId: null };
+    vi.mocked(robotsService.list).mockReturnValue(of([multiRobot]));
+    vi.mocked(robotsService.allRuns).mockReturnValue(of([noPlanRun]));
+    fixture = TestBed.createComponent(Robots);
+    component = fixture.componentInstance;
+    await fixture.whenStable();
+    component['toggleExpanded'](multiRobot);
+    fixture.detectChanges();
+
+    expect(campaignPlansService.listForRun).not.toHaveBeenCalled();
+    expect(fixture.nativeElement.textContent).not.toContain('Campaign plan');
+  });
+
+  it('fetches and renders the campaign plan, its title/angle, and per-output role mapping when a run is expanded', async () => {
+    const multiRobot = { ...robot('ACTIVE', 'DRAFT_ONLY'), highlightStrategy: 'TOP_DIVERSE_HIGHLIGHTS' as const,
+      highlightCount: 2, outputSpacingMinutes: 60 };
+    const planRun = multiOutputRunWithCampaignPlan();
+    vi.mocked(robotsService.list).mockReturnValue(of([multiRobot]));
+    vi.mocked(robotsService.allRuns).mockReturnValue(of([planRun]));
+    vi.mocked(campaignPlansService.listForRun).mockReturnValue(of([campaignPlan('READY_FOR_REVIEW')]));
+    fixture = TestBed.createComponent(Robots);
+    component = fixture.componentInstance;
+    await fixture.whenStable();
+    component['toggleExpanded'](multiRobot);
+    fixture.detectChanges();
+
+    expect(campaignPlansService.listForRun).toHaveBeenCalledWith('run-1');
+    const text = fixture.nativeElement.textContent as string;
+    expect(text).toContain('Series from keynote.mp4');
+    expect(text).toContain('Ready for review');
+    expect(text).toContain('Deterministic');
+    expect(text).toContain('Introduction');
+    expect(text).toContain('Conclusion');
+    expect(text).toContain('Open by introducing the topic.');
+    expect(text).not.toContain('undefined');
+  });
+
+  it('shows an AI provider/model badge instead of Deterministic for an AI-generated plan', async () => {
+    const multiRobot = { ...robot('ACTIVE', 'DRAFT_ONLY'), highlightStrategy: 'TOP_DIVERSE_HIGHLIGHTS' as const,
+      highlightCount: 2, outputSpacingMinutes: 60 };
+    const planRun = multiOutputRunWithCampaignPlan();
+    const aiPlan = { ...campaignPlan('READY_FOR_REVIEW'), provider: 'OLLAMA', model: 'llama3' };
+    vi.mocked(robotsService.list).mockReturnValue(of([multiRobot]));
+    vi.mocked(robotsService.allRuns).mockReturnValue(of([planRun]));
+    vi.mocked(campaignPlansService.listForRun).mockReturnValue(of([aiPlan]));
+    fixture = TestBed.createComponent(Robots);
+    component = fixture.componentInstance;
+    await fixture.whenStable();
+    component['toggleExpanded'](multiRobot);
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.textContent).toContain('AI (OLLAMA/llama3)');
+  });
+
+  it('applies a campaign plan ready for review', async () => {
+    const multiRobot = { ...robot('ACTIVE', 'DRAFT_ONLY'), highlightStrategy: 'TOP_DIVERSE_HIGHLIGHTS' as const,
+      highlightCount: 2, outputSpacingMinutes: 60 };
+    const planRun = multiOutputRunWithCampaignPlan();
+    vi.mocked(robotsService.list).mockReturnValue(of([multiRobot]));
+    vi.mocked(robotsService.allRuns).mockReturnValue(of([planRun]));
+    vi.mocked(campaignPlansService.listForRun).mockReturnValue(of([campaignPlan('READY_FOR_REVIEW')]));
+    fixture = TestBed.createComponent(Robots);
+    component = fixture.componentInstance;
+    await fixture.whenStable();
+    component['toggleExpanded'](multiRobot);
+    fixture.detectChanges();
+    const plan = component['currentCampaignPlan'](planRun)!;
+
+    component['applyCampaignPlan'](plan);
+
+    expect(campaignPlansService.apply).toHaveBeenCalledWith('plan-1');
+    expect(component['currentCampaignPlan'](planRun)!.status).toBe('APPLIED');
+  });
+
+  it('rejects a campaign plan ready for review', async () => {
+    const multiRobot = { ...robot('ACTIVE', 'DRAFT_ONLY'), highlightStrategy: 'TOP_DIVERSE_HIGHLIGHTS' as const,
+      highlightCount: 2, outputSpacingMinutes: 60 };
+    const planRun = multiOutputRunWithCampaignPlan();
+    vi.mocked(robotsService.list).mockReturnValue(of([multiRobot]));
+    vi.mocked(robotsService.allRuns).mockReturnValue(of([planRun]));
+    vi.mocked(campaignPlansService.listForRun).mockReturnValue(of([campaignPlan('READY_FOR_REVIEW')]));
+    fixture = TestBed.createComponent(Robots);
+    component = fixture.componentInstance;
+    await fixture.whenStable();
+    component['toggleExpanded'](multiRobot);
+    fixture.detectChanges();
+    const plan = component['currentCampaignPlan'](planRun)!;
+
+    component['rejectCampaignPlan'](plan);
+
+    expect(campaignPlansService.reject).toHaveBeenCalledWith('plan-1');
+    expect(component['currentCampaignPlan'](planRun)!.status).toBe('REJECTED');
+  });
+
+  it('regenerates a campaign plan and reloads its revisions', async () => {
+    const multiRobot = { ...robot('ACTIVE', 'DRAFT_ONLY'), highlightStrategy: 'TOP_DIVERSE_HIGHLIGHTS' as const,
+      highlightCount: 2, outputSpacingMinutes: 60 };
+    const planRun = multiOutputRunWithCampaignPlan();
+    vi.mocked(robotsService.list).mockReturnValue(of([multiRobot]));
+    vi.mocked(robotsService.allRuns).mockReturnValue(of([planRun]));
+    vi.mocked(campaignPlansService.listForRun).mockReturnValue(of([campaignPlan('REJECTED')]));
+    fixture = TestBed.createComponent(Robots);
+    component = fixture.componentInstance;
+    await fixture.whenStable();
+    component['toggleExpanded'](multiRobot);
+    fixture.detectChanges();
+
+    component['regenerateCampaignPlan'](planRun);
+
+    expect(campaignPlansService.regenerate).toHaveBeenCalledWith('run-1');
+    expect(campaignPlansService.listForRun).toHaveBeenCalledTimes(2);
+  });
+
+  it('surfaces a stale campaign plan and previous revisions', async () => {
+    const multiRobot = { ...robot('ACTIVE', 'DRAFT_ONLY'), highlightStrategy: 'TOP_DIVERSE_HIGHLIGHTS' as const,
+      highlightCount: 2, outputSpacingMinutes: 60 };
+    const planRun = multiOutputRunWithCampaignPlan();
+    const stalePlan = { ...campaignPlan('READY_FOR_REVIEW', 2), stale: true };
+    const previousPlan = { ...campaignPlan('REJECTED', 1), current: false, id: 'plan-0' };
+    vi.mocked(robotsService.list).mockReturnValue(of([multiRobot]));
+    vi.mocked(robotsService.allRuns).mockReturnValue(of([planRun]));
+    vi.mocked(campaignPlansService.listForRun).mockReturnValue(of([stalePlan, previousPlan]));
+    fixture = TestBed.createComponent(Robots);
+    component = fixture.componentInstance;
+    await fixture.whenStable();
+    component['toggleExpanded'](multiRobot);
+    fixture.detectChanges();
+
+    const text = fixture.nativeElement.textContent as string;
+    expect(text).toContain('Stale');
+    expect(text).toContain('1 previous revision(s)');
+  });
 });

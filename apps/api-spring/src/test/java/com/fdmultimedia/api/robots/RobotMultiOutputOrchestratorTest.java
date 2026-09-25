@@ -13,7 +13,7 @@ import org.junit.jupiter.api.Test;
 class RobotMultiOutputOrchestratorTest {
     private static final Instant NOW = Instant.parse("2026-09-25T10:00:00Z");
     private final RobotMultiOutputOrchestrator orchestrator = new RobotMultiOutputOrchestrator(
-            null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+            null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
 
     @Test
     void allSuccessfulOutputsCompleteTheParent() {

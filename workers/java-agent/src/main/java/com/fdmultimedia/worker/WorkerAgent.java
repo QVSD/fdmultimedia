@@ -48,6 +48,16 @@ public final class WorkerAgent {
             System.err.println("Content AI provider available: DETERMINISTIC_TEST only (OLLAMA not configured or unreachable)");
         }
         GenerateSocialCopyExecutor generateSocialCopyExecutor = new GenerateSocialCopyExecutor(contentEnrichmentProviders);
+        // Phase 17E: campaign planning reuses the exact same content-AI provider
+        // configuration/availability probe above (item 19) — no separate config,
+        // no second Ollama reachability probe, no DETERMINISTIC_TEST fallback here
+        // since DETERMINISTIC_CAMPAIGN_V1 runs entirely backend-side (item 5/37).
+        Map<String, CampaignPlanProvider> campaignPlanProviders = new LinkedHashMap<>();
+        if (ollamaContentProvider != null) {
+            campaignPlanProviders.put("OLLAMA", new OllamaCampaignPlanProvider(
+                    config.contentAiEndpoint(), config.contentAiModel(), config.contentAiTimeout()));
+        }
+        GenerateCampaignPlanExecutor generateCampaignPlanExecutor = new GenerateCampaignPlanExecutor(campaignPlanProviders);
         boolean ffprobeAvailable = FfprobeSupport.isAvailable(config.ffprobePath());
         if (ffprobeAvailable) {
             System.err.println("FFprobe available at " + config.ffprobePath());
@@ -113,7 +123,7 @@ public final class WorkerAgent {
                 activeJobs,
                 supportedJobTypes,
                 supportedHighlightAnalyzers));
-        executor.submit(() -> jobLoop(client, machineIdentifier, config, systemTestExecutor, importMediaExecutor, inspectMediaExecutor, clipExecutor, analyzeHighlightsExecutor, transcribeMediaExecutor, publishMediaExecutor, generateSocialCopyExecutor, supportedJobTypes, supportedHighlightAnalyzers, supportedPublishingProviders, activeJobs));
+        executor.submit(() -> jobLoop(client, machineIdentifier, config, systemTestExecutor, importMediaExecutor, inspectMediaExecutor, clipExecutor, analyzeHighlightsExecutor, transcribeMediaExecutor, publishMediaExecutor, generateSocialCopyExecutor, generateCampaignPlanExecutor, supportedJobTypes, supportedHighlightAnalyzers, supportedPublishingProviders, activeJobs));
         shutdown.await();
     }
 
@@ -154,6 +164,7 @@ public final class WorkerAgent {
             TranscribeMediaExecutor transcribeMediaExecutor,
             PublishMediaExecutor publishMediaExecutor,
             GenerateSocialCopyExecutor generateSocialCopyExecutor,
+            GenerateCampaignPlanExecutor generateCampaignPlanExecutor,
             List<String> supportedJobTypes,
             List<String> supportedHighlightAnalyzers,
             List<String> supportedPublishingProviders,
@@ -171,7 +182,7 @@ public final class WorkerAgent {
                 }
                 activeJobs.incrementAndGet();
                 try {
-                    executeClaimedJob(client, machineIdentifier, config.workerName(), systemTestExecutor, importMediaExecutor, inspectMediaExecutor, clipExecutor, analyzeHighlightsExecutor, transcribeMediaExecutor, publishMediaExecutor, generateSocialCopyExecutor, job);
+                    executeClaimedJob(client, machineIdentifier, config.workerName(), systemTestExecutor, importMediaExecutor, inspectMediaExecutor, clipExecutor, analyzeHighlightsExecutor, transcribeMediaExecutor, publishMediaExecutor, generateSocialCopyExecutor, generateCampaignPlanExecutor, job);
                 } finally {
                     activeJobs.decrementAndGet();
                 }
@@ -194,6 +205,7 @@ public final class WorkerAgent {
             TranscribeMediaExecutor transcribeMediaExecutor,
             PublishMediaExecutor publishMediaExecutor,
             GenerateSocialCopyExecutor generateSocialCopyExecutor,
+            GenerateCampaignPlanExecutor generateCampaignPlanExecutor,
             ClaimedJob job) throws InterruptedException {
         try {
             client.started(job.jobId(), machineIdentifier);
@@ -213,6 +225,8 @@ public final class WorkerAgent {
                 executePublishMediaJob(client, machineIdentifier, publishMediaExecutor, job);
             } else if ("GENERATE_SOCIAL_COPY".equals(job.type())) {
                 executeGenerateSocialCopyJob(client, machineIdentifier, generateSocialCopyExecutor, job);
+            } else if ("GENERATE_CAMPAIGN_PLAN".equals(job.type())) {
+                executeGenerateCampaignPlanJob(client, machineIdentifier, generateCampaignPlanExecutor, job);
             } else if ("SYSTEM_TEST".equals(job.type())) {
                 Map<String, Object> result = systemTestExecutor.execute(job, workerName);
                 client.complete(job.jobId(), machineIdentifier, result);
@@ -552,6 +566,42 @@ public final class WorkerAgent {
         }
     }
 
+    private static void executeGenerateCampaignPlanJob(
+            WorkerAgentClient client,
+            String machineIdentifier,
+            GenerateCampaignPlanExecutor generateCampaignPlanExecutor,
+            ClaimedJob job) throws InterruptedException {
+        AtomicBoolean running = new AtomicBoolean(true);
+        Thread renewer = new Thread(() -> leaseRenewLoop(client, machineIdentifier, job, running), "fdm-job-lease-renewer");
+        renewer.setDaemon(true);
+        renewer.start();
+        try {
+            generateCampaignPlanExecutor.execute(client, job, machineIdentifier);
+        } catch (ImportFailureException ex) {
+            reportCampaignPlanFailure(client, machineIdentifier, job, ex.code(), ex.getMessage(), ex.terminal());
+        } catch (Exception ex) {
+            reportCampaignPlanFailure(client, machineIdentifier, job, "GENERATE_CAMPAIGN_PLAN_FAILED", ex.getMessage(), false);
+        } finally {
+            running.set(false);
+            renewer.interrupt();
+        }
+    }
+
+    private static void reportCampaignPlanFailure(
+            WorkerAgentClient client,
+            String machineIdentifier,
+            ClaimedJob job,
+            String code,
+            String message,
+            boolean terminal) {
+        try {
+            CampaignPlanAuthorization authorization = client.authorizeCampaignPlanGeneration(job.jobId(), machineIdentifier);
+            client.failCampaignPlanGeneration(job.jobId(), machineIdentifier, authorization.planId(), code, message, terminal);
+        } catch (Exception reportFailure) {
+            System.err.println("Worker failed to report campaign plan failure: " + reportFailure.getMessage());
+        }
+    }
+
     private static void reportPublishingFailure(
             WorkerAgentClient client,
             String machineIdentifier,
@@ -612,6 +662,10 @@ public final class WorkerAgent {
         // DETERMINISTIC_TEST content-enrichment needs no external service and
         // is always available, exactly like DETERMINISTIC_V1 highlight analysis.
         types.add("GENERATE_SOCIAL_COPY");
+        // Phase 17E: DETERMINISTIC_CAMPAIGN_V1 runs entirely backend-side, and
+        // an AI_PLAN_* request that lacks a reachable provider fails cleanly
+        // via AI_PROVIDER_UNAVAILABLE, so this is always advertised too.
+        types.add("GENERATE_CAMPAIGN_PLAN");
         if (ffprobeAvailable) {
             types.add("INSPECT_MEDIA");
         }

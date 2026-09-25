@@ -395,6 +395,9 @@
                                 <span class="content__muted">{{ suggestion.provider }} ({{ suggestion.model }})</span>
                                 <span class="content__muted">Transcript used: {{ suggestion.transcriptUsed ? 'Yes' : 'No' }}</span>
                                 <span class="content__muted">Persona: {{ suggestion.personaName ?? 'None' }}</span>
+                                @if (suggestion.campaignPlanRevision) {
+                                  <span class="content__muted">Campaign plan revision {{ suggestion.campaignPlanRevision }}</span>
+                                }
                               </div>
                               @if (suggestion.status === 'READY' || suggestion.status === 'APPLIED') {
                                 @if (suggestion.hook) {

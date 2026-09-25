@@ -20,6 +20,7 @@ import {
   RobotSummary,
   RobotApprovalSummary,
   RobotHighlightStrategy,
+  RobotCampaignPlanningPolicy,
 } from '../../core/robots/robot.models';
 import { ContentSourcesService } from '../../core/content-sources/content-sources.service';
 import { ContentSourceSummary } from '../../core/content-sources/content-source.models';
@@ -28,6 +29,13 @@ import { PersonaSummary } from '../../core/personas/persona.models';
 import { SuggestionLanguage, SuggestionTone } from '../../core/content-suggestions/content-suggestion.models';
 import { ExperimentsService } from '../../core/experiments/experiments.service';
 import { ExperimentSummary } from '../../core/experiments/experiment.models';
+import { CampaignPlansService } from '../../core/campaign-plans/campaign-plans.service';
+import {
+  CampaignContentPlanItemSummary,
+  CampaignContentPlanSummary,
+  CampaignPlanRole,
+  CampaignPlanStatus,
+} from '../../core/campaign-plans/campaign-plan.models';
 
 type LoadState = 'loading' | 'ready' | 'error';
 
@@ -78,12 +86,19 @@ export class Robots implements OnInit, OnDestroy {
   protected readonly createHighlightStrategy = signal<RobotHighlightStrategy>('TOP_HIGHLIGHT');
   protected readonly createHighlightCount = signal(3);
   protected readonly createOutputSpacingMinutes = signal(60);
+  protected readonly createCampaignPlanningPolicy = signal<RobotCampaignPlanningPolicy>('NO_CAMPAIGN_PLAN');
   protected readonly createBusy = signal(false);
   protected readonly createError = signal<string | null>(null);
 
   protected readonly approveBusy = signal<Record<string, boolean>>({});
   protected readonly approveErrors = signal<Record<string, string | null>>({});
   protected readonly rejectBusy = signal<Record<string, boolean>>({});
+
+  // ---- Phase 17E: campaign content planning ----
+  protected readonly campaignPlansByRun = signal<Record<string, CampaignContentPlanSummary[]>>({});
+  protected readonly campaignPlanBusy = signal<Record<string, boolean>>({});
+  protected readonly campaignReviewBusy = signal<Record<string, boolean>>({});
+  protected readonly campaignReviewErrors = signal<Record<string, string | null>>({});
 
   private robotsSubscription?: Subscription;
   private approvalsSubscription?: Subscription;
@@ -97,6 +112,7 @@ export class Robots implements OnInit, OnDestroy {
     private readonly contentSourcesService: ContentSourcesService,
     private readonly personasService: PersonasService,
     private readonly experimentsService: ExperimentsService,
+    private readonly campaignPlansService: CampaignPlansService,
   ) {}
 
   ngOnInit(): void {
@@ -263,6 +279,118 @@ export class Robots implements OnInit, OnDestroy {
     return policy !== 'NO_AI';
   }
 
+  // ---- Phase 17E: campaign content planning ----
+
+  /** Coordinates messaging across a series without changing which highlights were selected. */
+  protected campaignPlanningPolicyExplanation(policy: RobotCampaignPlanningPolicy): string {
+    switch (policy) {
+      case 'NO_CAMPAIGN_PLAN':
+        return 'Each output is generated independently, with no cross-output coordination.';
+      case 'DETERMINISTIC_PLAN':
+        return 'Assign a role (intro/deep dive/conclusion) and simple guidance to each output, no AI involved.';
+      case 'AI_PLAN_FOR_REVIEW':
+        return 'An AI proposes a campaign title, roles, and guidance for your review before it is used.';
+      case 'AI_PLAN_AND_APPLY':
+        return 'An AI proposes a campaign plan and it is applied automatically before outputs continue.';
+    }
+  }
+
+  protected campaignPlanningPolicyLabel(policy: RobotCampaignPlanningPolicy): string {
+    switch (policy) {
+      case 'NO_CAMPAIGN_PLAN': return 'No campaign plan';
+      case 'DETERMINISTIC_PLAN': return 'Deterministic campaign plan';
+      case 'AI_PLAN_FOR_REVIEW': return 'AI campaign plan (review)';
+      case 'AI_PLAN_AND_APPLY': return 'AI campaign plan (auto-apply)';
+    }
+  }
+
+  protected campaignStatusLabel(status: CampaignPlanStatus): string {
+    switch (status) {
+      case 'GENERATING': return 'Generating...';
+      case 'READY_FOR_REVIEW': return 'Ready for review';
+      case 'APPLIED': return 'Applied';
+      case 'REJECTED': return 'Rejected';
+      case 'FAILED': return 'Failed';
+    }
+  }
+
+  protected campaignRoleLabel(role: CampaignPlanRole): string {
+    switch (role) {
+      case 'INTRODUCTION': return 'Introduction';
+      case 'DEEP_DIVE': return 'Deep dive';
+      case 'SUPPORTING_POINT': return 'Supporting point';
+      case 'CONCLUSION': return 'Conclusion';
+      case 'STANDALONE': return 'Standalone';
+    }
+  }
+
+  /** The one revision considered effective for this run right now — never a superseded one (item 27/47). */
+  protected currentCampaignPlan(run: RobotRunSummary): CampaignContentPlanSummary | null {
+    return (this.campaignPlansByRun()[run.id] ?? []).find((plan) => plan.current) ?? null;
+  }
+
+  protected historicalCampaignPlans(run: RobotRunSummary): CampaignContentPlanSummary[] {
+    return (this.campaignPlansByRun()[run.id] ?? []).filter((plan) => !plan.current);
+  }
+
+  protected campaignItemForOutput(plan: CampaignContentPlanSummary, outputId: string): CampaignContentPlanItemSummary | null {
+    return plan.items.find((item) => item.robotRunOutputId === outputId) ?? null;
+  }
+
+  protected loadCampaignPlansForRun(runId: string): void {
+    this.campaignPlanBusy.update((busy) => ({ ...busy, [runId]: true }));
+    this.campaignPlansService
+      .listForRun(runId)
+      .pipe(finalize(() => this.campaignPlanBusy.update((busy) => ({ ...busy, [runId]: false }))))
+      .subscribe({
+        next: (plans) => this.campaignPlansByRun.update((byRun) => ({ ...byRun, [runId]: plans })),
+        error: () => {},
+      });
+  }
+
+  protected applyCampaignPlan(plan: CampaignContentPlanSummary): void {
+    this.campaignReviewErrors.update((errors) => ({ ...errors, [plan.id]: null }));
+    this.campaignReviewBusy.update((busy) => ({ ...busy, [plan.id]: true }));
+    this.campaignPlansService
+      .apply(plan.id)
+      .pipe(finalize(() => this.campaignReviewBusy.update((busy) => ({ ...busy, [plan.id]: false }))))
+      .subscribe({
+        next: (updated) => this.replaceCampaignPlan(plan.robotRunId, updated),
+        error: () => this.campaignReviewErrors.update((errors) => ({ ...errors, [plan.id]: 'Could not apply the campaign plan.' })),
+      });
+  }
+
+  protected rejectCampaignPlan(plan: CampaignContentPlanSummary): void {
+    this.campaignReviewErrors.update((errors) => ({ ...errors, [plan.id]: null }));
+    this.campaignReviewBusy.update((busy) => ({ ...busy, [plan.id]: true }));
+    this.campaignPlansService
+      .reject(plan.id)
+      .pipe(finalize(() => this.campaignReviewBusy.update((busy) => ({ ...busy, [plan.id]: false }))))
+      .subscribe({
+        next: (updated) => this.replaceCampaignPlan(plan.robotRunId, updated),
+        error: () => this.campaignReviewErrors.update((errors) => ({ ...errors, [plan.id]: 'Could not reject the campaign plan.' })),
+      });
+  }
+
+  protected regenerateCampaignPlan(run: RobotRunSummary): void {
+    this.campaignReviewErrors.update((errors) => ({ ...errors, [run.id]: null }));
+    this.campaignReviewBusy.update((busy) => ({ ...busy, [run.id]: true }));
+    this.campaignPlansService
+      .regenerate(run.id)
+      .pipe(finalize(() => this.campaignReviewBusy.update((busy) => ({ ...busy, [run.id]: false }))))
+      .subscribe({
+        next: () => this.loadCampaignPlansForRun(run.id),
+        error: () => this.campaignReviewErrors.update((errors) => ({ ...errors, [run.id]: 'Could not regenerate the campaign plan.' })),
+      });
+  }
+
+  private replaceCampaignPlan(runId: string, updated: CampaignContentPlanSummary): void {
+    this.campaignPlansByRun.update((byRun) => ({
+      ...byRun,
+      [runId]: (byRun[runId] ?? []).map((plan) => (plan.id === updated.id ? updated : plan)),
+    }));
+  }
+
   // ---- Phase 14A: controlled experiments ----
 
   /** Item 55: a Robot may reference a DRAFT/ACTIVE/PAUSED Experiment (flexible setup order) but never a terminal one. */
@@ -327,6 +455,8 @@ export class Robots implements OnInit, OnDestroy {
         highlightStrategy: this.createHighlightStrategy(),
         highlightCount: this.createHighlightStrategy() === 'TOP_DIVERSE_HIGHLIGHTS' ? this.createHighlightCount() : 1,
         outputSpacingMinutes: this.createOutputSpacingMinutes(),
+        campaignPlanningPolicy: this.createHighlightStrategy() === 'TOP_DIVERSE_HIGHLIGHTS'
+          ? this.createCampaignPlanningPolicy() : 'NO_CAMPAIGN_PLAN',
       })
       .pipe(finalize(() => this.createBusy.set(false)))
       .subscribe({
@@ -348,7 +478,15 @@ export class Robots implements OnInit, OnDestroy {
   }
 
   protected toggleExpanded(robot: RobotSummary): void {
-    this.expandedRobots.update((items) => ({ ...items, [robot.id]: !(items[robot.id] ?? false) }));
+    const expanding = !(this.expandedRobots()[robot.id] ?? false);
+    this.expandedRobots.update((items) => ({ ...items, [robot.id]: expanding }));
+    if (expanding) {
+      for (const run of this.runsForRobot(robot)) {
+        if (run.campaignPlanId && !this.campaignPlansByRun()[run.id]) {
+          this.loadCampaignPlansForRun(run.id);
+        }
+      }
+    }
   }
 
   protected runsForRobot(robot: RobotSummary): RobotRunSummary[] {

@@ -36,6 +36,10 @@ export interface ContentSuggestionSummary {
   completedAt: string | null;
   appliedAt: string | null;
   appliedByUserId: string | null;
+  /** Phase 17E: set only when this suggestion actually consumed an applied CampaignContentPlanItem's guidance. */
+  campaignPlanId?: string | null;
+  campaignPlanRevision?: number | null;
+  campaignPlanItemId?: string | null;
 }
 
 export interface CreateContentSuggestionRequest {

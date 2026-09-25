@@ -102,6 +102,7 @@ public class RobotService {
                 request.experimentId(), membership.getUser(), now);
         HighlightConfig highlight = validateHighlightConfig(request.highlightStrategy(), request.highlightCount(), request.outputSpacingMinutes());
         robot.configureHighlightStrategy(highlight.strategy(), highlight.count(), highlight.spacingMinutes(), now);
+        robot.configureCampaignPlanning(validateCampaignPlanningPolicy(request.campaignPlanningPolicy()), now);
         return toSummary(robots.save(robot));
     }
 
@@ -208,6 +209,7 @@ public class RobotService {
                 aiConfig.policy(), aiConfig.persona(), aiConfig.languageOverride(), aiConfig.toneOverride(), request.experimentId(), now);
         HighlightConfig highlight = validateHighlightConfig(request.highlightStrategy(), request.highlightCount(), request.outputSpacingMinutes());
         robot.configureHighlightStrategy(highlight.strategy(), highlight.count(), highlight.spacingMinutes(), now);
+        robot.configureCampaignPlanning(validateCampaignPlanningPolicy(request.campaignPlanningPolicy()), now);
         return toSummary(robot);
     }
 
@@ -330,6 +332,11 @@ public class RobotService {
 
     private record HighlightConfig(RobotHighlightStrategy strategy, int count, int spacingMinutes) {}
 
+    /** Item 4: default is NO_CAMPAIGN_PLAN — no cross-field validation needed (unlike AI policy, it never depends on Persona/other config being present). */
+    private CampaignPlanningPolicy validateCampaignPlanningPolicy(CampaignPlanningPolicy policy) {
+        return policy == null ? CampaignPlanningPolicy.NO_CAMPAIGN_PLAN : policy;
+    }
+
     private String validateName(String name) {
         if (name == null || name.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "name is required");
@@ -394,6 +401,7 @@ public class RobotService {
                 robot.getNextRunAt(),
                 robot.getLastRunAt(),
                 robot.getCreatedAt(),
-                robot.getUpdatedAt());
+                robot.getUpdatedAt(),
+                robot.getCampaignPlanningPolicy());
     }
 }

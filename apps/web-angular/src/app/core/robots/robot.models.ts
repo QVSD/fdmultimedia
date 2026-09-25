@@ -9,6 +9,12 @@ export type RobotCadenceType = 'MANUAL_ONLY' | 'INTERVAL';
 export type RobotRunTriggerType = 'MANUAL' | 'SCHEDULED';
 /** Independent of autonomyMode (Phase 12C) — never merge the two axes. */
 export type RobotAiPolicy = 'NO_AI' | 'GENERATE_FOR_REVIEW' | 'GENERATE_AND_APPLY';
+/** Phase 17E: independent of highlightStrategy/aiPolicy — advisory cross-output coordination only, never changes selected highlights. Only meaningful for TOP_DIVERSE_HIGHLIGHTS. */
+export type RobotCampaignPlanningPolicy =
+  | 'NO_CAMPAIGN_PLAN'
+  | 'DETERMINISTIC_PLAN'
+  | 'AI_PLAN_FOR_REVIEW'
+  | 'AI_PLAN_AND_APPLY';
 export type RobotRunStatus =
   | 'RUNNING'
   | 'WAITING_FOR_DRAFT'
@@ -53,6 +59,7 @@ export interface RobotSummary {
   lastRunAt: string | null;
   createdAt: string;
   updatedAt: string;
+  campaignPlanningPolicy?: RobotCampaignPlanningPolicy;
 }
 
 export interface RobotRunSummary {
@@ -87,6 +94,8 @@ export interface RobotRunSummary {
   outputSpacingMinutes?: number;
   highlightSelectionId?: string | null;
   outputs?: RobotRunOutputSummary[];
+  campaignPlanningPolicySnapshot?: RobotCampaignPlanningPolicy;
+  campaignPlanId?: string | null;
 }
 
 export type RobotRunOutputStatus =
@@ -153,6 +162,7 @@ export interface CreateRobotRequest {
   highlightStrategy?: RobotHighlightStrategy;
   highlightCount?: number;
   outputSpacingMinutes?: number;
+  campaignPlanningPolicy?: RobotCampaignPlanningPolicy;
 }
 
 export type UpdateRobotRequest = Omit<CreateRobotRequest, 'sourcePolicy' | 'sourceAssetId' | 'contentSourceId' | 'selectionPolicy'>;

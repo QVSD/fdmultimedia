@@ -64,6 +64,10 @@ public class Robot {
     private int outputSpacingMinutes;
 
     @Enumerated(EnumType.STRING)
+    @Column(name = "campaign_planning_policy", nullable = false)
+    private CampaignPlanningPolicy campaignPlanningPolicy;
+
+    @Enumerated(EnumType.STRING)
     @Column(name = "source_policy", nullable = false)
     private RobotSourcePolicy sourcePolicy;
 
@@ -240,6 +244,7 @@ public class Robot {
         this.highlightStrategy = RobotHighlightStrategy.TOP_HIGHLIGHT;
         this.highlightCount = 1;
         this.outputSpacingMinutes = 60;
+        this.campaignPlanningPolicy = CampaignPlanningPolicy.NO_CAMPAIGN_PLAN;
         this.sourcePolicy = sourcePolicy;
         this.sourceAsset = sourceAsset;
         this.contentSource = contentSource;
@@ -321,6 +326,12 @@ public class Robot {
         this.updatedAt = now;
     }
 
+    /** Phase 17E: advisory cross-output planning policy. Independent of highlight strategy/AI policy — see {@link CampaignPlanningPolicy}. */
+    public void configureCampaignPlanning(CampaignPlanningPolicy policy, Instant now) {
+        this.campaignPlanningPolicy = policy;
+        this.updatedAt = now;
+    }
+
     public void pause(Instant now) {
         this.status = RobotStatus.PAUSED;
         this.updatedAt = now;
@@ -370,6 +381,7 @@ public class Robot {
     public RobotHighlightStrategy getHighlightStrategy() { return highlightStrategy; }
     public int getHighlightCount() { return highlightCount; }
     public int getOutputSpacingMinutes() { return outputSpacingMinutes; }
+    public CampaignPlanningPolicy getCampaignPlanningPolicy() { return campaignPlanningPolicy; }
     public RobotSourcePolicy getSourcePolicy() { return sourcePolicy; }
     public MediaAsset getSourceAsset() { return sourceAsset; }
     public ContentSource getContentSource() { return contentSource; }

@@ -404,6 +404,36 @@ final class WorkerAgentClient {
         send("/worker-agent/content-suggestions/" + jobId + "/fail", body, new TypeReference<Map<String, Object>>() {});
     }
 
+    CampaignPlanAuthorization authorizeCampaignPlanGeneration(UUID jobId, String machineIdentifier)
+            throws IOException, InterruptedException {
+        return send(
+                "/worker-agent/campaign-plans/" + jobId + "/authorization",
+                Map.of("machineIdentifier", machineIdentifier),
+                new TypeReference<CampaignPlanAuthorization>() {});
+    }
+
+    void completeCampaignPlanGeneration(UUID jobId, String machineIdentifier, CampaignPlanAuthorization authorization, CampaignPlanResult result)
+            throws IOException, InterruptedException {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("machineIdentifier", machineIdentifier);
+        body.put("planId", authorization.planId());
+        body.put("campaignTitle", result.campaignTitle());
+        body.put("campaignAngle", result.campaignAngle());
+        body.put("items", result.items());
+        send("/worker-agent/campaign-plans/" + jobId + "/complete", body, new TypeReference<Map<String, Object>>() {});
+    }
+
+    void failCampaignPlanGeneration(UUID jobId, String machineIdentifier, UUID planId, String errorCode, String errorMessage, boolean terminal)
+            throws IOException, InterruptedException {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("machineIdentifier", machineIdentifier);
+        body.put("planId", planId);
+        body.put("errorCode", errorCode);
+        body.put("errorMessage", errorMessage);
+        body.put("terminal", terminal);
+        send("/worker-agent/campaign-plans/" + jobId + "/fail", body, new TypeReference<Map<String, Object>>() {});
+    }
+
     void upload(URI uploadUrl, Path path, String contentType) throws IOException, InterruptedException {
         HttpRequest request = HttpRequest.newBuilder(uploadUrl)
                 .timeout(Duration.ofMinutes(30))

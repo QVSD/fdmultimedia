@@ -698,6 +698,10 @@ infra/
 docs/              Architecture, development, and roadmap docs
 ```
 
+## Phase 17E: campaign content planning
+
+`CampaignContentPlan`/`CampaignContentPlanItem` add optional, advisory cross-output coordination on top of Phase 17D's multi-output `RobotRun`s — a series title/angle plus a per-output role (`INTRODUCTION`/`DEEP_DIVE`/`SUPPORTING_POINT`/`CONCLUSION`/`STANDALONE`) and hook/caption/CTA/repetition-avoidance guidance, never a change to which highlights were selected, their order, or boundaries. `DETERMINISTIC_PLAN` needs no external dependency and auto-applies synchronously; `AI_PLAN_FOR_REVIEW`/`AI_PLAN_AND_APPLY` reuse the exact same Worker provider abstraction, prompt-injection hardening, and kill switch as AI social-copy generation, with every structured response authoritatively re-validated (fixed output set, controlled role enum, bounded fields, deterministic near-duplicate-hook rejection) before anything is persisted. Regeneration creates a new immutable revision; at most one revision is ever current per run, enforced at the database level. Applying a plan is advisory only — it never approves a `ContentSuggestion`, publishing approval, or Schedule, keeping campaign-plan review, per-output copy review, and publishing approval as three independent layers. `NO_CAMPAIGN_PLAN` (the default) is a byte-identical no-op for every historical and non-diverse Robot.
+
 ## Phase 17D: multi-output Robot campaigns
 
 `TOP_DIVERSE_HIGHLIGHTS` turns one immutable V3 diversity selection into 1–5 independently tracked `RobotRunOutput` rows. The parent `RobotRun` remains the automation, Experiment, and source-consumption unit; each child owns one selection item and at most one Draft, AI suggestion, publishing approval, and Schedule. Existing `TOP_HIGHLIGHT` runs retain their historical direct one-Draft shape.

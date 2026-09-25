@@ -126,18 +126,36 @@ public class ContentSuggestionService {
             Workspace workspace, ContentDraft draft, UUID personaId,
             SuggestionLanguage languageOverride, SuggestionTone toneOverride, UUID robotRunId,
             UUID robotRunOutputId, AppUser initiatingUser, ExperimentTreatment treatment) {
+        return createForRobotOutput(workspace, draft, personaId, languageOverride, toneOverride, robotRunId,
+                robotRunOutputId, initiatingUser, treatment, null);
+    }
+
+    /** Phase 17E: {@code campaignGuidance} is null whenever no campaign plan was applied for this output — behavior is then byte-identical to the overload above. */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public ContentSuggestionSummary createForRobotOutput(
+            Workspace workspace, ContentDraft draft, UUID personaId,
+            SuggestionLanguage languageOverride, SuggestionTone toneOverride, UUID robotRunId,
+            UUID robotRunOutputId, AppUser initiatingUser, ExperimentTreatment treatment, CampaignGuidance campaignGuidance) {
         ContentSuggestion existing = suggestions.findByRobotRunOutputId(robotRunOutputId).orElse(null);
         if (existing != null) {
             return toSummary(existing, draft);
         }
         return generate(workspace, draft, personaId, languageOverride, toneOverride, robotRunId,
-                robotRunOutputId, initiatingUser, treatment);
+                robotRunOutputId, initiatingUser, treatment, campaignGuidance);
     }
 
     private ContentSuggestionSummary generate(
             Workspace workspace, ContentDraft draft, UUID personaId,
             SuggestionLanguage languageOverride, SuggestionTone toneOverride, UUID robotRunId,
             UUID robotRunOutputId, AppUser initiatingUser, ExperimentTreatment treatment) {
+        return generate(workspace, draft, personaId, languageOverride, toneOverride, robotRunId,
+                robotRunOutputId, initiatingUser, treatment, null);
+    }
+
+    private ContentSuggestionSummary generate(
+            Workspace workspace, ContentDraft draft, UUID personaId,
+            SuggestionLanguage languageOverride, SuggestionTone toneOverride, UUID robotRunId,
+            UUID robotRunOutputId, AppUser initiatingUser, ExperimentTreatment treatment, CampaignGuidance campaignGuidance) {
         if (!properties.isEnabled()) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "AI_DISABLED");
         }
@@ -165,11 +183,12 @@ public class ContentSuggestionService {
         String provider = properties.getProvider();
         String model = properties.getModel();
         ContentEnrichmentContext context = contextBuilder.build(draft);
-        String prompt = promptBuilder.build(context, language, tone, personaSnapshot);
+        String promptVersion = campaignGuidance == null ? SocialCopyPromptBuilder.VERSION_V2 : SocialCopyPromptBuilder.VERSION_V3_CAMPAIGN;
+        String prompt = promptBuilder.build(context, language, tone, personaSnapshot, campaignGuidance);
         if (prompt.length() > properties.getMaxPromptCharacters()) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "AI_CONTEXT_UNAVAILABLE");
         }
-        String fingerprint = fingerprint(draft, language, tone, provider, model, SocialCopyPromptBuilder.VERSION_V2, personaSnapshot);
+        String fingerprint = fingerprint(draft, language, tone, provider, model, promptVersion, personaSnapshot, campaignGuidance);
 
         Instant now = Instant.now(clock);
         Map<String, Object> payload = new LinkedHashMap<>();
@@ -180,17 +199,23 @@ public class ContentSuggestionService {
 
         ContentSuggestion suggestion = robotRunId == null
                 ? new ContentSuggestion(
-                        workspace, draft, job, provider, model, SocialCopyPromptBuilder.VERSION_V2,
+                        workspace, draft, job, provider, model, promptVersion,
                         language, tone, prompt, fingerprint,
                         context.transcriptUsed(), context.transcriptId(), personaSnapshot, initiatingUser, now)
                 : ContentSuggestion.forRobot(
-                        workspace, draft, job, provider, model, SocialCopyPromptBuilder.VERSION_V2,
+                        workspace, draft, job, provider, model, promptVersion,
                         language, tone, prompt, fingerprint,
                         context.transcriptUsed(), context.transcriptId(), personaSnapshot, robotRunId,
                         robotRunOutputId, initiatingUser, now,
                         treatment == null ? null : treatment.experimentId(),
                         treatment == null ? null : treatment.experimentAssignmentId(),
-                        treatment == null ? null : treatment.experimentVariantId());
+                        treatment == null ? null : treatment.experimentVariantId(),
+                        campaignGuidance == null ? null : campaignGuidance.campaignPlanId(),
+                        campaignGuidance == null ? null : campaignGuidance.campaignPlanRevision(),
+                        campaignGuidance == null ? null : campaignGuidance.campaignPlanItemId());
+        if (campaignGuidance != null) {
+            suggestion.applyCampaignGuidance(campaignGuidance);
+        }
         return toSummary(suggestions.save(suggestion), draft);
     }
 
@@ -260,7 +285,7 @@ public class ContentSuggestionService {
         // Recomputed from the suggestion's OWN stored Persona snapshot, never by re-reading the live Persona —
         // this is what makes a Persona edit/archive unable to ever cause a stale Apply on its own.
         String currentFingerprint = fingerprint(draft, suggestion.getLanguage(), suggestion.getTone(), suggestion.getProvider(),
-                suggestion.getModel(), suggestion.getPromptVersion(), suggestion.getPersonaSnapshot());
+                suggestion.getModel(), suggestion.getPromptVersion(), suggestion.getPersonaSnapshot(), suggestion.getCampaignGuidance());
         if (!currentFingerprint.equals(suggestion.getInputFingerprint())) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "SUGGESTION_STALE");
         }
@@ -515,6 +540,13 @@ public class ContentSuggestionService {
     private String fingerprint(
             ContentDraft draft, SuggestionLanguage language, SuggestionTone tone, String provider, String model,
             String promptVersion, PersonaSnapshot personaSnapshot) {
+        return fingerprint(draft, language, tone, provider, model, promptVersion, personaSnapshot, null);
+    }
+
+    /** Phase 17E: V3_CAMPAIGN additionally folds in the applied plan item's own identity/guidance (never a fresh plan lookup — see class Javadoc pattern for Persona). */
+    private String fingerprint(
+            ContentDraft draft, SuggestionLanguage language, SuggestionTone tone, String provider, String model,
+            String promptVersion, PersonaSnapshot personaSnapshot, CampaignGuidance campaignGuidance) {
         List<String> parts = new ArrayList<>(List.of(
                 promptVersion,
                 draft.getId().toString(),
@@ -526,7 +558,7 @@ public class ContentSuggestionService {
                 tone.name(),
                 provider,
                 model));
-        if (SocialCopyPromptBuilder.VERSION_V2.equals(promptVersion)) {
+        if (SocialCopyPromptBuilder.VERSION_V2.equals(promptVersion) || SocialCopyPromptBuilder.VERSION_V3_CAMPAIGN.equals(promptVersion)) {
             parts.add(personaSnapshot == null ? "" : personaSnapshot.personaId().toString());
             parts.add(personaSnapshot == null ? "" : safe(personaSnapshot.audience()));
             parts.add(personaSnapshot == null ? "" : safe(personaSnapshot.voiceDescription()));
@@ -534,6 +566,14 @@ public class ContentSuggestionService {
             parts.add(personaSnapshot == null ? "" : safe(personaSnapshot.avoidGuidelines()));
             parts.add(personaSnapshot == null ? "" : safe(personaSnapshot.hashtagGuidelines()));
             parts.add(personaSnapshot == null ? "" : safe(personaSnapshot.exampleCopy()));
+        }
+        if (SocialCopyPromptBuilder.VERSION_V3_CAMPAIGN.equals(promptVersion)) {
+            parts.add(campaignGuidance == null ? "" : campaignGuidance.campaignPlanItemId().toString());
+            parts.add(campaignGuidance == null ? "" : safe(campaignGuidance.role()));
+            parts.add(campaignGuidance == null ? "" : safe(campaignGuidance.hookGuidance()));
+            parts.add(campaignGuidance == null ? "" : safe(campaignGuidance.captionGuidance()));
+            parts.add(campaignGuidance == null ? "" : safe(campaignGuidance.ctaGuidance()));
+            parts.add(campaignGuidance == null ? "" : safe(campaignGuidance.avoidRepetitionGuidance()));
         }
         return sha256Hex(String.join("|", parts));
     }
@@ -570,7 +610,7 @@ public class ContentSuggestionService {
     private ContentSuggestionSummary toSummary(ContentSuggestion suggestion, ContentDraft draft) {
         boolean stale = suggestion.getStatus() == ContentSuggestionStatus.READY
                 && !fingerprint(draft, suggestion.getLanguage(), suggestion.getTone(), suggestion.getProvider(), suggestion.getModel(),
-                        suggestion.getPromptVersion(), suggestion.getPersonaSnapshot())
+                        suggestion.getPromptVersion(), suggestion.getPersonaSnapshot(), suggestion.getCampaignGuidance())
                         .equals(suggestion.getInputFingerprint());
         return new ContentSuggestionSummary(
                 suggestion.getId(),
@@ -605,6 +645,9 @@ public class ContentSuggestionService {
                 suggestion.getCreatedAt(),
                 suggestion.getCompletedAt(),
                 suggestion.getAppliedAt(),
-                suggestion.getAppliedByUserId());
+                suggestion.getAppliedByUserId(),
+                suggestion.getCampaignPlanId(),
+                suggestion.getCampaignPlanRevision(),
+                suggestion.getCampaignPlanItemId());
     }
 }
