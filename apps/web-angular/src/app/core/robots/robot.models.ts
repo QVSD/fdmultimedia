@@ -15,6 +15,11 @@ export type RobotCampaignPlanningPolicy =
   | 'DETERMINISTIC_PLAN'
   | 'AI_PLAN_FOR_REVIEW'
   | 'AI_PLAN_AND_APPLY';
+/** Phase 17F: independent of campaignPlanningPolicy/aiPolicy as its own axis, but only ever produces anything when both are also active (enforced backend-side). Coordinates final copy across campaign outputs while keeping each post independently reviewable. */
+export type RobotCopyCoordinationPolicy =
+  | 'INDEPENDENT_COPY'
+  | 'COORDINATED_COPY_FOR_REVIEW'
+  | 'COORDINATED_COPY_AND_APPLY';
 export type RobotRunStatus =
   | 'RUNNING'
   | 'WAITING_FOR_DRAFT'
@@ -60,6 +65,7 @@ export interface RobotSummary {
   createdAt: string;
   updatedAt: string;
   campaignPlanningPolicy?: RobotCampaignPlanningPolicy;
+  copyCoordinationPolicy?: RobotCopyCoordinationPolicy;
 }
 
 export interface RobotRunSummary {
@@ -96,6 +102,8 @@ export interface RobotRunSummary {
   outputs?: RobotRunOutputSummary[];
   campaignPlanningPolicySnapshot?: RobotCampaignPlanningPolicy;
   campaignPlanId?: string | null;
+  copyCoordinationPolicySnapshot?: RobotCopyCoordinationPolicy;
+  campaignCopySetId?: string | null;
 }
 
 export type RobotRunOutputStatus =
@@ -163,6 +171,7 @@ export interface CreateRobotRequest {
   highlightCount?: number;
   outputSpacingMinutes?: number;
   campaignPlanningPolicy?: RobotCampaignPlanningPolicy;
+  copyCoordinationPolicy?: RobotCopyCoordinationPolicy;
 }
 
 export type UpdateRobotRequest = Omit<CreateRobotRequest, 'sourcePolicy' | 'sourceAssetId' | 'contentSourceId' | 'selectionPolicy'>;

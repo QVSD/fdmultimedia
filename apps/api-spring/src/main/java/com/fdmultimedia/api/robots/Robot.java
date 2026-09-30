@@ -68,6 +68,10 @@ public class Robot {
     private CampaignPlanningPolicy campaignPlanningPolicy;
 
     @Enumerated(EnumType.STRING)
+    @Column(name = "copy_coordination_policy", nullable = false)
+    private CopyCoordinationPolicy copyCoordinationPolicy;
+
+    @Enumerated(EnumType.STRING)
     @Column(name = "source_policy", nullable = false)
     private RobotSourcePolicy sourcePolicy;
 
@@ -245,6 +249,7 @@ public class Robot {
         this.highlightCount = 1;
         this.outputSpacingMinutes = 60;
         this.campaignPlanningPolicy = CampaignPlanningPolicy.NO_CAMPAIGN_PLAN;
+        this.copyCoordinationPolicy = CopyCoordinationPolicy.INDEPENDENT_COPY;
         this.sourcePolicy = sourcePolicy;
         this.sourceAsset = sourceAsset;
         this.contentSource = contentSource;
@@ -332,6 +337,12 @@ public class Robot {
         this.updatedAt = now;
     }
 
+    /** Phase 17F: advisory cross-output copy coordination policy. Independent of highlight strategy/AI policy/campaign planning policy — see {@link CopyCoordinationPolicy}. Cross-field validity (compatible with the current campaign planning policy/AI policy) is enforced by {@code RobotService}, not here. */
+    public void configureCopyCoordination(CopyCoordinationPolicy policy, Instant now) {
+        this.copyCoordinationPolicy = policy;
+        this.updatedAt = now;
+    }
+
     public void pause(Instant now) {
         this.status = RobotStatus.PAUSED;
         this.updatedAt = now;
@@ -382,6 +393,7 @@ public class Robot {
     public int getHighlightCount() { return highlightCount; }
     public int getOutputSpacingMinutes() { return outputSpacingMinutes; }
     public CampaignPlanningPolicy getCampaignPlanningPolicy() { return campaignPlanningPolicy; }
+    public CopyCoordinationPolicy getCopyCoordinationPolicy() { return copyCoordinationPolicy; }
     public RobotSourcePolicy getSourcePolicy() { return sourcePolicy; }
     public MediaAsset getSourceAsset() { return sourceAsset; }
     public ContentSource getContentSource() { return contentSource; }

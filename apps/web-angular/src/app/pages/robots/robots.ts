@@ -21,6 +21,7 @@ import {
   RobotApprovalSummary,
   RobotHighlightStrategy,
   RobotCampaignPlanningPolicy,
+  RobotCopyCoordinationPolicy,
 } from '../../core/robots/robot.models';
 import { ContentSourcesService } from '../../core/content-sources/content-sources.service';
 import { ContentSourceSummary } from '../../core/content-sources/content-source.models';
@@ -36,6 +37,12 @@ import {
   CampaignPlanRole,
   CampaignPlanStatus,
 } from '../../core/campaign-plans/campaign-plan.models';
+import { CampaignCopyService } from '../../core/campaign-copy/campaign-copy.service';
+import {
+  CampaignCopyItemSummary,
+  CampaignCopySetStatus,
+  CampaignCopySetSummary,
+} from '../../core/campaign-copy/campaign-copy.models';
 
 type LoadState = 'loading' | 'ready' | 'error';
 
@@ -87,6 +94,7 @@ export class Robots implements OnInit, OnDestroy {
   protected readonly createHighlightCount = signal(3);
   protected readonly createOutputSpacingMinutes = signal(60);
   protected readonly createCampaignPlanningPolicy = signal<RobotCampaignPlanningPolicy>('NO_CAMPAIGN_PLAN');
+  protected readonly createCopyCoordinationPolicy = signal<RobotCopyCoordinationPolicy>('INDEPENDENT_COPY');
   protected readonly createBusy = signal(false);
   protected readonly createError = signal<string | null>(null);
 
@@ -99,6 +107,12 @@ export class Robots implements OnInit, OnDestroy {
   protected readonly campaignPlanBusy = signal<Record<string, boolean>>({});
   protected readonly campaignReviewBusy = signal<Record<string, boolean>>({});
   protected readonly campaignReviewErrors = signal<Record<string, string | null>>({});
+
+  // ---- Phase 17F: coordinated campaign copy ----
+  protected readonly campaignCopySetsByRun = signal<Record<string, CampaignCopySetSummary[]>>({});
+  protected readonly copySetBusy = signal<Record<string, boolean>>({});
+  protected readonly copySetReviewBusy = signal<Record<string, boolean>>({});
+  protected readonly copySetReviewErrors = signal<Record<string, string | null>>({});
 
   private robotsSubscription?: Subscription;
   private approvalsSubscription?: Subscription;
@@ -113,6 +127,7 @@ export class Robots implements OnInit, OnDestroy {
     private readonly personasService: PersonasService,
     private readonly experimentsService: ExperimentsService,
     private readonly campaignPlansService: CampaignPlansService,
+    private readonly campaignCopyService: CampaignCopyService,
   ) {}
 
   ngOnInit(): void {
@@ -391,6 +406,112 @@ export class Robots implements OnInit, OnDestroy {
     }));
   }
 
+  // ---- Phase 17F: coordinated campaign copy ----
+
+  /** Mirrors the backend's own cross-field validation (RobotService.validateCopyCoordinationPolicy): coordinated copy is only ever satisfiable with an active campaign plan and an active AI policy. */
+  protected copyCoordinationEligible(): boolean {
+    return this.createHighlightStrategy() === 'TOP_DIVERSE_HIGHLIGHTS'
+      && this.createCampaignPlanningPolicy() !== 'NO_CAMPAIGN_PLAN'
+      && this.createAiPolicy() !== 'NO_AI';
+  }
+
+  /** Coordinates final copy across campaign outputs while keeping each post independently reviewable. */
+  protected copyCoordinationPolicyExplanation(policy: RobotCopyCoordinationPolicy): string {
+    switch (policy) {
+      case 'INDEPENDENT_COPY':
+        return 'Each output’s social copy is generated independently, exactly as without campaign copy coordination.';
+      case 'COORDINATED_COPY_FOR_REVIEW':
+        return 'An AI coordinates hook/caption/hashtags across all outputs in the series for your review before it is used.';
+      case 'COORDINATED_COPY_AND_APPLY':
+        return 'An AI coordinates copy across the series and applies it automatically before outputs continue.';
+    }
+  }
+
+  protected copyCoordinationPolicyLabel(policy: RobotCopyCoordinationPolicy): string {
+    switch (policy) {
+      case 'INDEPENDENT_COPY': return 'Independent copy';
+      case 'COORDINATED_COPY_FOR_REVIEW': return 'Coordinated copy (review)';
+      case 'COORDINATED_COPY_AND_APPLY': return 'Coordinated copy (auto-apply)';
+    }
+  }
+
+  protected copySetStatusLabel(status: CampaignCopySetStatus): string {
+    switch (status) {
+      case 'GENERATING': return 'Generating...';
+      case 'READY_FOR_REVIEW': return 'Ready for review';
+      case 'APPLIED': return 'Applied';
+      case 'REJECTED': return 'Rejected';
+      case 'FAILED': return 'Failed';
+    }
+  }
+
+  /** The one revision considered effective for this run right now — never a superseded one. */
+  protected currentCopySet(run: RobotRunSummary): CampaignCopySetSummary | null {
+    return (this.campaignCopySetsByRun()[run.id] ?? []).find((copySet) => copySet.current) ?? null;
+  }
+
+  protected historicalCopySets(run: RobotRunSummary): CampaignCopySetSummary[] {
+    return (this.campaignCopySetsByRun()[run.id] ?? []).filter((copySet) => !copySet.current);
+  }
+
+  protected copyItemForOutput(copySet: CampaignCopySetSummary, outputId: string): CampaignCopyItemSummary | null {
+    return copySet.items.find((item) => item.robotRunOutputId === outputId) ?? null;
+  }
+
+  protected loadCopySetsForRun(runId: string): void {
+    this.copySetBusy.update((busy) => ({ ...busy, [runId]: true }));
+    this.campaignCopyService
+      .listForRun(runId)
+      .pipe(finalize(() => this.copySetBusy.update((busy) => ({ ...busy, [runId]: false }))))
+      .subscribe({
+        next: (copySets) => this.campaignCopySetsByRun.update((byRun) => ({ ...byRun, [runId]: copySets })),
+        error: () => {},
+      });
+  }
+
+  protected applyCopySet(copySet: CampaignCopySetSummary): void {
+    this.copySetReviewErrors.update((errors) => ({ ...errors, [copySet.id]: null }));
+    this.copySetReviewBusy.update((busy) => ({ ...busy, [copySet.id]: true }));
+    this.campaignCopyService
+      .apply(copySet.id)
+      .pipe(finalize(() => this.copySetReviewBusy.update((busy) => ({ ...busy, [copySet.id]: false }))))
+      .subscribe({
+        next: (updated) => this.replaceCopySet(copySet.robotRunId, updated),
+        error: () => this.copySetReviewErrors.update((errors) => ({ ...errors, [copySet.id]: 'Could not apply the coordinated copy.' })),
+      });
+  }
+
+  protected rejectCopySet(copySet: CampaignCopySetSummary): void {
+    this.copySetReviewErrors.update((errors) => ({ ...errors, [copySet.id]: null }));
+    this.copySetReviewBusy.update((busy) => ({ ...busy, [copySet.id]: true }));
+    this.campaignCopyService
+      .reject(copySet.id)
+      .pipe(finalize(() => this.copySetReviewBusy.update((busy) => ({ ...busy, [copySet.id]: false }))))
+      .subscribe({
+        next: (updated) => this.replaceCopySet(copySet.robotRunId, updated),
+        error: () => this.copySetReviewErrors.update((errors) => ({ ...errors, [copySet.id]: 'Could not reject the coordinated copy.' })),
+      });
+  }
+
+  protected regenerateCopySet(run: RobotRunSummary): void {
+    this.copySetReviewErrors.update((errors) => ({ ...errors, [run.id]: null }));
+    this.copySetReviewBusy.update((busy) => ({ ...busy, [run.id]: true }));
+    this.campaignCopyService
+      .regenerate(run.id)
+      .pipe(finalize(() => this.copySetReviewBusy.update((busy) => ({ ...busy, [run.id]: false }))))
+      .subscribe({
+        next: () => this.loadCopySetsForRun(run.id),
+        error: () => this.copySetReviewErrors.update((errors) => ({ ...errors, [run.id]: 'Could not regenerate the coordinated copy.' })),
+      });
+  }
+
+  private replaceCopySet(runId: string, updated: CampaignCopySetSummary): void {
+    this.campaignCopySetsByRun.update((byRun) => ({
+      ...byRun,
+      [runId]: (byRun[runId] ?? []).map((copySet) => (copySet.id === updated.id ? updated : copySet)),
+    }));
+  }
+
   // ---- Phase 14A: controlled experiments ----
 
   /** Item 55: a Robot may reference a DRAFT/ACTIVE/PAUSED Experiment (flexible setup order) but never a terminal one. */
@@ -457,6 +578,7 @@ export class Robots implements OnInit, OnDestroy {
         outputSpacingMinutes: this.createOutputSpacingMinutes(),
         campaignPlanningPolicy: this.createHighlightStrategy() === 'TOP_DIVERSE_HIGHLIGHTS'
           ? this.createCampaignPlanningPolicy() : 'NO_CAMPAIGN_PLAN',
+        copyCoordinationPolicy: this.copyCoordinationEligible() ? this.createCopyCoordinationPolicy() : 'INDEPENDENT_COPY',
       })
       .pipe(finalize(() => this.createBusy.set(false)))
       .subscribe({
@@ -484,6 +606,9 @@ export class Robots implements OnInit, OnDestroy {
       for (const run of this.runsForRobot(robot)) {
         if (run.campaignPlanId && !this.campaignPlansByRun()[run.id]) {
           this.loadCampaignPlansForRun(run.id);
+        }
+        if (run.campaignCopySetId && !this.campaignCopySetsByRun()[run.id]) {
+          this.loadCopySetsForRun(run.id);
         }
       }
     }

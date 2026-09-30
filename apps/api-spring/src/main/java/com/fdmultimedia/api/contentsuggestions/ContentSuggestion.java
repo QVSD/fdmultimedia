@@ -116,6 +116,23 @@ public class ContentSuggestion {
     @Column(name = "campaign_avoid_repetition_guidance")
     private String campaignAvoidRepetitionGuidance;
 
+    /**
+     * Phase 17F provenance: set only when this suggestion was materialized
+     * from an applied {@code CampaignCopyItem} (promptVersion ==
+     * {@code SOCIAL_COPY_V4_COORDINATED}) — never merely because a copy set
+     * existed for the run. Plain UUIDs, no relationship, so this package
+     * never depends on {@code com.fdmultimedia.api.campaigns} (mirrors the
+     * campaign_plan_* fields above).
+     */
+    @Column(name = "campaign_copy_set_id")
+    private UUID campaignCopySetId;
+
+    @Column(name = "campaign_copy_set_revision")
+    private Integer campaignCopySetRevision;
+
+    @Column(name = "campaign_copy_item_id")
+    private UUID campaignCopyItemId;
+
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "generation_job_id", nullable = false)
     private Job generationJob;
@@ -362,6 +379,21 @@ public class ContentSuggestion {
             UUID robotRunId, UUID robotRunOutputId, AppUser createdByUser, Instant now,
             UUID experimentId, UUID experimentAssignmentId, UUID experimentVariantId,
             UUID campaignPlanId, Integer campaignPlanRevision, UUID campaignPlanItemId) {
+        return forRobot(workspace, contentDraft, generationJob, provider, model, promptVersion, language, tone,
+                promptText, inputFingerprint, transcriptUsed, transcriptId, personaSnapshot, robotRunId,
+                robotRunOutputId, createdByUser, now, experimentId, experimentAssignmentId, experimentVariantId,
+                campaignPlanId, campaignPlanRevision, campaignPlanItemId, null, null, null);
+    }
+
+    /** Phase 17F: campaignCopySetId/Revision/ItemId are null unless this suggestion was materialized from an applied CampaignCopyItem. */
+    public static ContentSuggestion forRobot(
+            Workspace workspace, ContentDraft contentDraft, Job generationJob, String provider, String model,
+            String promptVersion, SuggestionLanguage language, SuggestionTone tone, String promptText,
+            String inputFingerprint, boolean transcriptUsed, UUID transcriptId, PersonaSnapshot personaSnapshot,
+            UUID robotRunId, UUID robotRunOutputId, AppUser createdByUser, Instant now,
+            UUID experimentId, UUID experimentAssignmentId, UUID experimentVariantId,
+            UUID campaignPlanId, Integer campaignPlanRevision, UUID campaignPlanItemId,
+            UUID campaignCopySetId, Integer campaignCopySetRevision, UUID campaignCopyItemId) {
         ContentSuggestion suggestion = new ContentSuggestion(
                 workspace, contentDraft, generationJob, provider, model, promptVersion, language, tone, promptText,
                 inputFingerprint, transcriptUsed, transcriptId, personaSnapshot, createdByUser, now);
@@ -374,6 +406,9 @@ public class ContentSuggestion {
         suggestion.campaignPlanId = campaignPlanId;
         suggestion.campaignPlanRevision = campaignPlanRevision;
         suggestion.campaignPlanItemId = campaignPlanItemId;
+        suggestion.campaignCopySetId = campaignCopySetId;
+        suggestion.campaignCopySetRevision = campaignCopySetRevision;
+        suggestion.campaignCopyItemId = campaignCopyItemId;
         return suggestion;
     }
 
@@ -483,6 +518,9 @@ public class ContentSuggestion {
     public UUID getCampaignPlanId() { return campaignPlanId; }
     public Integer getCampaignPlanRevision() { return campaignPlanRevision; }
     public UUID getCampaignPlanItemId() { return campaignPlanItemId; }
+    public UUID getCampaignCopySetId() { return campaignCopySetId; }
+    public Integer getCampaignCopySetRevision() { return campaignCopySetRevision; }
+    public UUID getCampaignCopyItemId() { return campaignCopyItemId; }
 
     /** Reconstructed from this suggestion's own stored columns only — never re-reads the live CampaignContentPlanItem. Null when no campaign guidance was used. */
     public CampaignGuidance getCampaignGuidance() {

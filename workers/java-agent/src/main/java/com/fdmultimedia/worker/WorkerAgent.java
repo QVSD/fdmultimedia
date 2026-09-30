@@ -58,6 +58,17 @@ public final class WorkerAgent {
                     config.contentAiEndpoint(), config.contentAiModel(), config.contentAiTimeout()));
         }
         GenerateCampaignPlanExecutor generateCampaignPlanExecutor = new GenerateCampaignPlanExecutor(campaignPlanProviders);
+        // Phase 17F: unlike campaign planning, coordinated copy has no separate
+        // backend-only deterministic policy (item's dual-provider design mirrors
+        // GENERATE_SOCIAL_COPY instead) — DETERMINISTIC_TEST is always on so
+        // automated tests and E2E acceptance never depend on Ollama (item 20).
+        Map<String, CoordinatedCopyProvider> coordinatedCopyProviders = new LinkedHashMap<>();
+        coordinatedCopyProviders.put("DETERMINISTIC_TEST", new DeterministicCoordinatedCopyProvider());
+        if (ollamaContentProvider != null) {
+            coordinatedCopyProviders.put("OLLAMA", new OllamaCoordinatedCopyProvider(
+                    config.contentAiEndpoint(), config.contentAiModel(), config.contentAiTimeout()));
+        }
+        GenerateCoordinatedSocialCopyExecutor generateCoordinatedSocialCopyExecutor = new GenerateCoordinatedSocialCopyExecutor(coordinatedCopyProviders);
         boolean ffprobeAvailable = FfprobeSupport.isAvailable(config.ffprobePath());
         if (ffprobeAvailable) {
             System.err.println("FFprobe available at " + config.ffprobePath());
@@ -123,7 +134,7 @@ public final class WorkerAgent {
                 activeJobs,
                 supportedJobTypes,
                 supportedHighlightAnalyzers));
-        executor.submit(() -> jobLoop(client, machineIdentifier, config, systemTestExecutor, importMediaExecutor, inspectMediaExecutor, clipExecutor, analyzeHighlightsExecutor, transcribeMediaExecutor, publishMediaExecutor, generateSocialCopyExecutor, generateCampaignPlanExecutor, supportedJobTypes, supportedHighlightAnalyzers, supportedPublishingProviders, activeJobs));
+        executor.submit(() -> jobLoop(client, machineIdentifier, config, systemTestExecutor, importMediaExecutor, inspectMediaExecutor, clipExecutor, analyzeHighlightsExecutor, transcribeMediaExecutor, publishMediaExecutor, generateSocialCopyExecutor, generateCampaignPlanExecutor, generateCoordinatedSocialCopyExecutor, supportedJobTypes, supportedHighlightAnalyzers, supportedPublishingProviders, activeJobs));
         shutdown.await();
     }
 
@@ -165,6 +176,7 @@ public final class WorkerAgent {
             PublishMediaExecutor publishMediaExecutor,
             GenerateSocialCopyExecutor generateSocialCopyExecutor,
             GenerateCampaignPlanExecutor generateCampaignPlanExecutor,
+            GenerateCoordinatedSocialCopyExecutor generateCoordinatedSocialCopyExecutor,
             List<String> supportedJobTypes,
             List<String> supportedHighlightAnalyzers,
             List<String> supportedPublishingProviders,
@@ -182,7 +194,7 @@ public final class WorkerAgent {
                 }
                 activeJobs.incrementAndGet();
                 try {
-                    executeClaimedJob(client, machineIdentifier, config.workerName(), systemTestExecutor, importMediaExecutor, inspectMediaExecutor, clipExecutor, analyzeHighlightsExecutor, transcribeMediaExecutor, publishMediaExecutor, generateSocialCopyExecutor, generateCampaignPlanExecutor, job);
+                    executeClaimedJob(client, machineIdentifier, config.workerName(), systemTestExecutor, importMediaExecutor, inspectMediaExecutor, clipExecutor, analyzeHighlightsExecutor, transcribeMediaExecutor, publishMediaExecutor, generateSocialCopyExecutor, generateCampaignPlanExecutor, generateCoordinatedSocialCopyExecutor, job);
                 } finally {
                     activeJobs.decrementAndGet();
                 }
@@ -206,6 +218,7 @@ public final class WorkerAgent {
             PublishMediaExecutor publishMediaExecutor,
             GenerateSocialCopyExecutor generateSocialCopyExecutor,
             GenerateCampaignPlanExecutor generateCampaignPlanExecutor,
+            GenerateCoordinatedSocialCopyExecutor generateCoordinatedSocialCopyExecutor,
             ClaimedJob job) throws InterruptedException {
         try {
             client.started(job.jobId(), machineIdentifier);
@@ -227,6 +240,8 @@ public final class WorkerAgent {
                 executeGenerateSocialCopyJob(client, machineIdentifier, generateSocialCopyExecutor, job);
             } else if ("GENERATE_CAMPAIGN_PLAN".equals(job.type())) {
                 executeGenerateCampaignPlanJob(client, machineIdentifier, generateCampaignPlanExecutor, job);
+            } else if ("GENERATE_COORDINATED_SOCIAL_COPY".equals(job.type())) {
+                executeGenerateCoordinatedSocialCopyJob(client, machineIdentifier, generateCoordinatedSocialCopyExecutor, job);
             } else if ("SYSTEM_TEST".equals(job.type())) {
                 Map<String, Object> result = systemTestExecutor.execute(job, workerName);
                 client.complete(job.jobId(), machineIdentifier, result);
@@ -602,6 +617,42 @@ public final class WorkerAgent {
         }
     }
 
+    private static void executeGenerateCoordinatedSocialCopyJob(
+            WorkerAgentClient client,
+            String machineIdentifier,
+            GenerateCoordinatedSocialCopyExecutor generateCoordinatedSocialCopyExecutor,
+            ClaimedJob job) throws InterruptedException {
+        AtomicBoolean running = new AtomicBoolean(true);
+        Thread renewer = new Thread(() -> leaseRenewLoop(client, machineIdentifier, job, running), "fdm-job-lease-renewer");
+        renewer.setDaemon(true);
+        renewer.start();
+        try {
+            generateCoordinatedSocialCopyExecutor.execute(client, job, machineIdentifier);
+        } catch (ImportFailureException ex) {
+            reportCoordinatedCopyFailure(client, machineIdentifier, job, ex.code(), ex.getMessage(), ex.terminal());
+        } catch (Exception ex) {
+            reportCoordinatedCopyFailure(client, machineIdentifier, job, "GENERATE_COORDINATED_SOCIAL_COPY_FAILED", ex.getMessage(), false);
+        } finally {
+            running.set(false);
+            renewer.interrupt();
+        }
+    }
+
+    private static void reportCoordinatedCopyFailure(
+            WorkerAgentClient client,
+            String machineIdentifier,
+            ClaimedJob job,
+            String code,
+            String message,
+            boolean terminal) {
+        try {
+            CoordinatedCopyAuthorization authorization = client.authorizeCoordinatedCopyGeneration(job.jobId(), machineIdentifier);
+            client.failCoordinatedCopyGeneration(job.jobId(), machineIdentifier, authorization.copySetId(), code, message, terminal);
+        } catch (Exception reportFailure) {
+            System.err.println("Worker failed to report coordinated copy failure: " + reportFailure.getMessage());
+        }
+    }
+
     private static void reportPublishingFailure(
             WorkerAgentClient client,
             String machineIdentifier,
@@ -666,6 +717,10 @@ public final class WorkerAgent {
         // an AI_PLAN_* request that lacks a reachable provider fails cleanly
         // via AI_PROVIDER_UNAVAILABLE, so this is always advertised too.
         types.add("GENERATE_CAMPAIGN_PLAN");
+        // Phase 17F: DETERMINISTIC_TEST coordinated-copy provider is always
+        // available (mirrors GENERATE_SOCIAL_COPY's dual-provider design), so
+        // this is always advertised too.
+        types.add("GENERATE_COORDINATED_SOCIAL_COPY");
         if (ffprobeAvailable) {
             types.add("INSPECT_MEDIA");
         }

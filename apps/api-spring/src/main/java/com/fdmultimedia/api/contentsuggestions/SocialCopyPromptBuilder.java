@@ -31,6 +31,16 @@ public class SocialCopyPromptBuilder {
     public static final String VERSION_V2 = "SOCIAL_COPY_V2";
     /** Phase 17E: identical to V2 plus one delimited campaign-guidance section (item 30) — never emitted unless an applied CampaignContentPlanItem exists for this generation. */
     public static final String VERSION_V3_CAMPAIGN = "SOCIAL_COPY_V3_CAMPAIGN";
+    /**
+     * Phase 17F: never built by this class's own {@code build}/{@code
+     * buildInternal} — {@code CoordinatedCopyPromptBuilder} assembles the
+     * actual coordinated prompt. This constant exists purely as the stable,
+     * explicit {@code promptVersion} label a materialized {@code
+     * ContentSuggestion} is stamped with, exactly like the other version
+     * constants above, so historical rows stay traceable to which pipeline
+     * produced them.
+     */
+    public static final String VERSION_V4_COORDINATED = "SOCIAL_COPY_V4_COORDINATED";
 
     private static final String SOURCE_START = "<<<SOURCE_CONTEXT_START>>>";
     private static final String SOURCE_END = "<<<SOURCE_CONTEXT_END>>>";

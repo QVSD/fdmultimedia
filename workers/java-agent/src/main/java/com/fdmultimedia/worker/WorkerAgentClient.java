@@ -434,6 +434,35 @@ final class WorkerAgentClient {
         send("/worker-agent/campaign-plans/" + jobId + "/fail", body, new TypeReference<Map<String, Object>>() {});
     }
 
+    CoordinatedCopyAuthorization authorizeCoordinatedCopyGeneration(UUID jobId, String machineIdentifier)
+            throws IOException, InterruptedException {
+        return send(
+                "/worker-agent/campaign-copy-sets/" + jobId + "/authorization",
+                Map.of("machineIdentifier", machineIdentifier),
+                new TypeReference<CoordinatedCopyAuthorization>() {});
+    }
+
+    void completeCoordinatedCopyGeneration(UUID jobId, String machineIdentifier, CoordinatedCopyAuthorization authorization, CoordinatedCopyResult result)
+            throws IOException, InterruptedException {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("machineIdentifier", machineIdentifier);
+        body.put("copySetId", authorization.copySetId());
+        body.put("seriesTitle", result.seriesTitle());
+        body.put("items", result.items());
+        send("/worker-agent/campaign-copy-sets/" + jobId + "/complete", body, new TypeReference<Map<String, Object>>() {});
+    }
+
+    void failCoordinatedCopyGeneration(UUID jobId, String machineIdentifier, UUID copySetId, String errorCode, String errorMessage, boolean terminal)
+            throws IOException, InterruptedException {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("machineIdentifier", machineIdentifier);
+        body.put("copySetId", copySetId);
+        body.put("errorCode", errorCode);
+        body.put("errorMessage", errorMessage);
+        body.put("terminal", terminal);
+        send("/worker-agent/campaign-copy-sets/" + jobId + "/fail", body, new TypeReference<Map<String, Object>>() {});
+    }
+
     void upload(URI uploadUrl, Path path, String contentType) throws IOException, InterruptedException {
         HttpRequest request = HttpRequest.newBuilder(uploadUrl)
                 .timeout(Duration.ofMinutes(30))

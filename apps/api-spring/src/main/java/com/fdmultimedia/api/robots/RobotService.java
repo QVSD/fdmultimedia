@@ -102,7 +102,10 @@ public class RobotService {
                 request.experimentId(), membership.getUser(), now);
         HighlightConfig highlight = validateHighlightConfig(request.highlightStrategy(), request.highlightCount(), request.outputSpacingMinutes());
         robot.configureHighlightStrategy(highlight.strategy(), highlight.count(), highlight.spacingMinutes(), now);
-        robot.configureCampaignPlanning(validateCampaignPlanningPolicy(request.campaignPlanningPolicy()), now);
+        CampaignPlanningPolicy campaignPlanningPolicy = validateCampaignPlanningPolicy(request.campaignPlanningPolicy());
+        robot.configureCampaignPlanning(campaignPlanningPolicy, now);
+        robot.configureCopyCoordination(
+                validateCopyCoordinationPolicy(request.copyCoordinationPolicy(), aiConfig.policy(), campaignPlanningPolicy), now);
         return toSummary(robots.save(robot));
     }
 
@@ -209,7 +212,10 @@ public class RobotService {
                 aiConfig.policy(), aiConfig.persona(), aiConfig.languageOverride(), aiConfig.toneOverride(), request.experimentId(), now);
         HighlightConfig highlight = validateHighlightConfig(request.highlightStrategy(), request.highlightCount(), request.outputSpacingMinutes());
         robot.configureHighlightStrategy(highlight.strategy(), highlight.count(), highlight.spacingMinutes(), now);
-        robot.configureCampaignPlanning(validateCampaignPlanningPolicy(request.campaignPlanningPolicy()), now);
+        CampaignPlanningPolicy campaignPlanningPolicy = validateCampaignPlanningPolicy(request.campaignPlanningPolicy());
+        robot.configureCampaignPlanning(campaignPlanningPolicy, now);
+        robot.configureCopyCoordination(
+                validateCopyCoordinationPolicy(request.copyCoordinationPolicy(), aiConfig.policy(), campaignPlanningPolicy), now);
         return toSummary(robot);
     }
 
@@ -337,6 +343,31 @@ public class RobotService {
         return policy == null ? CampaignPlanningPolicy.NO_CAMPAIGN_PLAN : policy;
     }
 
+    /**
+     * Phase 17F item 38/39: a coordinated-copy policy is inherently an AI
+     * operation coordinated around an applied campaign plan — rejected at
+     * configuration time (never a silent runtime fallback) when either
+     * precondition can never be satisfied: {@code RobotAiPolicy.NO_AI} means
+     * this Robot never wants AI copy at all, and {@code
+     * CampaignPlanningPolicy.NO_CAMPAIGN_PLAN} means no plan will ever exist
+     * for coordinated generation to pin itself to.
+     */
+    private CopyCoordinationPolicy validateCopyCoordinationPolicy(
+            CopyCoordinationPolicy policy, RobotAiPolicy aiPolicy, CampaignPlanningPolicy campaignPlanningPolicy) {
+        CopyCoordinationPolicy resolved = policy == null ? CopyCoordinationPolicy.INDEPENDENT_COPY : policy;
+        if (resolved != CopyCoordinationPolicy.INDEPENDENT_COPY) {
+            if (aiPolicy == RobotAiPolicy.NO_AI) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "copyCoordinationPolicy requires an AI policy other than NO_AI");
+            }
+            if (campaignPlanningPolicy == CampaignPlanningPolicy.NO_CAMPAIGN_PLAN) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "copyCoordinationPolicy requires a campaignPlanningPolicy other than NO_CAMPAIGN_PLAN");
+            }
+        }
+        return resolved;
+    }
+
     private String validateName(String name) {
         if (name == null || name.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "name is required");
@@ -402,6 +433,7 @@ public class RobotService {
                 robot.getLastRunAt(),
                 robot.getCreatedAt(),
                 robot.getUpdatedAt(),
-                robot.getCampaignPlanningPolicy());
+                robot.getCampaignPlanningPolicy(),
+                robot.getCopyCoordinationPolicy());
     }
 }

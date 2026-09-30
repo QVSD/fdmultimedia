@@ -418,6 +418,9 @@ public class JobService {
         if (type == JobType.GENERATE_CAMPAIGN_PLAN) {
             return validateGenerateCampaignPlanPayload(payload);
         }
+        if (type == JobType.GENERATE_COORDINATED_SOCIAL_COPY) {
+            return validateGenerateCoordinatedSocialCopyPayload(payload);
+        }
         if (type != JobType.SYSTEM_TEST) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unsupported job type");
         }
@@ -545,6 +548,12 @@ public class JobService {
         String robotRunId = uuidString(payload.get("robotRunId"), "robotRunId");
         String planId = uuidString(payload.get("planId"), "planId");
         return Map.of("robotRunId", robotRunId, "planId", planId);
+    }
+
+    private Map<String, Object> validateGenerateCoordinatedSocialCopyPayload(Map<String, Object> payload) {
+        String robotRunId = uuidString(payload.get("robotRunId"), "robotRunId");
+        String copySetId = uuidString(payload.get("copySetId"), "copySetId");
+        return Map.of("robotRunId", robotRunId, "copySetId", copySetId);
     }
 
     private String uuidString(Object value, String field) {

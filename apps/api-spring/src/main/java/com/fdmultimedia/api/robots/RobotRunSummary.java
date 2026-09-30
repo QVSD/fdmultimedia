@@ -38,5 +38,7 @@ public record RobotRunSummary(
         UUID highlightSelectionId,
         List<RobotRunOutputSummary> outputs,
         CampaignPlanningPolicy campaignPlanningPolicySnapshot,
-        UUID campaignPlanId) {
+        UUID campaignPlanId,
+        CopyCoordinationPolicy copyCoordinationPolicySnapshot,
+        UUID campaignCopySetId) {
 }

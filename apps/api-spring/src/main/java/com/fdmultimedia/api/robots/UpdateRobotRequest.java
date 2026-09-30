@@ -22,7 +22,20 @@ public record UpdateRobotRequest(
         RobotHighlightStrategy highlightStrategy,
         Integer highlightCount,
         Integer outputSpacingMinutes,
-        CampaignPlanningPolicy campaignPlanningPolicy) {
+        CampaignPlanningPolicy campaignPlanningPolicy,
+        CopyCoordinationPolicy copyCoordinationPolicy) {
+
+    /** Backward-compatible overload (no copy coordination) — pre-17F call sites keep working unchanged. */
+    public UpdateRobotRequest(
+            String name, String description, RobotAutonomyMode autonomyMode, UUID targetSocialAccountId,
+            RobotCadenceType cadenceType, Integer cadenceIntervalHours, Integer scheduleDelayMinutes,
+            Integer maxRunsPerDay, RobotAiPolicy aiPolicy, UUID personaId, SuggestionLanguage aiLanguageOverride,
+            SuggestionTone aiToneOverride, UUID experimentId, RobotHighlightStrategy highlightStrategy,
+            Integer highlightCount, Integer outputSpacingMinutes, CampaignPlanningPolicy campaignPlanningPolicy) {
+        this(name, description, autonomyMode, targetSocialAccountId, cadenceType, cadenceIntervalHours,
+                scheduleDelayMinutes, maxRunsPerDay, aiPolicy, personaId, aiLanguageOverride, aiToneOverride,
+                experimentId, highlightStrategy, highlightCount, outputSpacingMinutes, campaignPlanningPolicy, null);
+    }
 
     /** Backward-compatible overload (no campaign planning) — pre-17E call sites keep working unchanged. */
     public UpdateRobotRequest(

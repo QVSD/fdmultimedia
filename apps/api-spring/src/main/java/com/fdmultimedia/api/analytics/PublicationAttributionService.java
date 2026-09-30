@@ -110,6 +110,13 @@ public class PublicationAttributionService {
         Integer campaignPlanRevision = suggestion == null ? null : suggestion.getCampaignPlanRevision();
         UUID campaignPlanItemId = suggestion == null ? null : suggestion.getCampaignPlanItemId();
 
+        // Phase 17F item 51/52: same "only when actually consumed" boundary as
+        // above — only non-null when the applied suggestion's own promptVersion
+        // is SOCIAL_COPY_V4_COORDINATED, never merely because a copy set existed.
+        UUID campaignCopySetId = suggestion == null ? null : suggestion.getCampaignCopySetId();
+        Integer campaignCopySetRevision = suggestion == null ? null : suggestion.getCampaignCopySetRevision();
+        UUID campaignCopyItemId = suggestion == null ? null : suggestion.getCampaignCopyItemId();
+
         jdbc.update("""
                 INSERT INTO publication_attributions (
                     publication_id, workspace_id, content_draft_id, publish_schedule_id,
@@ -125,8 +132,9 @@ public class PublicationAttributionService {
                     robot_run_output_id, highlight_selection_id, highlight_selection_item_id,
                     highlight_candidate_id, selection_order, source_rank,
                     campaign_plan_id, campaign_plan_revision, campaign_plan_item_id,
+                    campaign_copy_set_id, campaign_copy_set_revision, campaign_copy_item_id,
                     created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 publication.getId(), publication.getWorkspace().getId(), draft == null ? null : draft.getId(), scheduleId,
                 run == null ? null : run.getId(), run == null ? null : run.getRobot().getId(),
@@ -156,6 +164,7 @@ public class PublicationAttributionService {
                 output == null ? null : output.getSelectionOrder(),
                 output == null ? null : output.getSourceRank(),
                 campaignPlanId, campaignPlanRevision, campaignPlanItemId,
+                campaignCopySetId, campaignCopySetRevision, campaignCopyItemId,
                 java.sql.Timestamp.from(now));
     }
 
@@ -187,6 +196,8 @@ public class PublicationAttributionService {
                 (Integer) rs.getObject("selection_order"), (Integer) rs.getObject("source_rank"),
                 rs.getObject("campaign_plan_id", UUID.class), (Integer) rs.getObject("campaign_plan_revision"),
                 rs.getObject("campaign_plan_item_id", UUID.class),
+                rs.getObject("campaign_copy_set_id", UUID.class), (Integer) rs.getObject("campaign_copy_set_revision"),
+                rs.getObject("campaign_copy_item_id", UUID.class),
                 rs.getTimestamp("created_at").toInstant());
     }
 }

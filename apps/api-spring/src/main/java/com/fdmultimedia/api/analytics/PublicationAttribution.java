@@ -19,5 +19,6 @@ public record PublicationAttribution(
         UUID robotRunOutputId, UUID highlightSelectionId, UUID highlightSelectionItemId,
         UUID highlightCandidateId, Integer selectionOrder, Integer sourceRank,
         UUID campaignPlanId, Integer campaignPlanRevision, UUID campaignPlanItemId,
+        UUID campaignCopySetId, Integer campaignCopySetRevision, UUID campaignCopyItemId,
         Instant createdAt) {
 }

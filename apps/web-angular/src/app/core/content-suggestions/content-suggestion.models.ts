@@ -40,6 +40,10 @@ export interface ContentSuggestionSummary {
   campaignPlanId?: string | null;
   campaignPlanRevision?: number | null;
   campaignPlanItemId?: string | null;
+  /** Phase 17F: set only when this suggestion was materialized from an applied CampaignCopyItem. */
+  campaignCopySetId?: string | null;
+  campaignCopySetRevision?: number | null;
+  campaignCopyItemId?: string | null;
 }
 
 export interface CreateContentSuggestionRequest {

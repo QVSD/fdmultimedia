@@ -148,6 +148,10 @@ public class RobotRun {
     private CampaignPlanningPolicy campaignPlanningPolicySnapshot;
     @Column(name="campaign_plan_id") private UUID campaignPlanId;
 
+    @Enumerated(EnumType.STRING) @Column(name="copy_coordination_policy_snapshot",nullable=false)
+    private CopyCoordinationPolicy copyCoordinationPolicySnapshot;
+    @Column(name="campaign_copy_set_id") private UUID campaignCopySetId;
+
     @Column(name = "failure_code")
     private String failureCode;
 
@@ -194,6 +198,7 @@ public class RobotRun {
                 ? robot.getHighlightCount() : 1;
         this.outputSpacingMinutesSnapshot = robot.getOutputSpacingMinutes();
         this.campaignPlanningPolicySnapshot = robot.getCampaignPlanningPolicy();
+        this.copyCoordinationPolicySnapshot = robot.getCopyCoordinationPolicy();
     }
 
     @PrePersist
@@ -267,6 +272,11 @@ public class RobotRun {
         this.campaignPlanId = campaignPlanId;
     }
 
+    /** Always points at the current copy set revision for this run (see CampaignCopySetService.regenerate) — never a stale/superseded revision. */
+    public void bindCampaignCopySet(UUID campaignCopySetId) {
+        this.campaignCopySetId = campaignCopySetId;
+    }
+
     public Instant outputScheduleBase(Instant now, int delayMinutes) {
         if (outputScheduleBaseAt == null) {
             outputScheduleBaseAt = now.plus(delayMinutes, java.time.temporal.ChronoUnit.MINUTES);
@@ -329,6 +339,8 @@ public class RobotRun {
     public Instant getOutputScheduleBaseAt(){return outputScheduleBaseAt;}
     public CampaignPlanningPolicy getCampaignPlanningPolicySnapshot(){return campaignPlanningPolicySnapshot;}
     public UUID getCampaignPlanId(){return campaignPlanId;}
+    public CopyCoordinationPolicy getCopyCoordinationPolicySnapshot(){return copyCoordinationPolicySnapshot;}
+    public UUID getCampaignCopySetId(){return campaignCopySetId;}
     public String getFailureCode() { return failureCode; }
     public String getFailureMessage() { return failureMessage; }
     public Instant getCreatedAt() { return createdAt; }

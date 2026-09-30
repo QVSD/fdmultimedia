@@ -17,6 +17,8 @@ import { ExperimentsService } from '../../core/experiments/experiments.service';
 import { ExperimentSummary } from '../../core/experiments/experiment.models';
 import { CampaignPlansService } from '../../core/campaign-plans/campaign-plans.service';
 import { CampaignContentPlanSummary } from '../../core/campaign-plans/campaign-plan.models';
+import { CampaignCopyService } from '../../core/campaign-copy/campaign-copy.service';
+import { CampaignCopySetSummary } from '../../core/campaign-copy/campaign-copy.models';
 import { Robots } from './robots';
 
 describe('Robots', () => {
@@ -30,6 +32,7 @@ describe('Robots', () => {
   let personasService: Pick<PersonasService, 'list'>;
   let experimentsService: Pick<ExperimentsService, 'list'>;
   let campaignPlansService: Pick<CampaignPlansService, 'listForRun' | 'get' | 'apply' | 'reject' | 'regenerate'>;
+  let campaignCopyService: Pick<CampaignCopyService, 'listForRun' | 'get' | 'apply' | 'reject' | 'regenerate'>;
 
   beforeEach(async () => {
     robotsService = {
@@ -69,6 +72,13 @@ describe('Robots', () => {
       reject: vi.fn().mockReturnValue(of(campaignPlan('REJECTED'))),
       regenerate: vi.fn().mockReturnValue(of(campaignPlan('GENERATING', 2))),
     };
+    campaignCopyService = {
+      listForRun: vi.fn().mockReturnValue(of([])),
+      get: vi.fn().mockReturnValue(of(copySet('READY_FOR_REVIEW'))),
+      apply: vi.fn().mockReturnValue(of(copySet('APPLIED'))),
+      reject: vi.fn().mockReturnValue(of(copySet('REJECTED'))),
+      regenerate: vi.fn().mockReturnValue(of(copySet('GENERATING', 2))),
+    };
 
     await TestBed.configureTestingModule({
       imports: [Robots],
@@ -82,6 +92,7 @@ describe('Robots', () => {
         { provide: PersonasService, useValue: personasService },
         { provide: ExperimentsService, useValue: experimentsService },
         { provide: CampaignPlansService, useValue: campaignPlansService },
+        { provide: CampaignCopyService, useValue: campaignCopyService },
       ],
     }).compileComponents();
 
@@ -738,6 +749,52 @@ describe('Robots', () => {
     };
   }
 
+  function copySet(status: CampaignCopySetSummary['status'], revision = 1): CampaignCopySetSummary {
+    return {
+      id: 'copyset-1',
+      robotRunId: 'run-1',
+      campaignPlanId: 'plan-1',
+      campaignPlanRevision: 1,
+      revision,
+      current: true,
+      status,
+      generatorVersion: 'COORDINATED_COPY_V1',
+      provider: null,
+      model: null,
+      promptVersion: null,
+      seriesTitle: 'Two-part keynote series',
+      sharedFraming: null,
+      inputFingerprint: 'b'.repeat(64),
+      configSnapshot: null,
+      failureCode: null,
+      failureMessage: null,
+      stale: false,
+      createdAt: '2026-09-18T08:07:00Z',
+      updatedAt: '2026-09-18T08:07:00Z',
+      completedAt: '2026-09-18T08:07:00Z',
+      appliedAt: status === 'APPLIED' ? '2026-09-18T08:08:00Z' : null,
+      appliedByUserId: null,
+      rejectedAt: status === 'REJECTED' ? '2026-09-18T08:08:00Z' : null,
+      rejectedByUserId: null,
+      items: [
+        { id: 'copyitem-1', robotRunOutputId: 'output-1', campaignContentPlanItemId: 'item-1', sequence: 1,
+          hook: 'Part one starts here', caption: 'Kicking off the series with the setup.',
+          hashtags: ['shorts', 'partone'], shortTitle: 'Part 1', continuityNote: null, contentSuggestionId: null },
+        { id: 'copyitem-2', robotRunOutputId: 'output-2', campaignContentPlanItemId: 'item-2', sequence: 2,
+          hook: 'Part two closes it out', caption: 'Wrapping the series with the payoff.',
+          hashtags: ['shorts', 'parttwo'], shortTitle: 'Part 2', continuityNote: 'Follows part one', contentSuggestionId: null },
+      ],
+    };
+  }
+
+  function multiOutputRunWithCopySet(): RobotRunSummary {
+    return {
+      ...multiOutputRunWithCampaignPlan(),
+      copyCoordinationPolicySnapshot: 'COORDINATED_COPY_FOR_REVIEW',
+      campaignCopySetId: 'copyset-1',
+    };
+  }
+
   // ---- Phase 17E: campaign content planning ----
 
   it('uses the mandated explanation wording for each campaign planning policy', () => {
@@ -910,6 +967,189 @@ describe('Robots', () => {
     vi.mocked(robotsService.list).mockReturnValue(of([multiRobot]));
     vi.mocked(robotsService.allRuns).mockReturnValue(of([planRun]));
     vi.mocked(campaignPlansService.listForRun).mockReturnValue(of([stalePlan, previousPlan]));
+    fixture = TestBed.createComponent(Robots);
+    component = fixture.componentInstance;
+    await fixture.whenStable();
+    component['toggleExpanded'](multiRobot);
+    fixture.detectChanges();
+
+    const text = fixture.nativeElement.textContent as string;
+    expect(text).toContain('Stale');
+    expect(text).toContain('1 previous revision(s)');
+  });
+
+  // ---- Phase 17F: coordinated campaign copy ----
+
+  it('uses the mandated explanation wording for each copy coordination policy', () => {
+    fixture.detectChanges();
+
+    expect(component['copyCoordinationPolicyExplanation']('INDEPENDENT_COPY'))
+      .toContain('independently');
+    expect(component['copyCoordinationPolicyExplanation']('COORDINATED_COPY_FOR_REVIEW'))
+      .toContain('for your review');
+    expect(component['copyCoordinationPolicyExplanation']('COORDINATED_COPY_AND_APPLY'))
+      .toContain('applies it automatically');
+  });
+
+  it('only sends a non-default copy coordination policy when campaign plan and AI policy are both active', () => {
+    fixture.detectChanges();
+    component['toggleCreateForm']();
+    component['createName'].set('Single Highlight Robot');
+    component['createSourceAssetId'].set('asset-1');
+    component['createHighlightStrategy'].set('TOP_HIGHLIGHT');
+    component['createAiPolicy'].set('GENERATE_FOR_REVIEW');
+    component['createCampaignPlanningPolicy'].set('DETERMINISTIC_PLAN');
+    component['createCopyCoordinationPolicy'].set('COORDINATED_COPY_FOR_REVIEW');
+
+    component['createRobot']();
+
+    expect(robotsService.create).toHaveBeenCalledWith(expect.objectContaining({
+      copyCoordinationPolicy: 'INDEPENDENT_COPY',
+    }));
+  });
+
+  it('sends the selected copy coordination policy once campaign plan and AI policy are both active', () => {
+    fixture.detectChanges();
+    component['toggleCreateForm']();
+    component['createName'].set('Series Robot');
+    component['createSourceAssetId'].set('asset-1');
+    component['createHighlightStrategy'].set('TOP_DIVERSE_HIGHLIGHTS');
+    component['createAiPolicy'].set('GENERATE_FOR_REVIEW');
+    component['createCampaignPlanningPolicy'].set('AI_PLAN_FOR_REVIEW');
+    component['createCopyCoordinationPolicy'].set('COORDINATED_COPY_AND_APPLY');
+
+    component['createRobot']();
+
+    expect(robotsService.create).toHaveBeenCalledWith(expect.objectContaining({
+      copyCoordinationPolicy: 'COORDINATED_COPY_AND_APPLY',
+    }));
+  });
+
+  it('does not fetch or render coordinated copy for a historical INDEPENDENT_COPY run', async () => {
+    const multiRobot = { ...robot('ACTIVE', 'DRAFT_ONLY'), highlightStrategy: 'TOP_DIVERSE_HIGHLIGHTS' as const,
+      highlightCount: 2, outputSpacingMinutes: 60 };
+    const noCopySetRun: RobotRunSummary = { ...multiOutputRunWithCopySet(), copyCoordinationPolicySnapshot: undefined, campaignCopySetId: null };
+    vi.mocked(robotsService.list).mockReturnValue(of([multiRobot]));
+    vi.mocked(robotsService.allRuns).mockReturnValue(of([noCopySetRun]));
+    fixture = TestBed.createComponent(Robots);
+    component = fixture.componentInstance;
+    await fixture.whenStable();
+    component['toggleExpanded'](multiRobot);
+    fixture.detectChanges();
+
+    expect(campaignCopyService.listForRun).not.toHaveBeenCalled();
+    expect(fixture.nativeElement.textContent).not.toContain('Coordinated copy');
+  });
+
+  it('fetches and renders coordinated copy, its series title, and per-output hook/caption mapping when a run is expanded', async () => {
+    const multiRobot = { ...robot('ACTIVE', 'DRAFT_ONLY'), highlightStrategy: 'TOP_DIVERSE_HIGHLIGHTS' as const,
+      highlightCount: 2, outputSpacingMinutes: 60 };
+    const copySetRun = multiOutputRunWithCopySet();
+    vi.mocked(robotsService.list).mockReturnValue(of([multiRobot]));
+    vi.mocked(robotsService.allRuns).mockReturnValue(of([copySetRun]));
+    vi.mocked(campaignCopyService.listForRun).mockReturnValue(of([copySet('READY_FOR_REVIEW')]));
+    fixture = TestBed.createComponent(Robots);
+    component = fixture.componentInstance;
+    await fixture.whenStable();
+    component['toggleExpanded'](multiRobot);
+    fixture.detectChanges();
+
+    expect(campaignCopyService.listForRun).toHaveBeenCalledWith('run-1');
+    const text = fixture.nativeElement.textContent as string;
+    expect(text).toContain('Two-part keynote series');
+    expect(text).toContain('Ready for review');
+    expect(text).toContain('Deterministic');
+    expect(text).toContain('Part one starts here');
+    expect(text).toContain('Part two closes it out');
+    expect(text).toContain('Follows part one');
+    expect(text).not.toContain('undefined');
+  });
+
+  it('shows an AI provider/model badge instead of Deterministic for AI-generated coordinated copy', async () => {
+    const multiRobot = { ...robot('ACTIVE', 'DRAFT_ONLY'), highlightStrategy: 'TOP_DIVERSE_HIGHLIGHTS' as const,
+      highlightCount: 2, outputSpacingMinutes: 60 };
+    const copySetRun = multiOutputRunWithCopySet();
+    const aiCopySet = { ...copySet('READY_FOR_REVIEW'), provider: 'OLLAMA', model: 'llama3' };
+    vi.mocked(robotsService.list).mockReturnValue(of([multiRobot]));
+    vi.mocked(robotsService.allRuns).mockReturnValue(of([copySetRun]));
+    vi.mocked(campaignCopyService.listForRun).mockReturnValue(of([aiCopySet]));
+    fixture = TestBed.createComponent(Robots);
+    component = fixture.componentInstance;
+    await fixture.whenStable();
+    component['toggleExpanded'](multiRobot);
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.textContent).toContain('AI (OLLAMA/llama3)');
+  });
+
+  it('applies a coordinated copy set ready for review', async () => {
+    const multiRobot = { ...robot('ACTIVE', 'DRAFT_ONLY'), highlightStrategy: 'TOP_DIVERSE_HIGHLIGHTS' as const,
+      highlightCount: 2, outputSpacingMinutes: 60 };
+    const copySetRun = multiOutputRunWithCopySet();
+    vi.mocked(robotsService.list).mockReturnValue(of([multiRobot]));
+    vi.mocked(robotsService.allRuns).mockReturnValue(of([copySetRun]));
+    vi.mocked(campaignCopyService.listForRun).mockReturnValue(of([copySet('READY_FOR_REVIEW')]));
+    fixture = TestBed.createComponent(Robots);
+    component = fixture.componentInstance;
+    await fixture.whenStable();
+    component['toggleExpanded'](multiRobot);
+    fixture.detectChanges();
+    const current = component['currentCopySet'](copySetRun)!;
+
+    component['applyCopySet'](current);
+
+    expect(campaignCopyService.apply).toHaveBeenCalledWith('copyset-1');
+    expect(component['currentCopySet'](copySetRun)!.status).toBe('APPLIED');
+  });
+
+  it('rejects a coordinated copy set ready for review', async () => {
+    const multiRobot = { ...robot('ACTIVE', 'DRAFT_ONLY'), highlightStrategy: 'TOP_DIVERSE_HIGHLIGHTS' as const,
+      highlightCount: 2, outputSpacingMinutes: 60 };
+    const copySetRun = multiOutputRunWithCopySet();
+    vi.mocked(robotsService.list).mockReturnValue(of([multiRobot]));
+    vi.mocked(robotsService.allRuns).mockReturnValue(of([copySetRun]));
+    vi.mocked(campaignCopyService.listForRun).mockReturnValue(of([copySet('READY_FOR_REVIEW')]));
+    fixture = TestBed.createComponent(Robots);
+    component = fixture.componentInstance;
+    await fixture.whenStable();
+    component['toggleExpanded'](multiRobot);
+    fixture.detectChanges();
+    const current = component['currentCopySet'](copySetRun)!;
+
+    component['rejectCopySet'](current);
+
+    expect(campaignCopyService.reject).toHaveBeenCalledWith('copyset-1');
+    expect(component['currentCopySet'](copySetRun)!.status).toBe('REJECTED');
+  });
+
+  it('regenerates a coordinated copy set and reloads its revisions', async () => {
+    const multiRobot = { ...robot('ACTIVE', 'DRAFT_ONLY'), highlightStrategy: 'TOP_DIVERSE_HIGHLIGHTS' as const,
+      highlightCount: 2, outputSpacingMinutes: 60 };
+    const copySetRun = multiOutputRunWithCopySet();
+    vi.mocked(robotsService.list).mockReturnValue(of([multiRobot]));
+    vi.mocked(robotsService.allRuns).mockReturnValue(of([copySetRun]));
+    vi.mocked(campaignCopyService.listForRun).mockReturnValue(of([copySet('REJECTED')]));
+    fixture = TestBed.createComponent(Robots);
+    component = fixture.componentInstance;
+    await fixture.whenStable();
+    component['toggleExpanded'](multiRobot);
+    fixture.detectChanges();
+
+    component['regenerateCopySet'](copySetRun);
+
+    expect(campaignCopyService.regenerate).toHaveBeenCalledWith('run-1');
+    expect(campaignCopyService.listForRun).toHaveBeenCalledTimes(2);
+  });
+
+  it('surfaces a stale coordinated copy set and previous revisions', async () => {
+    const multiRobot = { ...robot('ACTIVE', 'DRAFT_ONLY'), highlightStrategy: 'TOP_DIVERSE_HIGHLIGHTS' as const,
+      highlightCount: 2, outputSpacingMinutes: 60 };
+    const copySetRun = multiOutputRunWithCopySet();
+    const staleCopySet = { ...copySet('READY_FOR_REVIEW', 2), stale: true };
+    const previousCopySet = { ...copySet('REJECTED', 1), current: false, id: 'copyset-0' };
+    vi.mocked(robotsService.list).mockReturnValue(of([multiRobot]));
+    vi.mocked(robotsService.allRuns).mockReturnValue(of([copySetRun]));
+    vi.mocked(campaignCopyService.listForRun).mockReturnValue(of([staleCopySet, previousCopySet]));
     fixture = TestBed.createComponent(Robots);
     component = fixture.componentInstance;
     await fixture.whenStable();

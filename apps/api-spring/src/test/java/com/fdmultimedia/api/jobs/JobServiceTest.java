@@ -183,6 +183,27 @@ class JobServiceTest {
                 .isEqualTo(HttpStatus.BAD_REQUEST);
     }
 
+    /** Phase 17F item 90: a new JobType must be wired into validatePayload — this is exactly the class of bug that caused a real production infinite-reconciliation-loop in Phase 17E (missing GENERATE_CAMPAIGN_PLAN case). */
+    @Test
+    void createsGenerateCoordinatedSocialCopyJobOnlyWithRunAndCopySetReferences() {
+        when(jobs.save(any(Job.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        UUID runId = UUID.randomUUID();
+        UUID copySetId = UUID.randomUUID();
+
+        JobSummary summary = service.createForWorkspace(
+                workspace,
+                new JobCreateRequest(JobType.GENERATE_COORDINATED_SOCIAL_COPY, Map.of(
+                        "robotRunId", runId.toString(), "copySetId", copySetId.toString())));
+
+        assertThat(summary.type()).isEqualTo(JobType.GENERATE_COORDINATED_SOCIAL_COPY);
+        assertThat(summary.payload()).containsEntry("robotRunId", runId.toString());
+        assertThat(summary.payload()).containsEntry("copySetId", copySetId.toString());
+        assertThatThrownBy(() -> service.createForWorkspace(workspace, new JobCreateRequest(JobType.GENERATE_COORDINATED_SOCIAL_COPY, Map.of())))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting("statusCode")
+                .isEqualTo(HttpStatus.BAD_REQUEST);
+    }
+
     @Test
     void listsAndGetsJobsOnlyFromCurrentWorkspace() {
         Job job = job();

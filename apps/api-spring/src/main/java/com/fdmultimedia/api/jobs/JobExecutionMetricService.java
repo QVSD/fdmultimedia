@@ -71,6 +71,7 @@ public class JobExecutionMetricService {
             case GENERATE_SOCIAL_COPY -> new WorkloadHints(null, null, null, null, null, null, null);
             // Same reasoning: the payload only carries a RobotRun/plan reference, no media-asset shape.
             case GENERATE_CAMPAIGN_PLAN -> new WorkloadHints(null, null, null, null, null, null, null);
+            case GENERATE_COORDINATED_SOCIAL_COPY -> new WorkloadHints(null, null, null, null, null, null, null);
         };
     }
 

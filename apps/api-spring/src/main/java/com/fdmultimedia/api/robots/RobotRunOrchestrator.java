@@ -545,7 +545,9 @@ public class RobotRunOrchestrator {
                         .map(this::toOutputSummary)
                         .toList(),
                 run.getCampaignPlanningPolicySnapshot(),
-                run.getCampaignPlanId());
+                run.getCampaignPlanId(),
+                run.getCopyCoordinationPolicySnapshot(),
+                run.getCampaignCopySetId());
     }
 
     private RobotRunOutputSummary toOutputSummary(RobotRunOutput output) {

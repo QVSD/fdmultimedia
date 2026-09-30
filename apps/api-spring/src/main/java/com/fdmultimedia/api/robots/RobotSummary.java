@@ -36,5 +36,6 @@ public record RobotSummary(
         Instant lastRunAt,
         Instant createdAt,
         Instant updatedAt,
-        CampaignPlanningPolicy campaignPlanningPolicy) {
+        CampaignPlanningPolicy campaignPlanningPolicy,
+        CopyCoordinationPolicy copyCoordinationPolicy) {
 }

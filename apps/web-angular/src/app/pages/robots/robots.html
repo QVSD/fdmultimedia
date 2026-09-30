@@ -195,6 +195,17 @@
             }
           </label>
         }
+        @if (copyCoordinationEligible()) {
+          <label>
+            <span>Copy coordination</span>
+            <select [ngModel]="createCopyCoordinationPolicy()" (ngModelChange)="createCopyCoordinationPolicy.set($event)" name="copyCoordinationPolicy">
+              <option value="INDEPENDENT_COPY">Independent copy</option>
+              <option value="COORDINATED_COPY_FOR_REVIEW">Coordinated copy (review)</option>
+              <option value="COORDINATED_COPY_AND_APPLY">Coordinated copy (auto-apply)</option>
+            </select>
+            <p class="robots__muted">{{ copyCoordinationPolicyExplanation(createCopyCoordinationPolicy()) }}</p>
+          </label>
+        }
         <button type="submit" [disabled]="createBusy()">{{ createBusy() ? 'Creating...' : 'Create' }}</button>
         @if (createError()) {
           <p class="robots__error">{{ createError() }}</p>
@@ -230,6 +241,9 @@
                       <span>{{ robot.highlightCount || 3 }} diverse outputs</span>
                       @if (robot.campaignPlanningPolicy && robot.campaignPlanningPolicy !== 'NO_CAMPAIGN_PLAN') {
                         <span class="robots__badge">{{ campaignPlanningPolicyLabel(robot.campaignPlanningPolicy) }}</span>
+                      }
+                      @if (robot.copyCoordinationPolicy && robot.copyCoordinationPolicy !== 'INDEPENDENT_COPY') {
+                        <span class="robots__badge">{{ copyCoordinationPolicyLabel(robot.copyCoordinationPolicy) }}</span>
                       }
                     }
                     <span>{{ robotSourceLabel(robot) }}</span>
@@ -349,6 +363,51 @@
                             }
                           </div>
                         }
+                        @if (run.copyCoordinationPolicySnapshot && run.copyCoordinationPolicySnapshot !== 'INDEPENDENT_COPY') {
+                          <div class="campaign-plan" [attr.aria-label]="'Coordinated copy for run ' + run.id">
+                            @if (copySetBusy()[run.id]) {
+                              <p class="robots__muted">Loading coordinated copy...</p>
+                            } @else if (currentCopySet(run); as copySet) {
+                              <div class="campaign-plan__header">
+                                <strong>Coordinated copy</strong>
+                                <span class="robots__badge">{{ copySetStatusLabel(copySet.status) }}</span>
+                                <span class="robots__muted">Revision {{ copySet.revision }}</span>
+                                <span class="robots__badge">{{ copySet.provider ? 'AI (' + copySet.provider + '/' + copySet.model + ')' : 'Deterministic' }}</span>
+                                @if (copySet.stale) {
+                                  <span class="robots__error">Stale &mdash; regenerate before applying</span>
+                                }
+                              </div>
+                              @if (copySet.seriesTitle) { <p><strong>{{ copySet.seriesTitle }}</strong></p> }
+                              @if (copySet.sharedFraming) { <p class="robots__muted">{{ copySet.sharedFraming }}</p> }
+                              @if (copySet.failureMessage) { <p class="robots__error">{{ copySet.failureCode }}: {{ copySet.failureMessage }}</p> }
+                              @if (copySet.status === 'READY_FOR_REVIEW') {
+                                <div class="campaign-plan__actions">
+                                  <button type="button" [disabled]="copySetReviewBusy()[copySet.id]" (click)="applyCopySet(copySet)">Apply</button>
+                                  <button type="button" [disabled]="copySetReviewBusy()[copySet.id]" (click)="rejectCopySet(copySet)">Reject</button>
+                                </div>
+                                @if (copySetReviewErrors()[copySet.id]) {
+                                  <p class="robots__error">{{ copySetReviewErrors()[copySet.id] }}</p>
+                                }
+                              }
+                              @if (copySet.status === 'APPLIED' || copySet.status === 'REJECTED' || copySet.status === 'FAILED') {
+                                <button type="button" [disabled]="copySetReviewBusy()[run.id]" (click)="regenerateCopySet(run)">Regenerate</button>
+                                @if (copySetReviewErrors()[run.id]) {
+                                  <p class="robots__error">{{ copySetReviewErrors()[run.id] }}</p>
+                                }
+                              }
+                              @if (historicalCopySets(run).length) {
+                                <details class="campaign-plan__history">
+                                  <summary>{{ historicalCopySets(run).length }} previous revision(s)</summary>
+                                  @for (previous of historicalCopySets(run); track previous.id) {
+                                    <p class="robots__muted">Revision {{ previous.revision }}: {{ copySetStatusLabel(previous.status) }}</p>
+                                  }
+                                </details>
+                              }
+                            } @else {
+                              <p class="robots__muted">No coordinated copy yet.</p>
+                            }
+                          </div>
+                        }
                         @if (run.outputs?.length) {
                           <div class="run-outputs" [attr.aria-label]="'Outputs for run ' + run.id">
                             <p class="robots__muted">
@@ -374,6 +433,19 @@
                                     @if (item.captionGuidance) { <p class="robots__muted">Caption: {{ item.captionGuidance }}</p> }
                                     @if (item.ctaGuidance) { <p class="robots__muted">CTA: {{ item.ctaGuidance }}</p> }
                                     @if (item.avoidRepetitionGuidance) { <p class="robots__muted">Avoid: {{ item.avoidRepetitionGuidance }}</p> }
+                                  }
+                                }
+                                @if (currentCopySet(run); as copySet) {
+                                  @if (copyItemForOutput(copySet, output.id); as copyItem) {
+                                    <p><strong>{{ copyItem.hook }}</strong></p>
+                                    <p class="robots__muted">{{ copyItem.caption }}</p>
+                                    @if (copyItem.hashtags.length) {
+                                      <p class="robots__muted">{{ copyItem.hashtags.join(' ') }}</p>
+                                    }
+                                    @if (copyItem.continuityNote) { <p class="robots__muted">{{ copyItem.continuityNote }}</p> }
+                                    @if (copyItem.contentSuggestionId) {
+                                      <a class="robots__muted" routerLink="/content">Suggestion {{ copyItem.contentSuggestionId.slice(0, 8) }} &rarr;</a>
+                                    }
                                   }
                                 }
                               </article>
