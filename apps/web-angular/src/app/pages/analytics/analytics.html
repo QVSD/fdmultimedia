@@ -11,8 +11,10 @@
   <nav class="analytics__tabs" aria-label="Analytics views">
     <button type="button" [class.analytics__tab--active]="tab() === 'dashboard'" (click)="switchTab('dashboard')">Dashboard</button>
     <button type="button" [class.analytics__tab--active]="tab() === 'insights'" (click)="switchTab('insights')">Insights</button>
+    <button type="button" [class.analytics__tab--active]="tab() === 'campaigns'" (click)="switchTab('campaigns')">Campaign Performance</button>
   </nav>
 
+  @if (tab() !== 'campaigns') {
   <section class="analytics__band" aria-labelledby="filters-heading">
     <div class="analytics__section-heading"><h2 id="filters-heading">Filters</h2></div>
     <div class="analytics__filters">
@@ -59,6 +61,7 @@
       </label>
     </div>
   </section>
+  }
 
   @if (tab() === 'dashboard') {
   <section class="analytics__band" aria-labelledby="dashboard-heading">
@@ -242,6 +245,124 @@
       </article>
     } @else if (!compareLoading() && !compareError() && compareLeft() && compareRight() && compareLeft() === compareRight()) {
       <p role="alert">Choose two different segments to compare.</p>
+    }
+  </section>
+  }
+
+  @if (tab() === 'campaigns') {
+  <section class="analytics__band" aria-labelledby="campaign-performance-heading">
+    <div class="analytics__section-heading">
+      <div><h2 id="campaign-performance-heading">Campaign Performance</h2>
+        <p class="analytics__muted">Observed associations do not establish causation. Controlled experiments are required for stronger causal conclusions.</p>
+      </div>
+      <button type="button" (click)="createCampaignReview()" [disabled]="!campaignRunId() || campaignCreating()">
+        {{ campaignCreating() ? 'Creating review…' : 'Create evidence review' }}
+      </button>
+    </div>
+    <div class="analytics__filters">
+      <label>Published from <input type="date" [value]="filters().dateFrom || ''" (change)="filter('dateFrom', $any($event.target).value)"></label>
+      <label>Published to <input type="date" [value]="filters().dateTo || ''" (change)="filter('dateTo', $any($event.target).value)"></label>
+      <label>Campaign run
+        <select [value]="campaignRunId()" (change)="setCampaignField('campaignRunId', $any($event.target).value)">
+          <option value="">Choose a terminal campaign</option>
+          @for (campaign of campaignOptions(); track campaign.robotRunId) {
+            <option [value]="campaign.robotRunId">{{ campaign.robotName }} · {{ campaign.startedAt | date:'mediumDate' }} · {{ campaign.publishedOutputCount }} published</option>
+          }
+        </select>
+      </label>
+      <label>Observation window
+        <select [value]="campaignWindow()" (change)="setCampaignField('campaignWindow', $any($event.target).value)">
+          <option value="H24">24 hours</option><option value="H72">72 hours</option><option value="D7">7 days</option>
+        </select>
+      </label>
+      <label>Metric
+        <select [value]="campaignMetric()" (change)="setCampaignField('campaignMetric', $any($event.target).value)">
+          @for (item of trendMetrics; track item) { <option [value]="item">{{ item.replace('_', ' ') }}</option> }
+        </select>
+      </label>
+      <label>Historical comparison
+        <select [value]="campaignDimension()" (change)="setCampaignField('campaignDimension', $any($event.target).value)">
+          <option value="ROLE">Campaign role</option><option value="COORDINATION_POLICY">Copy coordination policy</option>
+        </select>
+      </label>
+    </div>
+    @if (campaignLoading()) { <p role="status">Loading campaign evidence…</p> }
+    @if (campaignError()) { <p role="alert">{{ campaignError() }}</p> }
+  </section>
+
+  @if (!campaignLoading() && campaignReview(); as review) {
+    <section class="analytics__band" aria-labelledby="campaign-review-heading">
+      <div class="analytics__section-heading"><h2 id="campaign-review-heading">Evidence review</h2>
+        <span class="analytics__badge">Revision {{ review.revision }} · {{ review.observationWindow }} · {{ review.evidenceStatus }}</span>
+      </div>
+      <p class="analytics__coverage" role="status">
+        {{ review.publishedOutputCount }} / {{ review.actualOutputCount }} outputs published ·
+        {{ review.analyticsPublicationCount }} have a matching analytics snapshot · metric coverage {{ campaignCoverage() }}.
+      </p>
+      <dl class="analytics__kpis">
+        <div><dt>Intended outputs</dt><dd>{{ review.intendedOutputCount }}</dd></div>
+        <div><dt>Actual outputs</dt><dd>{{ review.actualOutputCount }}</dd></div>
+        <div><dt>Eligible by age</dt><dd>{{ review.eligibleByAgeCount }}</dd></div>
+        <div><dt>{{ review.primaryMetric.replace('_', ' ') }} total</dt><dd>{{ metric(review.metrics[review.primaryMetric].total) }}</dd><small>n={{ review.metrics[review.primaryMetric].sampleCount }}</small></div>
+        <div><dt>Average</dt><dd>{{ decimal(review.metrics[review.primaryMetric].average) }}</dd></div>
+        <div><dt>Median</dt><dd>{{ decimal(review.metrics[review.primaryMetric].median) }}</dd></div>
+      </dl>
+      @if (review.limitations.includes('TEST publishing and analytics are deterministic synthetic data, not representative of real social-platform engagement.')) {
+        <p class="analytics__coverage" role="note">TEST publishing and analytics are synthetic and deterministic; they do not represent real social-platform engagement.</p>
+      }
+    </section>
+
+    <section class="analytics__band" aria-labelledby="campaign-outputs-heading">
+      <h2 id="campaign-outputs-heading">Output evidence</h2>
+      @if (review.outputs.length === 0) { <p>No output provenance is available for this historical run.</p> }
+      @else {
+        <div class="analytics__insight-grid">
+          @for (output of review.outputs; track output.id) {
+            <article class="analytics__insight-card analytics__output-card">
+              <header><strong>Output {{ output.selectionOrder ?? 'legacy' }}</strong><span class="analytics__badge">{{ output.evidenceStatus }}</span></header>
+              <dl>
+                <div><dt>Campaign role</dt><dd>{{ output.campaignRole || 'No campaign role' }}</dd></div>
+                <div><dt>V3 source rank</dt><dd>{{ output.sourceRank ?? '—' }}</dd></div>
+                <div><dt>Provider</dt><dd>{{ output.provider || '—' }}</dd></div>
+                <div><dt>Published</dt><dd>{{ output.publishedAt ? (output.publishedAt | date:'medium') : '—' }}</dd></div>
+                <div><dt>{{ review.primaryMetric.replace('_', ' ') }}</dt><dd>{{ metric(output.metrics[review.primaryMetric]) }}</dd></div>
+              </dl>
+              <details><summary>Provenance</summary>
+                <p>Plan {{ output.campaignPlanId || '—' }} rev {{ output.campaignPlanRevision ?? '—' }}</p>
+                <p>Copy set {{ output.campaignCopySetId || '—' }} rev {{ output.campaignCopySetRevision ?? '—' }}</p>
+                <p>Suggestion {{ output.contentSuggestionId || '—' }}</p><p>Publication {{ output.publicationId || '—' }}</p>
+              </details>
+            </article>
+          }
+        </div>
+      }
+    </section>
+
+    <section class="analytics__band" aria-labelledby="campaign-next-checks-heading">
+      <h2 id="campaign-next-checks-heading">Next checks</h2>
+      @if (review.recommendations.length === 0) { <p>No additional deterministic check was emitted for this evidence snapshot.</p> }
+      @else { <div class="analytics__insight-grid">@for (item of review.recommendations; track item.id) {
+        <article class="analytics__insight-card"><span class="analytics__badge">{{ item.type }}</span><p>{{ item.message }}</p>
+          <details><summary>Evidence and limitations</summary><pre>{{ item.evidence | json }}</pre><ul>@for (l of item.limitations; track l) { <li>{{ l }}</li> }</ul></details>
+        </article>
+      }</div> }
+    </section>
+  } @else if (!campaignLoading() && campaignRunId() && !campaignError()) {
+    <section class="analytics__band"><p>This campaign has no saved performance review yet.</p></section>
+  }
+
+  <section class="analytics__band" aria-labelledby="campaign-cohorts-heading">
+    <h2 id="campaign-cohorts-heading">Historical descriptive comparison</h2>
+    @if (campaignComparison(); as comparison) {
+      @if (comparison.rows.length === 0) { <p>No comparable published campaign outputs in the selected date range.</p> }
+      @else { <div class="analytics__table-wrap"><table>
+        <thead><tr><th scope="col">Segment</th><th scope="col">Publications</th><th scope="col">Coverage</th><th scope="col">Average</th><th scope="col">Median</th><th scope="col">Range</th></tr></thead>
+        <tbody>@for (row of comparison.rows; track row.key) { <tr><th scope="row">{{ row.label }}</th><td>{{ row.publicationCount }}</td>
+          <td>{{ row.sampleCount }} / {{ row.eligibleByAgeCount }}</td><td>{{ decimal(row.metric.average) }}</td><td>{{ decimal(row.metric.median) }}</td>
+          <td>{{ metric(row.metric.minimum) }}–{{ metric(row.metric.maximum) }}</td></tr> }</tbody>
+      </table></div> }
+      @if (comparison.recommendations.length > 0) { <div class="analytics__recommendations"><h3>Next checks</h3><ul>@for (rec of comparison.recommendations; track rec.id) { <li>{{ rec.message }}</li> }</ul></div> }
+      <details><summary>Limitations</summary><ul>@for (l of comparison.limitations; track l) { <li>{{ l }}</li> }</ul></details>
     }
   </section>
   }

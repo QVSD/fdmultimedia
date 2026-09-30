@@ -6,13 +6,15 @@ import { environment } from '../../../environments/environment';
 import { PublicationAnalyticsSnapshot, PublicationAnalyticsState, PublicationAttribution } from './publication-analytics.models';
 import { DashboardBreakdown, DashboardDimension, DashboardFilters, DashboardMetric, DashboardOptions, DashboardSummary, DashboardTrend } from './publication-dashboard.models';
 import { CompareRequest, ComparisonResult, InsightsResponse } from './publication-insights.models';
+import { CampaignCohortComparison, CampaignDimension, CampaignOption, CampaignReview, CampaignReviewListItem, CampaignWindow } from './campaign-performance.models';
 
 @Injectable({ providedIn: 'root' })
 export class PublicationAnalyticsService {
   constructor(private readonly http: HttpClient) {}
 
-  private dashboardParams(filters: DashboardFilters): Record<string, string> {
-    return Object.fromEntries(Object.entries(filters).filter(([, value]) => value != null && value !== '')) as Record<string, string>;
+  private dashboardParams(filters: object): Record<string, string> {
+    return Object.fromEntries(Object.entries(filters).filter(([, value]) => value != null && value !== '')
+      .map(([key, value]) => [key, String(value)])) as Record<string, string>;
   }
 
   dashboardSummary(filters: DashboardFilters): Observable<DashboardSummary> {
@@ -70,5 +72,31 @@ export class PublicationAnalyticsService {
     }
     return this.http.get<ComparisonResult>(`${environment.apiBaseUrl}/analytics/insights/compare`,
       { params, withCredentials: true });
+  }
+
+  campaignOptions(limit = 50): Observable<CampaignOption[]> {
+    return this.http.get<CampaignOption[]>(`${environment.apiBaseUrl}/analytics/campaign-performance/campaigns`,
+      { params: { limit }, withCredentials: true });
+  }
+
+  campaignReviews(runId: string): Observable<CampaignReviewListItem[]> {
+    return this.http.get<CampaignReviewListItem[]>(`${environment.apiBaseUrl}/robot-runs/${runId}/performance-reviews`,
+      { withCredentials: true });
+  }
+
+  campaignReview(id: string): Observable<CampaignReview> {
+    return this.http.get<CampaignReview>(`${environment.apiBaseUrl}/campaign-performance-reviews/${id}`,
+      { withCredentials: true });
+  }
+
+  createCampaignReview(runId: string, observationWindow: CampaignWindow, metric: DashboardMetric): Observable<CampaignReview> {
+    return this.http.post<CampaignReview>(`${environment.apiBaseUrl}/robot-runs/${runId}/performance-reviews`,
+      { observationWindow, metric }, { withCredentials: true });
+  }
+
+  campaignComparison(filters: { dateFrom: string; dateTo: string; observationWindow: CampaignWindow;
+    metric: DashboardMetric; dimension: CampaignDimension; provider?: string }): Observable<CampaignCohortComparison> {
+    return this.http.get<CampaignCohortComparison>(`${environment.apiBaseUrl}/analytics/campaign-performance/comparison`,
+      { params: this.dashboardParams(filters), withCredentials: true });
   }
 }

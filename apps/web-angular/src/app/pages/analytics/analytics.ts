@@ -1,4 +1,4 @@
-import { DatePipe } from '@angular/common';
+import { DatePipe, JsonPipe } from '@angular/common';
 import { HttpErrorResponse } from '@angular/common/http';
 import { Component, OnDestroy, OnInit, signal } from '@angular/core';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
@@ -17,12 +17,15 @@ import {
 import {
   ComparisonResult, InsightsResponse, InsightStatistic,
 } from '../../core/publishing/publication-insights.models';
+import {
+  CampaignCohortComparison, CampaignDimension, CampaignOption, CampaignReview, CampaignWindow,
+} from '../../core/publishing/campaign-performance.models';
 
-type AnalyticsTab = 'dashboard' | 'insights';
+type AnalyticsTab = 'dashboard' | 'insights' | 'campaigns';
 
 @Component({
   selector: 'app-analytics',
-  imports: [DatePipe, RouterLink],
+  imports: [DatePipe, JsonPipe, RouterLink],
   templateUrl: './analytics.html',
   styleUrl: './analytics.scss',
 })
@@ -60,6 +63,18 @@ export class Analytics implements OnInit, OnDestroy {
   protected readonly compareResult = signal<ComparisonResult | null>(null);
   protected readonly compareLoading = signal(false);
   protected readonly compareError = signal<string | null>(null);
+  protected readonly campaignOptions = signal<CampaignOption[]>([]);
+  protected readonly campaignRunId = signal<string>('');
+  protected readonly campaignWindow = signal<CampaignWindow>('H72');
+  protected readonly campaignMetric = signal<DashboardMetric>('TOTAL_INTERACTIONS');
+  protected readonly campaignDimension = signal<CampaignDimension>('ROLE');
+  protected readonly campaignReview = signal<CampaignReview | null>(null);
+  protected readonly campaignComparison = signal<CampaignCohortComparison | null>(null);
+  protected readonly campaignLoading = signal(false);
+  protected readonly campaignCreating = signal(false);
+  protected readonly campaignError = signal<string | null>(null);
+  protected readonly campaignWindows: CampaignWindow[] = ['H24', 'H72', 'D7'];
+  protected readonly campaignDimensions: CampaignDimension[] = ['ROLE', 'COORDINATION_POLICY'];
   private readonly subscriptions = new Subscription();
   private dashboardSubscription?: Subscription;
   private insightsSubscription?: Subscription;
@@ -114,7 +129,7 @@ export class Analytics implements OnInit, OnDestroy {
       this.loadDashboard(next, dimension, metric);
       this.loadInsights(next);
 
-      const tab = this.valid(['dashboard', 'insights'] as const, params.get('tab'), 'dashboard') ?? 'dashboard';
+      const tab = this.valid(['dashboard', 'insights', 'campaigns'] as const, params.get('tab'), 'dashboard') ?? 'dashboard';
       this.tab.set(tab);
       const compareDimension = this.valid(this.dimensions, params.get('compareDimension'), 'ORIGIN') ?? 'ORIGIN';
       const compareMetric = this.valid(this.trendMetrics, params.get('compareMetric'), 'VIEWS') ?? 'VIEWS';
@@ -131,6 +146,17 @@ export class Analytics implements OnInit, OnDestroy {
       } else {
         this.compareResult.set(null);
       }
+
+      const campaignRunId = this.safeId(params.get('campaignRunId')) ?? '';
+      const campaignWindow = this.valid(this.campaignWindows, params.get('campaignWindow'), 'H72') ?? 'H72';
+      const campaignMetric = this.valid(this.trendMetrics, params.get('campaignMetric'), 'TOTAL_INTERACTIONS') ?? 'TOTAL_INTERACTIONS';
+      const campaignDimension = this.valid(this.campaignDimensions, params.get('campaignDimension'), 'ROLE') ?? 'ROLE';
+      this.campaignRunId.set(campaignRunId);
+      this.campaignWindow.set(campaignWindow);
+      this.campaignMetric.set(campaignMetric);
+      this.campaignDimension.set(campaignDimension);
+      this.loadCampaigns(campaignRunId);
+      this.loadCampaignComparison(next, campaignWindow, campaignMetric, campaignDimension);
     }));
   }
 
@@ -158,6 +184,64 @@ export class Analytics implements OnInit, OnDestroy {
 
   protected switchTab(tab: AnalyticsTab): void {
     this.router.navigate(['/analytics'], { queryParams: { tab }, queryParamsHandling: 'merge' });
+  }
+
+  protected setCampaignField(name: 'campaignRunId' | 'campaignWindow' | 'campaignMetric' | 'campaignDimension', value: string): void {
+    this.router.navigate(['/analytics'], { queryParams: { [name]: value || null }, queryParamsHandling: 'merge' });
+  }
+
+  protected createCampaignReview(): void {
+    const runId = this.campaignRunId();
+    if (!runId || this.campaignCreating()) return;
+    this.campaignCreating.set(true);
+    this.campaignError.set(null);
+    this.subscriptions.add(this.analytics.createCampaignReview(runId, this.campaignWindow(), this.campaignMetric()).subscribe({
+      next: (review) => { this.campaignReview.set(review); this.campaignCreating.set(false); this.loadCampaigns(runId); },
+      error: (error: HttpErrorResponse) => {
+        this.campaignError.set(error.status === 409 ? 'This campaign is not ready for a performance review.' : 'Campaign review could not be created.');
+        this.campaignCreating.set(false);
+      },
+    }));
+  }
+
+  private loadCampaigns(runId: string): void {
+    this.campaignLoading.set(true);
+    this.subscriptions.add(this.analytics.campaignOptions().subscribe({
+      next: (options) => {
+        this.campaignOptions.set(options);
+        if (!runId) { this.campaignReview.set(null); this.campaignLoading.set(false); return; }
+        this.subscriptions.add(this.analytics.campaignReviews(runId).subscribe({
+          next: (rows) => {
+            const selected = rows.find((row) => row.observationWindow === this.campaignWindow() && row.primaryMetric === this.campaignMetric()) ?? null;
+            if (!selected) { this.campaignReview.set(null); this.campaignLoading.set(false); return; }
+            this.subscriptions.add(this.analytics.campaignReview(selected.id).subscribe({
+              next: (review) => { this.campaignReview.set(review); this.campaignLoading.set(false); },
+              error: () => { this.campaignError.set('Campaign review could not be loaded.'); this.campaignLoading.set(false); },
+            }));
+          },
+          error: () => { this.campaignError.set('Campaign review history could not be loaded.'); this.campaignLoading.set(false); },
+        }));
+      },
+      error: () => { this.campaignError.set('Campaigns could not be loaded.'); this.campaignLoading.set(false); },
+    }));
+  }
+
+  private loadCampaignComparison(filters: DashboardFilters, observationWindow: CampaignWindow,
+      metric: DashboardMetric, dimension: CampaignDimension): void {
+    if (!filters.dateFrom || !filters.dateTo) return;
+    this.subscriptions.add(this.analytics.campaignComparison({
+      dateFrom: filters.dateFrom, dateTo: filters.dateTo, observationWindow, metric, dimension, provider: filters.provider,
+    }).subscribe({
+      next: (comparison) => this.campaignComparison.set(comparison),
+      error: () => this.campaignComparison.set(null),
+    }));
+  }
+
+  protected campaignCoverage(): string {
+    const review = this.campaignReview();
+    if (!review) return '—';
+    const sample = review.metrics[review.primaryMetric]?.sampleCount ?? 0;
+    return `${sample} / ${review.eligibleByAgeCount}`;
   }
 
   protected setCompareField(name: 'compareDimension' | 'compareMetric' | 'compareStatistic' | 'compareLeft' | 'compareRight', value: string): void {

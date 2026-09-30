@@ -59,6 +59,8 @@
 .analytics__recommendations { border-top: 1px dashed #d6dce1; padding-top: 8px; }
 .analytics__recommendations h3 { margin: 0 0 4px; font-size: .82rem; color: #59636d; text-transform: uppercase; letter-spacing: .02em; }
 .analytics__insight-card details summary { cursor: pointer; color: #59636d; font-size: .82rem; }
+.analytics__output-card dl div { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.analytics__output-card details { overflow-wrap: anywhere; }
 
 @media (max-width: 600px) {
   .analytics { padding: 16px; }

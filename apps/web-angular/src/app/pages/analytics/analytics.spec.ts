@@ -78,7 +78,8 @@ const compareResult = {
 describe('Analytics', () => {
   let fixture: ComponentFixture<Analytics>;
   let analytics: Pick<PublicationAnalyticsService, 'history' | 'attribution' | 'state' | 'refresh' |
-    'dashboardSummary' | 'dashboardTrend' | 'dashboardBreakdown' | 'dashboardOptions' | 'insights' | 'compareSegments'>;
+    'dashboardSummary' | 'dashboardTrend' | 'dashboardBreakdown' | 'dashboardOptions' | 'insights' | 'compareSegments' |
+    'campaignOptions' | 'campaignReviews' | 'campaignReview' | 'createCampaignReview' | 'campaignComparison'>;
   let publications: Subject<PublicationSummary[]>;
 
   beforeEach(async () => {
@@ -97,6 +98,13 @@ describe('Analytics', () => {
       dashboardOptions: vi.fn().mockReturnValue(of({ providers: ['TEST'], robots: [], personas: [], contentSources: [], truncated: false })),
       insights: vi.fn().mockReturnValue(of(insightsResponse)),
       compareSegments: vi.fn().mockReturnValue(of(compareResult)),
+      campaignOptions: vi.fn().mockReturnValue(of([])),
+      campaignReviews: vi.fn().mockReturnValue(of([])),
+      campaignReview: vi.fn().mockReturnValue(of({})),
+      createCampaignReview: vi.fn().mockReturnValue(of({})),
+      campaignComparison: vi.fn().mockReturnValue(of({ dateFrom: '2026-08-22', dateTo: '2026-09-20',
+        observationWindow: 'H72', metric: 'TOTAL_INTERACTIONS', dimension: 'ROLE', rows: [], truncated: false,
+        recommendations: [], limitations: ['Observed associations do not establish causation.'] })),
     };
     await TestBed.configureTestingModule({
       imports: [Analytics],
@@ -117,6 +125,78 @@ describe('Analytics', () => {
   it('selects a deep-linked publication after async options arrive', () => {
     expect((fixture.nativeElement.querySelector('#publication-select') as HTMLSelectElement).value)
       .toBe(publication.id);
+  });
+
+  it('renders campaign performance with neutral coverage, null and TEST limitation semantics', () => {
+    const review = {
+      id: 'review-1', robotRunId: '11111111-1111-1111-1111-111111111111', revision: 1,
+      observationWindow: 'H72', primaryMetric: 'VIEWS', engineVersion: 'CAMPAIGN_PERFORMANCE_V1',
+      recommendationEngineVersion: 'CAMPAIGN_RECOMMENDATIONS_V1', evidenceStatus: 'INSUFFICIENT_SAMPLE',
+      robotRunStatus: 'SUCCEEDED', intendedOutputCount: 3, actualOutputCount: 3, publishedOutputCount: 3,
+      failedOutputCount: 0, eligibleByAgeCount: 3, analyticsPublicationCount: 2,
+      evidenceCutoffAt: '2026-09-20T12:00:00Z', createdAt: '2026-09-20T12:00:00Z',
+      metrics: { VIEWS: { total: 0, average: 0, median: 0, minimum: 0, maximum: 0, sampleCount: 1 } },
+      outputs: [{ id: 'evidence-1', robotRunOutputId: 'output-1', selectionOrder: 1, sourceRank: 1,
+        outputStatus: 'SUCCEEDED', campaignRole: 'INTRODUCTION', highlightCandidateId: 'candidate-1',
+        campaignPlanId: 'plan-1', campaignPlanRevision: 1, campaignPlanItemId: 'plan-item-1', campaignCopySetId: 'copy-1',
+        campaignCopySetRevision: 1, campaignCopyItemId: 'copy-item-1', contentSuggestionId: 'suggestion-1',
+        contentDraftId: 'draft-1', publishScheduleId: 'schedule-1', publicationId: 'publication-1', provider: 'TEST',
+        publishedAt: '2026-09-16T12:00:00Z', analyticsSnapshotId: 'snapshot-1', evidenceStatus: 'OBSERVED',
+        metrics: { VIEWS: 0 } }], comparisons: [],
+      recommendations: [{ id: 'rec-1', sequence: 1, type: 'COLLECT_MORE_DATA', metric: 'VIEWS',
+        comparedDimension: null, evidence: { sampleCount: 1 }, message: 'Collect more comparable observations.', limitations: [] }],
+      limitations: ['Observed associations do not establish causation.',
+        'TEST publishing and analytics are deterministic synthetic data, not representative of real social-platform engagement.'],
+    };
+    (fixture.componentInstance as any).tab.set('campaigns');
+    (fixture.componentInstance as any).campaignReview.set(review as any);
+    fixture.detectChanges();
+    const text = fixture.nativeElement.textContent as string;
+    expect(text).toContain('Campaign Performance');
+    expect(text).toContain('Output 1');
+    expect(text).toContain('INTRODUCTION');
+    expect(text).toContain('synthetic and deterministic');
+    expect(text).toContain('Observed associations do not establish causation');
+    expect(text.toLowerCase()).not.toContain('winner');
+    expect(text.toLowerCase()).not.toContain('best-performing');
+  });
+
+  it('creates a campaign performance review for the selected run/window/metric and reloads it', () => {
+    (fixture.componentInstance as any).tab.set('campaigns');
+    (fixture.componentInstance as any).campaignRunId.set('run-1');
+    (fixture.componentInstance as any).campaignWindow.set('H72');
+    (fixture.componentInstance as any).campaignMetric.set('VIEWS');
+    fixture.detectChanges();
+
+    (fixture.componentInstance as any).createCampaignReview();
+
+    expect(analytics.createCampaignReview).toHaveBeenCalledWith('run-1', 'H72', 'VIEWS');
+  });
+
+  it('renders the historical cohort comparison table with neutral segment labels, no leaderboard styling', () => {
+    (fixture.componentInstance as any).tab.set('campaigns');
+    (fixture.componentInstance as any).campaignComparison.set({
+      dateFrom: '2026-08-22', dateTo: '2026-09-20', observationWindow: 'H72', metric: 'VIEWS', dimension: 'ROLE',
+      rows: [
+        { key: 'INTRODUCTION', label: 'INTRODUCTION', publicationCount: 10, eligibleByAgeCount: 10, analyticsPublicationCount: 10,
+          sampleCount: 10, coverage: 1, metric: { total: 1000, average: 100, median: 95, minimum: 50, maximum: 150, sampleCount: 10 } },
+        { key: 'CONCLUSION', label: 'CONCLUSION', publicationCount: 10, eligibleByAgeCount: 10, analyticsPublicationCount: 10,
+          sampleCount: 10, coverage: 1, metric: { total: 800, average: 80, median: 78, minimum: 40, maximum: 120, sampleCount: 10 } },
+      ],
+      truncated: false,
+      recommendations: [{ id: 'rec-cohort', sequence: 1, type: 'CONSIDER_CONTROLLED_EXPERIMENT', metric: 'VIEWS',
+        comparedDimension: 'ROLE', evidence: {}, message: 'Consider a separately designed controlled experiment.', limitations: [] }],
+      limitations: ['Observed associations do not establish causation.'],
+    });
+    fixture.detectChanges();
+
+    const text = fixture.nativeElement.textContent as string;
+    expect(text).toContain('INTRODUCTION');
+    expect(text).toContain('CONCLUSION');
+    expect(text).toContain('Consider a separately designed controlled experiment');
+    expect(text.toLowerCase()).not.toContain('winner');
+    const rowLabels = Array.from(fixture.nativeElement.querySelectorAll('th[scope="row"]')).map((el: any) => el.textContent.trim());
+    expect(rowLabels).toEqual(['INTRODUCTION', 'CONCLUSION']);
   });
 
   it('renders observed zero separately from unavailable metrics, history and manual attribution', () => {

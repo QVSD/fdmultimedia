@@ -28,6 +28,10 @@ public interface RobotRunRepository extends JpaRepository<RobotRun, UUID> {
     @Query(value = "SELECT * FROM robot_runs WHERE id = :id FOR UPDATE SKIP LOCKED", nativeQuery = true)
     Optional<RobotRun> findByIdForUpdateSkipLocked(@Param("id") UUID id);
 
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @Query("select r from RobotRun r where r.id=:id")
+    Optional<RobotRun> findByIdForUpdate(@Param("id") UUID id);
+
     boolean existsByRobotAndStatusNotIn(Robot robot, List<RobotRunStatus> terminalStatuses);
 
     boolean existsByRobotAndSourceAssetAndStatus(Robot robot, MediaAsset sourceAsset, RobotRunStatus status);
