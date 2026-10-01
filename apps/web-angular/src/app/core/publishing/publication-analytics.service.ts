@@ -7,6 +7,7 @@ import { PublicationAnalyticsSnapshot, PublicationAnalyticsState, PublicationAtt
 import { DashboardBreakdown, DashboardDimension, DashboardFilters, DashboardMetric, DashboardOptions, DashboardSummary, DashboardTrend } from './publication-dashboard.models';
 import { CompareRequest, ComparisonResult, InsightsResponse } from './publication-insights.models';
 import { CampaignCohortComparison, CampaignDimension, CampaignOption, CampaignReview, CampaignReviewListItem, CampaignWindow } from './campaign-performance.models';
+import { OptimizationEligibility, OptimizationProposal } from './optimization-proposal.models';
 
 @Injectable({ providedIn: 'root' })
 export class PublicationAnalyticsService {
@@ -98,5 +99,32 @@ export class PublicationAnalyticsService {
     metric: DashboardMetric; dimension: CampaignDimension; provider?: string }): Observable<CampaignCohortComparison> {
     return this.http.get<CampaignCohortComparison>(`${environment.apiBaseUrl}/analytics/campaign-performance/comparison`,
       { params: this.dashboardParams(filters), withCredentials: true });
+  }
+
+  optimizationEligibility(reviewId: string): Observable<OptimizationEligibility> {
+    return this.http.get<OptimizationEligibility>(`${environment.apiBaseUrl}/optimization-proposals/eligibility/${reviewId}`,
+      { withCredentials: true });
+  }
+
+  optimizationProposals(limit = 50): Observable<OptimizationProposal[]> {
+    return this.http.get<OptimizationProposal[]>(`${environment.apiBaseUrl}/optimization-proposals`,
+      { params: { limit }, withCredentials: true });
+  }
+
+  createOptimizationProposal(sourceReviewId: string, candidatePersonaId: string): Observable<OptimizationProposal> {
+    return this.http.post<OptimizationProposal>(`${environment.apiBaseUrl}/optimization-proposals`,
+      { sourceReviewId, candidatePersonaId }, { withCredentials: true });
+  }
+
+  approveOptimizationProposal(id: string): Observable<OptimizationProposal> {
+    return this.http.post<OptimizationProposal>(`${environment.apiBaseUrl}/optimization-proposals/${id}/approve`, {}, { withCredentials: true });
+  }
+
+  rejectOptimizationProposal(id: string): Observable<OptimizationProposal> {
+    return this.http.post<OptimizationProposal>(`${environment.apiBaseUrl}/optimization-proposals/${id}/reject`, {}, { withCredentials: true });
+  }
+
+  materializeOptimizationProposal(id: string): Observable<OptimizationProposal> {
+    return this.http.post<OptimizationProposal>(`${environment.apiBaseUrl}/optimization-proposals/${id}/materialize-experiment`, {}, { withCredentials: true });
   }
 }

@@ -205,6 +205,12 @@ public class PublicationDashboardStore {
      */
     public static String snapshotLateralJoinSql(
             Window window, String publicationIdExpr, String matureBeforeExpr, String selectColumnsSql, String resultAlias) {
+        return snapshotLateralJoinSql(window, publicationIdExpr, matureBeforeExpr, selectColumnsSql, resultAlias, "");
+    }
+
+    public static String snapshotLateralJoinSql(
+            Window window, String publicationIdExpr, String matureBeforeExpr, String selectColumnsSql,
+            String resultAlias, String trustedAdditionalFilterSql) {
         String snapshotFilter = window == Window.LATEST ? "" :
                 " AND s.publication_age_seconds BETWEEN :minimumAge AND :maximumAge";
         String ordering = window == Window.LATEST ? "s.collected_at DESC, s.id DESC" :
@@ -212,6 +218,7 @@ public class PublicationDashboardStore {
         return "LEFT JOIN LATERAL (SELECT s.id, " + selectColumnsSql
                 + " FROM publication_analytics_snapshots s WHERE s.publication_id = " + publicationIdExpr
                 + " AND " + matureBeforeExpr + " <= :matureBefore" + snapshotFilter
+                + trustedAdditionalFilterSql
                 + " ORDER BY " + ordering + " LIMIT 1) " + resultAlias + " ON TRUE";
     }
 

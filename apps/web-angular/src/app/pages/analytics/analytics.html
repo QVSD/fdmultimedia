@@ -347,6 +347,35 @@
         </article>
       }</div> }
     </section>
+
+    <section class="analytics__band" aria-labelledby="optimization-heading">
+      <div class="analytics__section-heading">
+        <div><h2 id="optimization-heading">Optimization proposals</h2>
+          <p class="analytics__muted">A proposal defines one controlled PERSONA test. It does not change a Robot, Persona, schedule, or publication.</p>
+        </div>
+      </div>
+      @if (optimizationEligibility(); as eligibility) {
+        @if (eligibility.eligible) {
+          <div class="analytics__filters">
+            <label>Candidate Persona
+              <select [value]="optimizationCandidateId()" (change)="chooseOptimizationCandidate($any($event.target).value)">
+                <option value="">Choose an active Persona</option>
+                @for (persona of optimizationPersonas(); track persona.id) {
+                  @if (persona.id !== eligibility.baselinePersonaId) { <option [value]="persona.id">{{ persona.name }}</option> }
+                }
+              </select>
+            </label>
+            <button type="button" (click)="createOptimizationProposal()" [disabled]="!optimizationCandidateId() || optimizationBusy()">
+              Create controlled test proposal
+            </button>
+          </div>
+          <p class="analytics__muted">Baseline: {{ eligibility.baselinePersonaName }} · {{ eligibility.metric }} · {{ eligibility.observationWindow }} · minimum n={{ eligibility.minimumSample }} per Persona · {{ eligibility.minimumCoverage * 100 }}% coverage · {{ eligibility.materialDifferencePercent }}% material difference.</p>
+        } @else {
+          <p class="analytics__muted">This review is not eligible for a controlled test proposal: {{ eligibility.reasonCode }}.</p>
+        }
+      }
+      @if (optimizationMessage()) { <p role="status">{{ optimizationMessage() }}</p> }
+    </section>
   } @else if (!campaignLoading() && campaignRunId() && !campaignError()) {
     <section class="analytics__band"><p>This campaign has no saved performance review yet.</p></section>
   }
@@ -363,6 +392,45 @@
       </table></div> }
       @if (comparison.recommendations.length > 0) { <div class="analytics__recommendations"><h3>Next checks</h3><ul>@for (rec of comparison.recommendations; track rec.id) { <li>{{ rec.message }}</li> }</ul></div> }
       <details><summary>Limitations</summary><ul>@for (l of comparison.limitations; track l) { <li>{{ l }}</li> }</ul></details>
+    }
+  </section>
+
+  <section class="analytics__band" aria-labelledby="proposal-history-heading">
+    <h2 id="proposal-history-heading">Controlled test proposal history</h2>
+    @if (optimizationProposals().length === 0) { <p>No optimization proposals have been created.</p> }
+    @else {
+      <div class="analytics__insight-grid">
+        @for (proposal of optimizationProposals(); track proposal.id) {
+          <article class="analytics__insight-card">
+            <header><strong>PERSONA proposal · revision {{ proposal.revision }}</strong><span class="analytics__badge">{{ proposal.status }}</span></header>
+            <dl>
+              <div><dt>Baseline</dt><dd>{{ proposal.baselinePersonaName }}</dd></div>
+              <div><dt>Candidate</dt><dd>{{ proposal.candidatePersonaName }}</dd></div>
+              <div><dt>Evidence</dt><dd>{{ proposal.metric }} median at {{ proposal.observationWindow }}</dd></div>
+              <div><dt>Baseline observation</dt><dd>{{ decimal(proposal.baselineValue) }} · n={{ proposal.baselineSample }} · {{ proposalCoverage(proposal.baselineSample, proposal.baselineEligible) }}</dd></div>
+              <div><dt>Candidate observation</dt><dd>{{ decimal(proposal.candidateValue) }} · n={{ proposal.candidateSample }} · {{ proposalCoverage(proposal.candidateSample, proposal.candidateEligible) }}</dd></div>
+              <div><dt>Observed difference</dt><dd>{{ decimal(proposal.absoluteDifference) }} · {{ proposal.relativeDifferencePercent === null ? 'relative difference unavailable' : decimal(proposal.relativeDifferencePercent) + '%' }} · {{ proposal.direction }}</dd></div>
+            </dl>
+            <p>{{ proposal.rationale }}</p><p class="analytics__muted">{{ proposal.limitation }}</p>
+            @if (proposal.provider === 'TEST') { <p class="analytics__coverage" role="note">TEST evidence is synthetic and deterministic, not representative of real social engagement.</p> }
+            <div class="analytics__actions">
+              @if (proposal.status === 'READY_FOR_REVIEW') {
+                <button type="button" (click)="optimizationAction(proposal, 'approve')" [disabled]="optimizationBusy()">Approve for testing</button>
+                <button type="button" class="button-secondary" (click)="optimizationAction(proposal, 'reject')" [disabled]="optimizationBusy()">Reject</button>
+              }
+              @if (proposal.status === 'APPROVED') {
+                <button type="button" (click)="optimizationAction(proposal, 'materialize')" [disabled]="optimizationBusy()">Materialize draft experiment</button>
+              }
+              @if (proposal.materializedExperimentId) {
+                <a [routerLink]="['/experiments']" [queryParams]="{ experimentId: proposal.materializedExperimentId }">Open DRAFT Experiment</a>
+              }
+            </div>
+            @if (proposal.status === 'MATERIALIZED') {
+              <p class="analytics__muted">Experiment created as DRAFT. No Robot has been enrolled and the Experiment has not been activated.</p>
+            }
+          </article>
+        }
+      </div>
     }
   </section>
   }

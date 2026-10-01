@@ -59,6 +59,20 @@ public class ExperimentService {
 
     @Transactional
     public ExperimentSummary create(AuthenticatedUser principal, CreateExperimentRequest request) {
+        return createDraft(principal, request, null);
+    }
+
+    @Transactional
+    public ExperimentSummary createDraftFromOptimizationProposal(AuthenticatedUser principal,
+            CreateExperimentRequest request, UUID optimizationProposalId) {
+        if (optimizationProposalId == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "optimizationProposalId is required");
+        }
+        return createDraft(principal, request, optimizationProposalId);
+    }
+
+    private ExperimentSummary createDraft(AuthenticatedUser principal, CreateExperimentRequest request,
+            UUID optimizationProposalId) {
         WorkspaceMembership membership = authService.currentMembershipFor(principal);
         Workspace workspace = membership.getWorkspace();
         String name = validateName(request.name());
@@ -74,8 +88,9 @@ public class ExperimentService {
         requireDistinct(personaA, personaB);
 
         Instant now = Instant.now(clock);
-        Experiment experiment = experiments.save(
-                new Experiment(workspace, name, description, hypothesis, factor, window, metric, membership.getUser(), now));
+        Experiment experiment = new Experiment(workspace, name, description, hypothesis, factor, window, metric, membership.getUser(), now);
+        if (optimizationProposalId != null) experiment.bindOptimizationProposal(optimizationProposalId);
+        experiments.save(experiment);
         experiment.setDraftPracticalEffect(threshold, now);
         variants.save(new ExperimentVariant(experiment, ExperimentVariantKey.A,
                 variantLabel(request.variantALabel(), personaA), personaA.getId(), now));

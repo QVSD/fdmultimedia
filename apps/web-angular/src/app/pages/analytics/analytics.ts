@@ -3,6 +3,8 @@ import { HttpErrorResponse } from '@angular/common/http';
 import { Component, OnDestroy, OnInit, signal } from '@angular/core';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { Subscription, forkJoin } from 'rxjs';
+import { PersonasService } from '../../core/personas/personas.service';
+import { PersonaSummary } from '../../core/personas/persona.models';
 
 import { PublishingService } from '../../core/publishing/publishing.service';
 import { PublicationSummary } from '../../core/publishing/publishing.models';
@@ -20,6 +22,7 @@ import {
 import {
   CampaignCohortComparison, CampaignDimension, CampaignOption, CampaignReview, CampaignWindow,
 } from '../../core/publishing/campaign-performance.models';
+import { OptimizationEligibility, OptimizationProposal } from '../../core/publishing/optimization-proposal.models';
 
 type AnalyticsTab = 'dashboard' | 'insights' | 'campaigns';
 
@@ -75,6 +78,12 @@ export class Analytics implements OnInit, OnDestroy {
   protected readonly campaignError = signal<string | null>(null);
   protected readonly campaignWindows: CampaignWindow[] = ['H24', 'H72', 'D7'];
   protected readonly campaignDimensions: CampaignDimension[] = ['ROLE', 'COORDINATION_POLICY'];
+  protected readonly optimizationEligibility = signal<OptimizationEligibility | null>(null);
+  protected readonly optimizationProposals = signal<OptimizationProposal[]>([]);
+  protected readonly optimizationPersonas = signal<PersonaSummary[]>([]);
+  protected readonly optimizationCandidateId = signal('');
+  protected readonly optimizationBusy = signal(false);
+  protected readonly optimizationMessage = signal<string | null>(null);
   private readonly subscriptions = new Subscription();
   private dashboardSubscription?: Subscription;
   private insightsSubscription?: Subscription;
@@ -84,6 +93,7 @@ export class Analytics implements OnInit, OnDestroy {
     private readonly router: Router,
     private readonly publishing: PublishingService,
     private readonly analytics: PublicationAnalyticsService,
+    private readonly personasService: PersonasService,
   ) {}
 
   ngOnInit(): void {
@@ -91,6 +101,11 @@ export class Analytics implements OnInit, OnDestroy {
       next: (rows) => this.publications.set(rows.filter((row) => row.status === 'PUBLISHED').slice(0, 50)),
       error: () => this.error.set('Published items could not be loaded.'),
     }));
+    this.subscriptions.add(this.personasService.list().subscribe({
+      next: (rows) => this.optimizationPersonas.set(rows.filter((row) => row.status === 'ACTIVE')),
+      error: () => this.optimizationPersonas.set([]),
+    }));
+    this.loadOptimizationProposals();
     this.subscriptions.add(this.route.queryParamMap.subscribe((params) => {
       const id = params.get('publicationId');
       this.selectedId.set(id);
@@ -196,7 +211,7 @@ export class Analytics implements OnInit, OnDestroy {
     this.campaignCreating.set(true);
     this.campaignError.set(null);
     this.subscriptions.add(this.analytics.createCampaignReview(runId, this.campaignWindow(), this.campaignMetric()).subscribe({
-      next: (review) => { this.campaignReview.set(review); this.campaignCreating.set(false); this.loadCampaigns(runId); },
+      next: (review) => { this.campaignReview.set(review); this.loadOptimizationEligibility(review.id); this.campaignCreating.set(false); this.loadCampaigns(runId); },
       error: (error: HttpErrorResponse) => {
         this.campaignError.set(error.status === 409 ? 'This campaign is not ready for a performance review.' : 'Campaign review could not be created.');
         this.campaignCreating.set(false);
@@ -209,13 +224,13 @@ export class Analytics implements OnInit, OnDestroy {
     this.subscriptions.add(this.analytics.campaignOptions().subscribe({
       next: (options) => {
         this.campaignOptions.set(options);
-        if (!runId) { this.campaignReview.set(null); this.campaignLoading.set(false); return; }
+        if (!runId) { this.campaignReview.set(null); this.optimizationEligibility.set(null); this.campaignLoading.set(false); return; }
         this.subscriptions.add(this.analytics.campaignReviews(runId).subscribe({
           next: (rows) => {
             const selected = rows.find((row) => row.observationWindow === this.campaignWindow() && row.primaryMetric === this.campaignMetric()) ?? null;
-            if (!selected) { this.campaignReview.set(null); this.campaignLoading.set(false); return; }
+            if (!selected) { this.campaignReview.set(null); this.optimizationEligibility.set(null); this.campaignLoading.set(false); return; }
             this.subscriptions.add(this.analytics.campaignReview(selected.id).subscribe({
-              next: (review) => { this.campaignReview.set(review); this.campaignLoading.set(false); },
+              next: (review) => { this.campaignReview.set(review); this.loadOptimizationEligibility(review.id); this.campaignLoading.set(false); },
               error: () => { this.campaignError.set('Campaign review could not be loaded.'); this.campaignLoading.set(false); },
             }));
           },
@@ -242,6 +257,62 @@ export class Analytics implements OnInit, OnDestroy {
     if (!review) return '—';
     const sample = review.metrics[review.primaryMetric]?.sampleCount ?? 0;
     return `${sample} / ${review.eligibleByAgeCount}`;
+  }
+
+  protected chooseOptimizationCandidate(value: string): void { this.optimizationCandidateId.set(value); }
+
+  protected createOptimizationProposal(): void {
+    const review = this.campaignReview(); const candidate = this.optimizationCandidateId();
+    if (!review || !candidate || this.optimizationBusy()) return;
+    this.optimizationBusy.set(true); this.optimizationMessage.set(null);
+    this.subscriptions.add(this.analytics.createOptimizationProposal(review.id, candidate).subscribe({
+      next: (proposal) => { this.upsertProposal(proposal); this.optimizationBusy.set(false); this.optimizationMessage.set('Controlled test proposal created for human review.'); },
+      error: (error: HttpErrorResponse) => { this.optimizationBusy.set(false); this.optimizationMessage.set(this.optimizationError(error)); },
+    }));
+  }
+
+  protected optimizationAction(proposal: OptimizationProposal, action: 'approve' | 'reject' | 'materialize'): void {
+    if (this.optimizationBusy()) return;
+    this.optimizationBusy.set(true); this.optimizationMessage.set(null);
+    const request = action === 'approve' ? this.analytics.approveOptimizationProposal(proposal.id)
+      : action === 'reject' ? this.analytics.rejectOptimizationProposal(proposal.id)
+        : this.analytics.materializeOptimizationProposal(proposal.id);
+    this.subscriptions.add(request.subscribe({
+      next: (updated) => { this.upsertProposal(updated); this.optimizationBusy.set(false);
+        this.optimizationMessage.set(updated.status === 'STALE' ? 'The proposal is stale because a Persona changed or was archived.'
+          : action === 'materialize' ? 'A DRAFT Experiment was created. No Robot was enrolled and nothing was activated.'
+            : `Proposal ${action === 'approve' ? 'approved for testing' : 'rejected'}.`); },
+      error: (error: HttpErrorResponse) => { this.optimizationBusy.set(false); this.optimizationMessage.set(this.optimizationError(error)); },
+    }));
+  }
+
+  protected proposalCoverage(sample: number, eligible: number): string { return `${sample} / ${eligible}`; }
+
+  private loadOptimizationEligibility(reviewId: string): void {
+    this.subscriptions.add(this.analytics.optimizationEligibility(reviewId).subscribe({
+      next: (value) => { this.optimizationEligibility.set(value); this.optimizationCandidateId.set(''); },
+      error: () => this.optimizationEligibility.set(null),
+    }));
+  }
+
+  private loadOptimizationProposals(): void {
+    this.subscriptions.add(this.analytics.optimizationProposals().subscribe({
+      next: (rows) => this.optimizationProposals.set(rows), error: () => this.optimizationProposals.set([]),
+    }));
+  }
+
+  private upsertProposal(proposal: OptimizationProposal): void {
+    this.optimizationProposals.update((rows) => [proposal, ...rows.filter((row) => row.id !== proposal.id)]);
+  }
+
+  private optimizationError(error: HttpErrorResponse): string {
+    const detail = typeof error.error?.detail === 'string' ? error.error.detail
+      : typeof error.error?.message === 'string' ? error.error.message : '';
+    if (detail.includes('INSUFFICIENT_SAMPLE')) return 'Both Persona cohorts need at least five comparable observations.';
+    if (detail.includes('LOW_COVERAGE')) return 'Both Persona cohorts need at least 60% analytics coverage.';
+    if (detail.includes('NO_MATERIAL')) return 'The observed median difference is below the 10% evidence gate.';
+    if (detail.includes('STALE')) return 'The proposal is stale because a Persona changed or was archived.';
+    return 'The controlled test proposal action could not be completed.';
   }
 
   protected setCompareField(name: 'compareDimension' | 'compareMetric' | 'compareStatistic' | 'compareLeft' | 'compareRight', value: string): void {

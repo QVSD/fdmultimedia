@@ -69,6 +69,9 @@ public class Experiment {
     @Column(name = "minimum_practical_effect", precision = 20, scale = 4)
     private BigDecimal minimumPracticalEffect;
 
+    @Column(name = "optimization_proposal_id")
+    private UUID optimizationProposalId;
+
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "created_by_user_id", nullable = false)
     private AppUser createdByUser;
@@ -146,6 +149,14 @@ public class Experiment {
         this.updatedAt = now;
     }
 
+    public void bindOptimizationProposal(UUID proposalId) {
+        requireDraft();
+        if (optimizationProposalId != null && !optimizationProposalId.equals(proposalId)) {
+            throw new IllegalStateException("Experiment is already linked to another optimization proposal");
+        }
+        optimizationProposalId = proposalId;
+    }
+
     public void activate(Instant now) {
         if (status != ExperimentStatus.DRAFT) {
             throw new IllegalStateException("Only a DRAFT experiment can be activated");
@@ -210,6 +221,7 @@ public class Experiment {
     public DashboardQuery.Window getTargetObservationWindow() { return targetObservationWindow; }
     public DashboardQuery.Metric getPrimaryMetric() { return primaryMetric; }
     public BigDecimal getMinimumPracticalEffect() { return minimumPracticalEffect; }
+    public UUID getOptimizationProposalId() { return optimizationProposalId; }
     public AppUser getCreatedByUser() { return createdByUser; }
     public Instant getCreatedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }

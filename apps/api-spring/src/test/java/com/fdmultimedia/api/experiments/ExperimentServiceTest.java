@@ -24,6 +24,7 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
@@ -116,6 +117,18 @@ class ExperimentServiceTest {
         assertThat(summary.variants().get(1).variantKey()).isEqualTo(ExperimentVariantKey.B);
         assertThat(summary.variants().get(1).personaId()).isEqualTo(b.getId());
         assertThat(summary.variants()).allMatch(v -> !v.frozen());
+    }
+
+    @Test
+    void optimizationProposalCreatesLinkedDraftWithoutActivation() {
+        Persona a=activePersona("Observed A"); Persona b=activePersona("Test B");
+        when(personas.findByWorkspaceAndId(workspace,a.getId())).thenReturn(Optional.of(a));
+        when(personas.findByWorkspaceAndId(workspace,b.getId())).thenReturn(Optional.of(b));
+        UUID proposalId=UUID.randomUUID();
+        ExperimentSummary summary=service.createDraftFromOptimizationProposal(user,validCreateRequest(a,b),proposalId);
+        assertThat(summary.status()).isEqualTo(ExperimentStatus.DRAFT);
+        assertThat(experimentEntity(summary.id()).getOptimizationProposalId()).isEqualTo(proposalId);
+        assertThat(summary.activatedAt()).isNull();
     }
 
     @Test

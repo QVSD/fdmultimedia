@@ -409,4 +409,11 @@ V3 adds deterministic transcript-semantic reranking over V2 windows, immutable t
 - `CAMPAIGN_PERFORMANCE_V1` reuses Phase 13B's canonical nearest-age selector and Phase 13C's sample/coverage/materiality thresholds. Null stays unavailable, observed zero stays zero, and sum/average/median/min/max report their actual metric sample.
 - Output evidence traces RobotRunOutput through plan/copy revisions, suggestion, Draft, Schedule, Publication, provider, and selected analytics snapshot. Partial/cancelled and bounded legacy campaigns remain readable without zero-imputing missing outputs.
 - Historical comparisons by campaign role and frozen copy-coordination policy are bounded, descriptive, and neutral. TEST data and provider-semantic limitations are explicit; `CAMPAIGN_RECOMMENDATIONS_V1` only proposes human next checks with machine-readable evidence.
-- Experiment analysis remains a separate one-assignment-per-RobotRun system with its deterministic one-Publication selection. No Robot, Persona, selection, plan, copy, schedule, Publication, or Experiment mutation and no analytics feedback into 17F exists. Automatic optimization and Phase 17H remain unstarted.
+- Experiment analysis remains a separate one-assignment-per-RobotRun system with its deterministic one-Publication selection. No Robot, Persona, selection, plan, copy, schedule, Publication, or Experiment mutation and no analytics feedback into 17F exists.
+
+### Phase 17H — Controlled optimization proposals (implemented)
+
+- Immutable/revisioned `OPTIMIZATION_PROPOSALS_V1` proposals support one factor only: a human-selected, pre-existing ACTIVE candidate PERSONA against the frozen baseline Persona in a mature 17G review.
+- Server-side comparable cohorts reuse the Phase 13B H24/H72/D7 selector and Phase 13C gates (n>=5 and coverage>=0.60 independently per side; observed median difference >=10%). No client-supplied evidence, score, winner, or causal claim exists.
+- Human approval is non-mutating. A separate, idempotent materialization action creates one ordinary Phase 14A PERSONA Experiment with A/B variants in `DRAFT`; it does not activate the Experiment, enroll a Robot, or modify either Persona.
+- Persona fingerprints guard staleness; PostgreSQL locking and unique provenance guard concurrent materialization. TEST data remains explicitly synthetic. Multi-factor proposals, Persona creation, automatic activation/enrollment, any production mutation, LLM optimization, bandits/RL, and Phase 17I remain unstarted.

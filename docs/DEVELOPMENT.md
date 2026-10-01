@@ -911,3 +911,13 @@ Current limits: five outputs maximum, one source asset and one policy, Persona, 
 5. Before/after review creation, verify Robot, Persona, plan, copy set, Draft, and Schedule `updated_at` values are unchanged. Review generation has no mutation dependency and no Worker job.
 
 Long-term limitations are deliberate: observational evidence is not causal; small samples and missing snapshots weaken evidence; TEST analytics are synthetic; provider metrics can differ; campaign roles and Personas are not randomized; there is no analytics-trained planning, engagement prediction, automatic Experiment creation, configuration mutation, or cross-platform equivalence model. Those boundaries remain in place for the Phase 17H decision.
+
+## Testing controlled optimization proposals locally
+
+1. Create or select a `READY` H24/H72/D7 Campaign Performance review whose canonical Publications all resolve to one frozen baseline Persona/provider. `GET /api/optimization-proposals/eligibility/{reviewId}` reports only source-review eligibility and the authoritative 5 / 0.60 / 10% gates; Angular does not duplicate this logic.
+2. `POST /api/optimization-proposals` with only `sourceReviewId` and an existing ACTIVE `candidatePersonaId`. Samples, coverage, medians, differences, provider, window, and direction are recomputed by the server. Both Persona cohorts use the same 365-day cutoff, provider, normalized metric, and nearest-age selector. Insufficient sample/coverage, same/inactive Persona, zero-denominator materiality, or <10% difference returns a controlled 4xx reason.
+3. Review the proposal in `/analytics?tab=campaigns`. TEST evidence must show its synthetic limitation and wording must remain observational. `POST /{id}/approve` records human intent only; it creates no Experiment and changes no Robot/Persona.
+4. `POST /{id}/materialize-experiment` after approval. The result links one Experiment whose factor is PERSONA, status is `DRAFT`, A is the baseline and B is the candidate. Repeating or racing this action returns the same Experiment. The Experiment is not ACTIVE and no `robots.experiment_id` changes.
+5. Edit/archive either Persona after proposal creation and before materialization to verify `STALE`. Proposal fingerprints are historical and are never silently rewritten. Rejection and stale/materialized proposals remain readable.
+
+Limitations are intentional: evidence is observational, candidates must already exist, only PERSONA/median proposals are supported, both cohorts need comparable history, provider semantics can differ, and TEST data is synthetic. There is no Persona/Robot mutation, automatic activation/enrollment, multi-factor proposal, schedule/highlight/copy optimization, AI decision maker, bandit/RL loop, or Phase 17I implementation.

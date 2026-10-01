@@ -1,3 +1,4 @@
+import { HttpErrorResponse } from '@angular/common/http';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, Router, convertToParamMap } from '@angular/router';
 import { Subject, of, throwError } from 'rxjs';
@@ -9,6 +10,7 @@ import { PublicationAnalyticsSnapshot, PublicationAttribution } from '../../core
 import { DashboardSummary } from '../../core/publishing/publication-dashboard.models';
 import { ComparisonResult, InsightsResponse } from '../../core/publishing/publication-insights.models';
 import { Analytics } from './analytics';
+import { PersonasService } from '../../core/personas/personas.service';
 
 const publication = {
   id: 'publication-1', status: 'PUBLISHED', socialAccountDisplayName: 'TEST account',
@@ -79,7 +81,9 @@ describe('Analytics', () => {
   let fixture: ComponentFixture<Analytics>;
   let analytics: Pick<PublicationAnalyticsService, 'history' | 'attribution' | 'state' | 'refresh' |
     'dashboardSummary' | 'dashboardTrend' | 'dashboardBreakdown' | 'dashboardOptions' | 'insights' | 'compareSegments' |
-    'campaignOptions' | 'campaignReviews' | 'campaignReview' | 'createCampaignReview' | 'campaignComparison'>;
+    'campaignOptions' | 'campaignReviews' | 'campaignReview' | 'createCampaignReview' | 'campaignComparison' |
+    'optimizationEligibility' | 'optimizationProposals' | 'createOptimizationProposal' |
+    'approveOptimizationProposal' | 'rejectOptimizationProposal' | 'materializeOptimizationProposal'>;
   let publications: Subject<PublicationSummary[]>;
 
   beforeEach(async () => {
@@ -105,6 +109,14 @@ describe('Analytics', () => {
       campaignComparison: vi.fn().mockReturnValue(of({ dateFrom: '2026-08-22', dateTo: '2026-09-20',
         observationWindow: 'H72', metric: 'TOTAL_INTERACTIONS', dimension: 'ROLE', rows: [], truncated: false,
         recommendations: [], limitations: ['Observed associations do not establish causation.'] })),
+      optimizationEligibility: vi.fn().mockReturnValue(of({ eligible: true, reasonCode: null, baselinePersonaId: 'persona-a',
+        baselinePersonaName: 'Persona A', metric: 'VIEWS', observationWindow: 'H72', provider: 'TEST',
+        minimumSample: 5, minimumCoverage: 0.6, materialDifferencePercent: 10, limitations: [] })),
+      optimizationProposals: vi.fn().mockReturnValue(of([])),
+      createOptimizationProposal: vi.fn().mockReturnValue(of({})),
+      approveOptimizationProposal: vi.fn().mockReturnValue(of({})),
+      rejectOptimizationProposal: vi.fn().mockReturnValue(of({})),
+      materializeOptimizationProposal: vi.fn().mockReturnValue(of({})),
     };
     await TestBed.configureTestingModule({
       imports: [Analytics],
@@ -113,6 +125,9 @@ describe('Analytics', () => {
         { provide: Router, useValue: { navigate: vi.fn() } },
         { provide: PublishingService, useValue: { list: vi.fn().mockReturnValue(publications) } },
         { provide: PublicationAnalyticsService, useValue: analytics },
+        { provide: PersonasService, useValue: { list: vi.fn().mockReturnValue(of([
+          { id: 'persona-a', name: 'Persona A', status: 'ACTIVE' }, { id: 'persona-b', name: 'Persona B', status: 'ACTIVE' },
+        ])) } },
       ],
     }).compileComponents();
     fixture = TestBed.createComponent(Analytics);
@@ -171,6 +186,33 @@ describe('Analytics', () => {
     (fixture.componentInstance as any).createCampaignReview();
 
     expect(analytics.createCampaignReview).toHaveBeenCalledWith('run-1', 'H72', 'VIEWS');
+  });
+
+  it('shows neutral Persona proposal evidence and preserves the explicit DRAFT experiment boundary', () => {
+    const proposal = {
+      id: 'proposal-1', sourceReviewId: 'review-1', revision: 1, current: true, engineVersion: 'OPTIMIZATION_PROPOSALS_V1',
+      factor: 'PERSONA', status: 'MATERIALIZED', baselinePersonaId: 'persona-a', baselinePersonaName: 'Persona A',
+      candidatePersonaId: 'persona-b', candidatePersonaName: 'Persona B', metric: 'VIEWS', statistic: 'MEDIAN',
+      observationWindow: 'H72', provider: 'TEST', cohortFrom: '2025-09-20T00:00:00Z', cohortTo: '2026-09-20T00:00:00Z',
+      baselineSample: 8, candidateSample: 7, baselineEligible: 10, candidateEligible: 10,
+      baselineCoverage: .8, candidateCoverage: .7, baselineValue: 100, candidateValue: 120,
+      absoluteDifference: 20, relativeDifferencePercent: 20, direction: 'HIGHER_OBSERVED', evidenceFingerprint: 'fingerprint',
+      rationale: 'Observed medians differ; this is a hypothesis to test, not proof of causation.',
+      limitation: 'Historical Persona differences are observational and may be confounded.',
+      materializedExperimentId: 'experiment-1', createdAt: '2026-09-20T00:00:00Z', reviewedAt: '2026-09-20T01:00:00Z', materializedAt: '2026-09-20T02:00:00Z',
+    };
+    (fixture.componentInstance as any).tab.set('campaigns');
+    (fixture.componentInstance as any).optimizationProposals.set([proposal]);
+    fixture.detectChanges();
+    const text = fixture.nativeElement.textContent as string;
+    expect(text).toContain('PERSONA proposal'); expect(text).toContain('Persona A'); expect(text).toContain('Persona B');
+    expect(text).toContain('Experiment created as DRAFT'); expect(text).toContain('No Robot has been enrolled');
+    expect(text).toContain('synthetic and deterministic'); expect(text.toLowerCase()).not.toContain('winner');
+  });
+
+  it('maps controlled proposal reason codes from the API error message', () => {
+    const error = new HttpErrorResponse({ status: 409, error: { message: 'CANDIDATE_EVIDENCE_LOW_COVERAGE' } });
+    expect((fixture.componentInstance as any).optimizationError(error)).toContain('60% analytics coverage');
   });
 
   it('renders the historical cohort comparison table with neutral segment labels, no leaderboard styling', () => {
