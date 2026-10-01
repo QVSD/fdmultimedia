@@ -11,6 +11,8 @@ import { DashboardSummary } from '../../core/publishing/publication-dashboard.mo
 import { ComparisonResult, InsightsResponse } from '../../core/publishing/publication-insights.models';
 import { Analytics } from './analytics';
 import { PersonasService } from '../../core/personas/personas.service';
+import { RobotsService } from '../../core/robots/robots.service';
+import { RobotSummary } from '../../core/robots/robot.models';
 
 const publication = {
   id: 'publication-1', status: 'PUBLISHED', socialAccountDisplayName: 'TEST account',
@@ -77,13 +79,32 @@ const compareResult = {
   recommendations: [],
 } as unknown as ComparisonResult;
 
+function robotChangeProposal(status: string) {
+  return {
+    id: 'change-proposal-1', sourceOptimizationProposalId: 'proposal-1', sourceExperimentId: 'experiment-1',
+    engineVersion: 'ROBOT_CHANGE_PROPOSALS_V1', factor: 'PERSONA', status, targetRobotId: 'robot-1',
+    targetRobotNameSnapshot: 'Robot One', currentPersonaId: 'persona-a', currentPersonaNameSnapshot: 'Persona A',
+    proposedPersonaId: 'persona-b', proposedPersonaNameSnapshot: 'Persona B', expectedRobotConfigFingerprint: 'fp-expected',
+    analysisEngineVersion: 'EXPERIMENT_ANALYSIS_V1', metric: 'VIEWS', observationWindow: 'H72', population: 'ASSIGNED_OBSERVED',
+    baselineSampleCount: 10, candidateSampleCount: 12, baselineCoverage: 0.8, candidateCoverage: 0.75,
+    absoluteMeanDifference: 20, relativeMeanDifferencePercent: 18, standardError: 2, degreesOfFreedom: 18,
+    confidenceIntervalLower: 2, confidenceIntervalUpper: 38, confidenceIntervalIncludesZero: false, pValue: 0.02,
+    standardizedEffectSize: 0.6, limitations: ['Observed controlled-experiment evidence only.'],
+    rationale: 'Observed controlled-experiment evidence; human review and approval are required before any Robot configuration change.',
+    proposalFingerprint: 'fp-proposal', createdAt: '2026-09-20T00:00:00Z', reviewedAt: null, appliedAt: null, rolledBackAt: null,
+  };
+}
+
 describe('Analytics', () => {
   let fixture: ComponentFixture<Analytics>;
   let analytics: Pick<PublicationAnalyticsService, 'history' | 'attribution' | 'state' | 'refresh' |
     'dashboardSummary' | 'dashboardTrend' | 'dashboardBreakdown' | 'dashboardOptions' | 'insights' | 'compareSegments' |
     'campaignOptions' | 'campaignReviews' | 'campaignReview' | 'createCampaignReview' | 'campaignComparison' |
     'optimizationEligibility' | 'optimizationProposals' | 'createOptimizationProposal' |
-    'approveOptimizationProposal' | 'rejectOptimizationProposal' | 'materializeOptimizationProposal'>;
+    'approveOptimizationProposal' | 'rejectOptimizationProposal' | 'materializeOptimizationProposal' |
+    'robotChangeEligibility' | 'robotChangeProposals' | 'createRobotChangeProposal' |
+    'approveRobotChangeProposal' | 'rejectRobotChangeProposal' | 'applyRobotChangeProposal'>;
+  let robotsService: Pick<RobotsService, 'list'>;
   let publications: Subject<PublicationSummary[]>;
 
   beforeEach(async () => {
@@ -117,6 +138,18 @@ describe('Analytics', () => {
       approveOptimizationProposal: vi.fn().mockReturnValue(of({})),
       rejectOptimizationProposal: vi.fn().mockReturnValue(of({})),
       materializeOptimizationProposal: vi.fn().mockReturnValue(of({})),
+      robotChangeEligibility: vi.fn().mockReturnValue(of({ eligible: true, reasonCode: null,
+        sourceOptimizationProposalId: 'proposal-1', targetRobotId: 'robot-1' })),
+      robotChangeProposals: vi.fn().mockReturnValue(of([])),
+      createRobotChangeProposal: vi.fn().mockReturnValue(of(robotChangeProposal('READY_FOR_REVIEW'))),
+      approveRobotChangeProposal: vi.fn().mockReturnValue(of(robotChangeProposal('APPROVED'))),
+      rejectRobotChangeProposal: vi.fn().mockReturnValue(of(robotChangeProposal('REJECTED'))),
+      applyRobotChangeProposal: vi.fn().mockReturnValue(of(robotChangeProposal('APPLIED'))),
+    };
+    robotsService = {
+      list: vi.fn().mockReturnValue(of([
+        { id: 'robot-1', name: 'Robot One', aiPolicy: 'GENERATE_FOR_REVIEW', experimentId: 'experiment-1' } as RobotSummary,
+      ])),
     };
     await TestBed.configureTestingModule({
       imports: [Analytics],
@@ -128,6 +161,7 @@ describe('Analytics', () => {
         { provide: PersonasService, useValue: { list: vi.fn().mockReturnValue(of([
           { id: 'persona-a', name: 'Persona A', status: 'ACTIVE' }, { id: 'persona-b', name: 'Persona B', status: 'ACTIVE' },
         ])) } },
+        { provide: RobotsService, useValue: robotsService },
       ],
     }).compileComponents();
     fixture = TestBed.createComponent(Analytics);
@@ -213,6 +247,54 @@ describe('Analytics', () => {
   it('maps controlled proposal reason codes from the API error message', () => {
     const error = new HttpErrorResponse({ status: 409, error: { message: 'CANDIDATE_EVIDENCE_LOW_COVERAGE' } });
     expect((fixture.componentInstance as any).optimizationError(error)).toContain('60% analytics coverage');
+  });
+
+  it('shows the Robot change proposal entry point only once eligibility is checked and passes', () => {
+    const component = fixture.componentInstance as any;
+    expect(component.robotsForExperiment('experiment-1')).toHaveLength(1);
+    expect(component.robotChangeEligibilities()['proposal-1']).toBeUndefined();
+
+    component.chooseRobotChangeTarget('proposal-1', 'robot-1');
+
+    expect(analytics.robotChangeEligibility).toHaveBeenCalledWith('proposal-1', 'robot-1');
+    expect(component.robotChangeEligibilities()['proposal-1'].eligible).toBe(true);
+  });
+
+  it('creates a Robot change proposal only when a target Robot is selected and eligible', () => {
+    const component = fixture.componentInstance as any;
+    component.createRobotChangeProposal('proposal-1');
+    expect(analytics.createRobotChangeProposal).not.toHaveBeenCalled();
+
+    component.chooseRobotChangeTarget('proposal-1', 'robot-1');
+    component.createRobotChangeProposal('proposal-1');
+
+    expect(analytics.createRobotChangeProposal).toHaveBeenCalledWith('proposal-1', 'robot-1');
+    expect(component.robotChangeProposals()[0].id).toBe('change-proposal-1');
+  });
+
+  it('renders Robot change proposal evidence with neutral wording and separates approve from apply', () => {
+    const component = fixture.componentInstance as any;
+    component.tab.set('campaigns');
+    component.robotChangeProposals.set([robotChangeProposal('APPROVED')]);
+    fixture.detectChanges();
+    const text = fixture.nativeElement.textContent as string;
+    expect(text).toContain('Proposed Persona change');
+    expect(text).toContain('Robot One');
+    expect(text).toContain('Apply approved change');
+    expect(text.toLowerCase()).not.toContain('winner');
+    expect(text.toLowerCase()).not.toContain('best');
+    expect(text.toLowerCase()).not.toContain('guaranteed');
+    expect(text.toLowerCase()).not.toContain('upgrade');
+
+    component.robotChangeAction(robotChangeProposal('APPROVED'), 'apply');
+    expect(analytics.applyRobotChangeProposal).toHaveBeenCalledWith('change-proposal-1');
+  });
+
+  it('shows a stale explanation without ever claiming the Robot changed when apply is blocked', () => {
+    (analytics.applyRobotChangeProposal as any).mockReturnValue(of(robotChangeProposal('STALE')));
+    const component = fixture.componentInstance as any;
+    component.robotChangeAction(robotChangeProposal('APPROVED'), 'apply');
+    expect(component.robotChangeMessage()).toContain('stale');
   });
 
   it('renders the historical cohort comparison table with neutral segment labels, no leaderboard styling', () => {

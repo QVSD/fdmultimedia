@@ -23,6 +23,9 @@ import {
   CampaignCohortComparison, CampaignDimension, CampaignOption, CampaignReview, CampaignWindow,
 } from '../../core/publishing/campaign-performance.models';
 import { OptimizationEligibility, OptimizationProposal } from '../../core/publishing/optimization-proposal.models';
+import { RobotChangeEligibility, RobotChangeProposal } from '../../core/publishing/robot-change-proposal.models';
+import { RobotsService } from '../../core/robots/robots.service';
+import { RobotSummary } from '../../core/robots/robot.models';
 
 type AnalyticsTab = 'dashboard' | 'insights' | 'campaigns';
 
@@ -84,6 +87,12 @@ export class Analytics implements OnInit, OnDestroy {
   protected readonly optimizationCandidateId = signal('');
   protected readonly optimizationBusy = signal(false);
   protected readonly optimizationMessage = signal<string | null>(null);
+  protected readonly robotChangeRobots = signal<RobotSummary[]>([]);
+  protected readonly robotChangeProposals = signal<RobotChangeProposal[]>([]);
+  protected readonly robotChangeTargets = signal<Record<string, string>>({});
+  protected readonly robotChangeEligibilities = signal<Record<string, RobotChangeEligibility>>({});
+  protected readonly robotChangeBusy = signal(false);
+  protected readonly robotChangeMessage = signal<string | null>(null);
   private readonly subscriptions = new Subscription();
   private dashboardSubscription?: Subscription;
   private insightsSubscription?: Subscription;
@@ -94,6 +103,7 @@ export class Analytics implements OnInit, OnDestroy {
     private readonly publishing: PublishingService,
     private readonly analytics: PublicationAnalyticsService,
     private readonly personasService: PersonasService,
+    private readonly robotsService: RobotsService,
   ) {}
 
   ngOnInit(): void {
@@ -106,6 +116,11 @@ export class Analytics implements OnInit, OnDestroy {
       error: () => this.optimizationPersonas.set([]),
     }));
     this.loadOptimizationProposals();
+    this.subscriptions.add(this.robotsService.list().subscribe({
+      next: (rows) => this.robotChangeRobots.set(rows.filter((row) => row.aiPolicy !== 'NO_AI')),
+      error: () => this.robotChangeRobots.set([]),
+    }));
+    this.loadRobotChangeProposals();
     this.subscriptions.add(this.route.queryParamMap.subscribe((params) => {
       const id = params.get('publicationId');
       this.selectedId.set(id);
@@ -313,6 +328,73 @@ export class Analytics implements OnInit, OnDestroy {
     if (detail.includes('NO_MATERIAL')) return 'The observed median difference is below the 10% evidence gate.';
     if (detail.includes('STALE')) return 'The proposal is stale because a Persona changed or was archived.';
     return 'The controlled test proposal action could not be completed.';
+  }
+
+  protected robotsForExperiment(experimentId: string | null): RobotSummary[] {
+    if (!experimentId) return [];
+    return this.robotChangeRobots().filter((robot) => robot.experimentId === experimentId);
+  }
+
+  protected chooseRobotChangeTarget(optimizationProposalId: string, robotId: string): void {
+    this.robotChangeTargets.update((map) => ({ ...map, [optimizationProposalId]: robotId }));
+    this.robotChangeEligibilities.update((map) => { const next = { ...map }; delete next[optimizationProposalId]; return next; });
+    if (!robotId) return;
+    this.subscriptions.add(this.analytics.robotChangeEligibility(optimizationProposalId, robotId).subscribe({
+      next: (result) => this.robotChangeEligibilities.update((map) => ({ ...map, [optimizationProposalId]: result })),
+      error: () => this.robotChangeEligibilities.update((map) => {
+        const next = { ...map };
+        next[optimizationProposalId] = { eligible: false, reasonCode: 'ELIGIBILITY_CHECK_FAILED', sourceOptimizationProposalId: optimizationProposalId, targetRobotId: robotId };
+        return next;
+      }),
+    }));
+  }
+
+  protected createRobotChangeProposal(optimizationProposalId: string): void {
+    const robotId = this.robotChangeTargets()[optimizationProposalId];
+    const eligibility = this.robotChangeEligibilities()[optimizationProposalId];
+    if (!robotId || !eligibility?.eligible || this.robotChangeBusy()) return;
+    this.robotChangeBusy.set(true); this.robotChangeMessage.set(null);
+    this.subscriptions.add(this.analytics.createRobotChangeProposal(optimizationProposalId, robotId).subscribe({
+      next: (proposal) => { this.upsertRobotChangeProposal(proposal); this.robotChangeBusy.set(false);
+        this.robotChangeMessage.set('Robot change proposal created for human review. Approving and applying are separate, explicit actions.'); },
+      error: (error: HttpErrorResponse) => { this.robotChangeBusy.set(false); this.robotChangeMessage.set(this.robotChangeError(error)); },
+    }));
+  }
+
+  protected robotChangeAction(proposal: RobotChangeProposal, action: 'approve' | 'reject' | 'apply'): void {
+    if (this.robotChangeBusy()) return;
+    this.robotChangeBusy.set(true); this.robotChangeMessage.set(null);
+    const request = action === 'approve' ? this.analytics.approveRobotChangeProposal(proposal.id)
+      : action === 'reject' ? this.analytics.rejectRobotChangeProposal(proposal.id)
+        : this.analytics.applyRobotChangeProposal(proposal.id);
+    this.subscriptions.add(request.subscribe({
+      next: (updated) => { this.upsertRobotChangeProposal(updated); this.robotChangeBusy.set(false);
+        this.robotChangeMessage.set(updated.status === 'STALE' ? 'This proposal is stale: the Robot or the proposed Persona changed since the proposal was created. Applying has been blocked.'
+          : action === 'apply' ? 'Apply approved change: the Robot now uses the proposed Persona for future runs. Historical runs keep their original Persona.'
+            : `Proposal ${action === 'approve' ? 'approved' : 'rejected'}.`); },
+      error: (error: HttpErrorResponse) => { this.robotChangeBusy.set(false); this.robotChangeMessage.set(this.robotChangeError(error)); },
+    }));
+  }
+
+  private loadRobotChangeProposals(): void {
+    this.subscriptions.add(this.analytics.robotChangeProposals().subscribe({
+      next: (rows) => this.robotChangeProposals.set(rows), error: () => this.robotChangeProposals.set([]),
+    }));
+  }
+
+  private upsertRobotChangeProposal(proposal: RobotChangeProposal): void {
+    this.robotChangeProposals.update((rows) => [proposal, ...rows.filter((row) => row.id !== proposal.id)]);
+  }
+
+  private robotChangeError(error: HttpErrorResponse): string {
+    const detail = typeof error.error?.detail === 'string' ? error.error.detail
+      : typeof error.error?.message === 'string' ? error.error.message : '';
+    if (detail.includes('ROBOT_CONFIG_DIVERGED')) return 'The Robot configuration changed since this proposal was created; it is now stale.';
+    if (detail.includes('CANDIDATE_PERSONA_ARCHIVED')) return 'The proposed Persona was archived; this proposal is now stale.';
+    if (detail.includes('ROLLBACK_TARGET_NOT_CURRENT')) return 'A later configuration change already superseded this revision; it can no longer be rolled back.';
+    if (detail.includes('PROPOSAL_NOT_APPROVED')) return 'This proposal must be approved before it can be applied.';
+    if (detail.includes('PROPOSAL_NOT_READY_FOR_REVIEW')) return 'This proposal has already been reviewed.';
+    return 'The Robot change proposal action could not be completed.';
   }
 
   protected setCompareField(name: 'compareDimension' | 'compareMetric' | 'compareStatistic' | 'compareLeft' | 'compareRight', value: string): void {

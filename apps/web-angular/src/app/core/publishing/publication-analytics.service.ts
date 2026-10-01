@@ -8,6 +8,7 @@ import { DashboardBreakdown, DashboardDimension, DashboardFilters, DashboardMetr
 import { CompareRequest, ComparisonResult, InsightsResponse } from './publication-insights.models';
 import { CampaignCohortComparison, CampaignDimension, CampaignOption, CampaignReview, CampaignReviewListItem, CampaignWindow } from './campaign-performance.models';
 import { OptimizationEligibility, OptimizationProposal } from './optimization-proposal.models';
+import { RobotChangeEligibility, RobotChangeProposal } from './robot-change-proposal.models';
 
 @Injectable({ providedIn: 'root' })
 export class PublicationAnalyticsService {
@@ -126,5 +127,32 @@ export class PublicationAnalyticsService {
 
   materializeOptimizationProposal(id: string): Observable<OptimizationProposal> {
     return this.http.post<OptimizationProposal>(`${environment.apiBaseUrl}/optimization-proposals/${id}/materialize-experiment`, {}, { withCredentials: true });
+  }
+
+  robotChangeEligibility(sourceOptimizationProposalId: string, targetRobotId: string): Observable<RobotChangeEligibility> {
+    return this.http.get<RobotChangeEligibility>(`${environment.apiBaseUrl}/robot-change-proposals/eligibility`,
+      { params: { sourceOptimizationProposalId, targetRobotId }, withCredentials: true });
+  }
+
+  robotChangeProposals(limit = 50): Observable<RobotChangeProposal[]> {
+    return this.http.get<RobotChangeProposal[]>(`${environment.apiBaseUrl}/robot-change-proposals`,
+      { params: { limit }, withCredentials: true });
+  }
+
+  createRobotChangeProposal(sourceOptimizationProposalId: string, targetRobotId: string): Observable<RobotChangeProposal> {
+    return this.http.post<RobotChangeProposal>(`${environment.apiBaseUrl}/robot-change-proposals`,
+      { sourceOptimizationProposalId, targetRobotId }, { withCredentials: true });
+  }
+
+  approveRobotChangeProposal(id: string): Observable<RobotChangeProposal> {
+    return this.http.post<RobotChangeProposal>(`${environment.apiBaseUrl}/robot-change-proposals/${id}/approve`, {}, { withCredentials: true });
+  }
+
+  rejectRobotChangeProposal(id: string): Observable<RobotChangeProposal> {
+    return this.http.post<RobotChangeProposal>(`${environment.apiBaseUrl}/robot-change-proposals/${id}/reject`, {}, { withCredentials: true });
+  }
+
+  applyRobotChangeProposal(id: string): Observable<RobotChangeProposal> {
+    return this.http.post<RobotChangeProposal>(`${environment.apiBaseUrl}/robot-change-proposals/${id}/apply`, {}, { withCredentials: true });
   }
 }

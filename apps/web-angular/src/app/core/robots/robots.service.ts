@@ -4,6 +4,7 @@ import { Observable } from 'rxjs';
 
 import { environment } from '../../../environments/environment';
 import { CreateRobotRequest, RobotRunSummary, RobotSummary, UpdateRobotRequest } from './robot.models';
+import { RobotConfigurationRevision } from '../publishing/robot-change-proposal.models';
 
 @Injectable({ providedIn: 'root' })
 export class RobotsService {
@@ -43,5 +44,16 @@ export class RobotsService {
 
   cancelRun(runId: string): Observable<RobotRunSummary> {
     return this.http.post<RobotRunSummary>(`${environment.apiBaseUrl}/robot-runs/${runId}/cancel`, {}, { withCredentials: true });
+  }
+
+  configurationRevisions(robotId: string): Observable<RobotConfigurationRevision[]> {
+    return this.http.get<RobotConfigurationRevision[]>(`${environment.apiBaseUrl}/robots/${robotId}/configuration-revisions`,
+      { withCredentials: true });
+  }
+
+  rollbackConfigurationRevision(robotId: string, revisionId: string, reason: string | null): Observable<RobotConfigurationRevision> {
+    return this.http.post<RobotConfigurationRevision>(
+      `${environment.apiBaseUrl}/robots/${robotId}/configuration-revisions/${revisionId}/rollback`,
+      reason ? { reason } : {}, { withCredentials: true });
   }
 }

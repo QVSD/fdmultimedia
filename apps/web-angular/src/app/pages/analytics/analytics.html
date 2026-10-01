@@ -428,6 +428,75 @@
             @if (proposal.status === 'MATERIALIZED') {
               <p class="analytics__muted">Experiment created as DRAFT. No Robot has been enrolled and the Experiment has not been activated.</p>
             }
+            @if (proposal.status === 'MATERIALIZED' && robotsForExperiment(proposal.materializedExperimentId).length > 0) {
+              <div class="analytics__actions" role="group" aria-label="Create Robot change proposal">
+                <select [value]="robotChangeTargets()[proposal.id] ?? ''"
+                  (change)="chooseRobotChangeTarget(proposal.id, $any($event.target).value)">
+                  <option value="">Select a Robot enrolled in this Experiment…</option>
+                  @for (robot of robotsForExperiment(proposal.materializedExperimentId); track robot.id) {
+                    <option [value]="robot.id">{{ robot.name }}</option>
+                  }
+                </select>
+                @if (robotChangeTargets()[proposal.id]; as targetId) {
+                  @if (robotChangeEligibilities()[proposal.id]; as eligibility) {
+                    @if (eligibility.eligible) {
+                      <button type="button" (click)="createRobotChangeProposal(proposal.id)" [disabled]="robotChangeBusy()">Create Robot change proposal</button>
+                    } @else {
+                      <span class="analytics__muted" role="note">Not eligible yet: {{ eligibility.reasonCode }}</span>
+                    }
+                  }
+                }
+              </div>
+            }
+          </article>
+        }
+      </div>
+    }
+  </section>
+
+  <section class="analytics__band" aria-labelledby="robot-change-heading">
+    <h2 id="robot-change-heading">Robot change proposals</h2>
+    <p class="analytics__muted">
+      A Robot change proposal reflects observed controlled-experiment evidence for one completed Experiment. It does not
+      establish universal superiority of the proposed Persona. Approving a proposal does not change the Robot — applying
+      it is a separate, explicit action, and only ever affects future runs. Historical runs always keep the Persona they
+      were created with.
+    </p>
+    @if (robotChangeMessage()) { <p role="status">{{ robotChangeMessage() }}</p> }
+    @if (robotChangeProposals().length === 0) { <p>No Robot change proposals have been created.</p> }
+    @else {
+      <div class="analytics__insight-grid">
+        @for (proposal of robotChangeProposals(); track proposal.id) {
+          <article class="analytics__insight-card">
+            <header><strong>{{ proposal.targetRobotNameSnapshot }}</strong><span class="analytics__badge">{{ proposal.status }}</span></header>
+            <dl>
+              <div><dt>Current Persona</dt><dd>{{ proposal.currentPersonaNameSnapshot ?? 'None' }}</dd></div>
+              <div><dt>Proposed Persona change</dt><dd>{{ proposal.proposedPersonaNameSnapshot }}</dd></div>
+              <div><dt>Evidence</dt><dd>{{ proposal.metric }} over {{ proposal.observationWindow }}, assigned-observed population</dd></div>
+              <div><dt>Observed controlled-experiment evidence</dt>
+                <dd>n={{ proposal.baselineSampleCount }}/{{ proposal.candidateSampleCount }} · absolute difference {{ decimal(proposal.absoluteMeanDifference) }}
+                  @if (proposal.pValue !== null) { · p={{ decimal(proposal.pValue) }} }
+                  @if (proposal.confidenceIntervalLower !== null && proposal.confidenceIntervalUpper !== null) {
+                    · 95% CI [{{ decimal(proposal.confidenceIntervalLower) }}, {{ decimal(proposal.confidenceIntervalUpper) }}]
+                  }
+                </dd>
+              </div>
+            </dl>
+            <p>{{ proposal.rationale }}</p>
+            @for (limitation of proposal.limitations; track limitation) { <p class="analytics__muted">{{ limitation }}</p> }
+            @if (proposal.status === 'STALE') {
+              <p role="note">This proposal is stale: the Robot configuration or the proposed Persona changed since it was created. It cannot be applied.</p>
+            }
+            <div class="analytics__actions">
+              @if (proposal.status === 'READY_FOR_REVIEW') {
+                <button type="button" (click)="robotChangeAction(proposal, 'approve')" [disabled]="robotChangeBusy()">Approve</button>
+                <button type="button" class="button-secondary" (click)="robotChangeAction(proposal, 'reject')" [disabled]="robotChangeBusy()">Reject</button>
+              }
+              @if (proposal.status === 'APPROVED') {
+                <button type="button" (click)="robotChangeAction(proposal, 'apply')" [disabled]="robotChangeBusy()">Apply approved change</button>
+              }
+              <a [routerLink]="['/robots']" [queryParams]="{ robotId: proposal.targetRobotId }">Open Robot</a>
+            </div>
           </article>
         }
       </div>

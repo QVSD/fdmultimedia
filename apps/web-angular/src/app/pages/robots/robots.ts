@@ -43,6 +43,7 @@ import {
   CampaignCopySetStatus,
   CampaignCopySetSummary,
 } from '../../core/campaign-copy/campaign-copy.models';
+import { RobotConfigurationRevision } from '../../core/publishing/robot-change-proposal.models';
 
 type LoadState = 'loading' | 'ready' | 'error';
 
@@ -113,6 +114,13 @@ export class Robots implements OnInit, OnDestroy {
   protected readonly copySetBusy = signal<Record<string, boolean>>({});
   protected readonly copySetReviewBusy = signal<Record<string, boolean>>({});
   protected readonly copySetReviewErrors = signal<Record<string, string | null>>({});
+
+  // ---- Phase 17I: Robot configuration history & rollback ----
+  protected readonly configurationHistoryByRobot = signal<Record<string, RobotConfigurationRevision[]>>({});
+  protected readonly configurationHistoryExpanded = signal<Record<string, boolean>>({});
+  protected readonly rollbackConfirming = signal<Record<string, boolean>>({});
+  protected readonly rollbackBusy = signal<Record<string, boolean>>({});
+  protected readonly rollbackErrors = signal<Record<string, string | null>>({});
 
   private robotsSubscription?: Subscription;
   private approvalsSubscription?: Subscription;
@@ -758,5 +766,66 @@ export class Robots implements OnInit, OnDestroy {
 
   private replaceApproval(approval: RobotApprovalSummary): void {
     this.approvals.set(this.approvals().map((existing) => (existing.id === approval.id ? approval : existing)));
+  }
+
+  // ---- Phase 17I: Robot configuration history & rollback ----
+
+  protected isConfigurationHistoryExpanded(robot: RobotSummary): boolean {
+    return this.configurationHistoryExpanded()[robot.id] ?? false;
+  }
+
+  protected toggleConfigurationHistory(robot: RobotSummary): void {
+    const expanding = !this.isConfigurationHistoryExpanded(robot);
+    this.configurationHistoryExpanded.update((items) => ({ ...items, [robot.id]: expanding }));
+    if (expanding && !this.configurationHistoryByRobot()[robot.id]) {
+      this.loadConfigurationHistory(robot.id);
+    }
+  }
+
+  protected configurationHistoryFor(robot: RobotSummary): RobotConfigurationRevision[] {
+    return this.configurationHistoryByRobot()[robot.id] ?? [];
+  }
+
+  /** The current (highest-numbered) revision is the only one eligible for rollback — no time travel. */
+  protected isCurrentRevision(robot: RobotSummary, revision: RobotConfigurationRevision): boolean {
+    const history = this.configurationHistoryFor(robot);
+    return history.length > 0 && history[0].id === revision.id;
+  }
+
+  protected loadConfigurationHistory(robotId: string): void {
+    this.robotsService.configurationRevisions(robotId).subscribe({
+      next: (revisions) => this.configurationHistoryByRobot.update((byRobot) => ({ ...byRobot, [robotId]: revisions })),
+      error: () => this.configurationHistoryByRobot.update((byRobot) => ({ ...byRobot, [robotId]: [] })),
+    });
+  }
+
+  protected confirmRollback(revision: RobotConfigurationRevision): void {
+    this.rollbackConfirming.update((items) => ({ ...items, [revision.id]: true }));
+  }
+
+  protected cancelRollback(revision: RobotConfigurationRevision): void {
+    this.rollbackConfirming.update((items) => ({ ...items, [revision.id]: false }));
+  }
+
+  protected rollback(robot: RobotSummary, revision: RobotConfigurationRevision): void {
+    this.rollbackErrors.update((errors) => ({ ...errors, [revision.id]: null }));
+    this.rollbackBusy.update((busy) => ({ ...busy, [revision.id]: true }));
+    this.robotsService
+      .rollbackConfigurationRevision(robot.id, revision.id, null)
+      .pipe(finalize(() => this.rollbackBusy.update((busy) => ({ ...busy, [revision.id]: false }))))
+      .subscribe({
+        next: () => {
+          this.rollbackConfirming.update((items) => ({ ...items, [revision.id]: false }));
+          this.loadConfigurationHistory(robot.id);
+          this.robotsService.list().subscribe((rows) => this.robots.set(rows));
+        },
+        error: () => this.rollbackErrors.update((errors) => ({
+          ...errors, [revision.id]: 'Rollback could not be completed. The Robot may have changed since this revision.',
+        })),
+      });
+  }
+
+  protected changeTypeLabel(type: RobotConfigurationRevision['changeType']): string {
+    return type === 'ROLLBACK' ? 'Rolled back' : 'Persona change';
   }
 }

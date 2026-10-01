@@ -279,8 +279,49 @@
                     <button class="button-secondary" type="button" (click)="toggleExpanded(robot)" [attr.aria-expanded]="isExpanded(robot)">
                       {{ isExpanded(robot) ? 'Hide Details' : 'Details' }}
                     </button>
+                    <button class="button-secondary" type="button" (click)="toggleConfigurationHistory(robot)" [attr.aria-expanded]="isConfigurationHistoryExpanded(robot)">
+                      {{ isConfigurationHistoryExpanded(robot) ? 'Hide Configuration History' : 'Configuration History' }}
+                    </button>
                   </div>
                 </div>
+
+                @if (isConfigurationHistoryExpanded(robot)) {
+                  <div class="robot-card__runs" aria-labelledby="configuration-history-heading">
+                    <h3 id="configuration-history-heading">Configuration history</h3>
+                    <p class="robots__muted">
+                      Every PERSONA change ever applied to this Robot through a human-approved Robot change proposal or
+                      rollback, oldest change last. Rollback is only available on the current (most recent) revision and
+                      always creates a new revision — it never rewrites history.
+                    </p>
+                    @if (configurationHistoryFor(robot).length === 0) {
+                      <p class="robots__muted">No configuration changes have been applied to this Robot yet.</p>
+                    } @else {
+                      @for (revision of configurationHistoryFor(robot); track revision.id) {
+                        <div class="run-row">
+                          <span class="robots__badge">Revision {{ revision.revision }}</span>
+                          <span class="robots__muted">{{ changeTypeLabel(revision.changeType) }}</span>
+                          <span>{{ revision.previousPersonaNameSnapshot ?? 'No Persona' }} &rarr; {{ revision.newPersonaNameSnapshot ?? 'No Persona' }}</span>
+                          <span class="robots__muted">{{ revision.createdAt | date:'medium' }}</span>
+                          @if (revision.reason) { <span class="robots__muted">Reason: {{ revision.reason }}</span> }
+                          @if (isCurrentRevision(robot, revision)) {
+                            @if (!rollbackConfirming()[revision.id]) {
+                              <button class="button-secondary" type="button" (click)="confirmRollback(revision)">Roll back</button>
+                            } @else {
+                              <span role="alertdialog" aria-label="Confirm rollback">
+                                Restore {{ revision.previousPersonaNameSnapshot ?? 'No Persona' }} for this Robot's future runs?
+                                <button type="button" (click)="rollback(robot, revision)" [disabled]="rollbackBusy()[revision.id]">
+                                  {{ rollbackBusy()[revision.id] ? 'Rolling back...' : 'Confirm rollback' }}
+                                </button>
+                                <button class="button-secondary" type="button" (click)="cancelRollback(revision)" [disabled]="rollbackBusy()[revision.id]">Cancel</button>
+                              </span>
+                            }
+                          }
+                          @if (rollbackErrors()[revision.id]) { <span class="robots__error">{{ rollbackErrors()[revision.id] }}</span> }
+                        </div>
+                      }
+                    }
+                  </div>
+                }
                 @if (runNowErrors()[robot.id]) {
                   <p class="robots__error">{{ runNowErrors()[robot.id] }}</p>
                 }

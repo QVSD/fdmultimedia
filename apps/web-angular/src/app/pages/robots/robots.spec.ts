@@ -19,12 +19,13 @@ import { CampaignPlansService } from '../../core/campaign-plans/campaign-plans.s
 import { CampaignContentPlanSummary } from '../../core/campaign-plans/campaign-plan.models';
 import { CampaignCopyService } from '../../core/campaign-copy/campaign-copy.service';
 import { CampaignCopySetSummary } from '../../core/campaign-copy/campaign-copy.models';
+import { RobotConfigurationRevision } from '../../core/publishing/robot-change-proposal.models';
 import { Robots } from './robots';
 
 describe('Robots', () => {
   let component: Robots;
   let fixture: ComponentFixture<Robots>;
-  let robotsService: Pick<RobotsService, 'list' | 'create' | 'runNow' | 'pause' | 'resume' | 'runsForRobot' | 'allRuns' | 'cancelRun'>;
+  let robotsService: Pick<RobotsService, 'list' | 'create' | 'runNow' | 'pause' | 'resume' | 'runsForRobot' | 'allRuns' | 'cancelRun' | 'configurationRevisions' | 'rollbackConfigurationRevision'>;
   let approvalsService: Pick<RobotApprovalsService, 'list' | 'approve' | 'reject'>;
   let assetsService: Pick<AssetsService, 'list'>;
   let socialAccountsService: Pick<SocialAccountsService, 'list'>;
@@ -44,6 +45,8 @@ describe('Robots', () => {
       runsForRobot: vi.fn().mockReturnValue(of([])),
       allRuns: vi.fn().mockReturnValue(of([])),
       cancelRun: vi.fn().mockReturnValue(of(run('CANCELLED'))),
+      configurationRevisions: vi.fn().mockReturnValue(of([])),
+      rollbackConfigurationRevision: vi.fn().mockReturnValue(of(configurationRevision(2, 'ROLLBACK'))),
     };
     approvalsService = {
       list: vi.fn().mockReturnValue(of([])),
@@ -511,6 +514,86 @@ describe('Robots', () => {
     expect(approvalsService.reject).toHaveBeenCalledWith(pending.id);
     expect(component['approvals']()[0].status).toBe('REJECTED');
   });
+
+  it('loads configuration history only when expanded, and shows rollback only on the current revision', () => {
+    vi.mocked(robotsService.list).mockReturnValue(of([robot('ACTIVE', 'DRAFT_ONLY')]));
+    vi.mocked(robotsService.configurationRevisions).mockReturnValue(
+      of([configurationRevision(2, 'PERSONA_CHANGE'), configurationRevision(1, 'PERSONA_CHANGE')]),
+    );
+    fixture = TestBed.createComponent(Robots);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+    const target = component['robots']()[0];
+
+    expect(robotsService.configurationRevisions).not.toHaveBeenCalled();
+
+    component['toggleConfigurationHistory'](target);
+
+    expect(robotsService.configurationRevisions).toHaveBeenCalledWith('robot-1');
+    const history = component['configurationHistoryFor'](target);
+    expect(history).toHaveLength(2);
+    expect(component['isCurrentRevision'](target, history[0])).toBe(true);
+    expect(component['isCurrentRevision'](target, history[1])).toBe(false);
+  });
+
+  it('rolls back the current revision and reloads history and the Robot list', () => {
+    vi.mocked(robotsService.list).mockReturnValue(of([robot('ACTIVE', 'DRAFT_ONLY')]));
+    vi.mocked(robotsService.configurationRevisions).mockReturnValue(of([configurationRevision(1, 'PERSONA_CHANGE')]));
+    fixture = TestBed.createComponent(Robots);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+    const target = component['robots']()[0];
+    component['toggleConfigurationHistory'](target);
+    const revision = component['configurationHistoryFor'](target)[0];
+
+    component['confirmRollback'](revision);
+    expect(component['rollbackConfirming']()[revision.id]).toBe(true);
+
+    const historyCallsBefore = vi.mocked(robotsService.configurationRevisions).mock.calls.length;
+    const listCallsBefore = vi.mocked(robotsService.list).mock.calls.length;
+    component['rollback'](target, revision);
+
+    expect(robotsService.rollbackConfigurationRevision).toHaveBeenCalledWith('robot-1', revision.id, null);
+    expect(robotsService.configurationRevisions).toHaveBeenCalledTimes(historyCallsBefore + 1);
+    expect(robotsService.list).toHaveBeenCalledTimes(listCallsBefore + 1);
+    expect(component['rollbackConfirming']()[revision.id]).toBe(false);
+  });
+
+  it('surfaces a rollback error without clearing the confirmation state silently rewriting history', () => {
+    vi.mocked(robotsService.list).mockReturnValue(of([robot('ACTIVE', 'DRAFT_ONLY')]));
+    vi.mocked(robotsService.configurationRevisions).mockReturnValue(of([configurationRevision(1, 'PERSONA_CHANGE')]));
+    vi.mocked(robotsService.rollbackConfigurationRevision).mockReturnValue(throwError(() => new Error('conflict')));
+    fixture = TestBed.createComponent(Robots);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+    const target = component['robots']()[0];
+    component['toggleConfigurationHistory'](target);
+    const revision = component['configurationHistoryFor'](target)[0];
+
+    component['rollback'](target, revision);
+
+    expect(component['rollbackErrors']()[revision.id]).toBeTruthy();
+  });
+
+  function configurationRevision(revision: number, changeType: RobotConfigurationRevision['changeType']): RobotConfigurationRevision {
+    return {
+      id: `revision-${revision}`,
+      robotId: 'robot-1',
+      revision,
+      changeType,
+      previousPersonaId: 'persona-a',
+      previousPersonaNameSnapshot: 'Persona A',
+      newPersonaId: 'persona-b',
+      newPersonaNameSnapshot: 'Persona B',
+      previousConfigFingerprint: 'fp-before',
+      newConfigFingerprint: 'fp-after',
+      sourceProposalId: 'proposal-1',
+      sourceExperimentId: 'experiment-1',
+      rollbackOfRevisionId: null,
+      reason: null,
+      createdAt: '2026-09-20T08:00:00Z',
+    };
+  }
 
   function robot(status: RobotSummary['status'], autonomyMode: RobotSummary['autonomyMode']): RobotSummary {
     return {
