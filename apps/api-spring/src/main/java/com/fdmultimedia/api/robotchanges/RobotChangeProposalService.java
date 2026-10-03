@@ -57,15 +57,16 @@ public class RobotChangeProposalService {
     private final ExperimentAnalysisService analysisService;
     private final RobotRepository robots;
     private final PersonaRepository personas;
+    private final AdaptiveGuardrailService guardrails;
     private final Clock clock;
 
     public RobotChangeProposalService(AuthService auth, RobotChangeProposalRepository proposals,
             RobotConfigurationRevisionRepository revisions, OptimizationProposalRepository optimizationProposals,
             ExperimentRepository experiments, ExperimentVariantRepository variants, ExperimentAnalysisService analysisService,
-            RobotRepository robots, PersonaRepository personas, Clock clock) {
+            RobotRepository robots, PersonaRepository personas, AdaptiveGuardrailService guardrails, Clock clock) {
         this.auth = auth; this.proposals = proposals; this.revisions = revisions;
         this.optimizationProposals = optimizationProposals; this.experiments = experiments; this.variants = variants;
-        this.analysisService = analysisService; this.robots = robots; this.personas = personas; this.clock = clock;
+        this.analysisService = analysisService; this.robots = robots; this.personas = personas; this.guardrails=guardrails; this.clock = clock;
     }
 
     @Transactional(readOnly = true)
@@ -126,6 +127,7 @@ public class RobotChangeProposalService {
                 effect.confidenceIntervalIncludesZero(), effect.pValue(), effect.standardizedEffectSize(), limitations,
                 rationale, fingerprint, membership.getUser(), Instant.now(clock));
         proposals.saveAndFlush(p);
+        guardrails.evaluateAndPersist(workspace,robot,p,RobotAdaptivePolicyModels.Trigger.CREATE);
         return summary(p);
     }
 
@@ -135,6 +137,8 @@ public class RobotChangeProposalService {
         if (p.getStatus() != Status.READY_FOR_REVIEW) throw conflict("PROPOSAL_NOT_READY_FOR_REVIEW");
         p.approve(Instant.now(clock));
         proposals.saveAndFlush(p);
+        Robot robot=robots.findByWorkspaceAndId(p.getWorkspace(),p.getTargetRobotId()).orElseThrow(()->notFound("Robot not found"));
+        guardrails.evaluateAndPersist(p.getWorkspace(),robot,p,RobotAdaptivePolicyModels.Trigger.APPROVE);
         return summary(p);
     }
 
@@ -183,6 +187,9 @@ public class RobotChangeProposalService {
             return summary(p);
         }
 
+        AdaptiveGuardrailEvaluation evaluation=guardrails.evaluateAndPersist(workspace,robot,p,RobotAdaptivePolicyModels.Trigger.APPLY);
+        if(!evaluation.isEligible())return summary(p);
+
         Instant now = Instant.now(clock);
         robot.applyPersona(candidate, now);
         robots.saveAndFlush(robot);
@@ -192,7 +199,7 @@ public class RobotChangeProposalService {
         RobotConfigurationRevision revision = new RobotConfigurationRevision(workspace, robot.getId(), nextRevision,
                 ChangeType.PERSONA_CHANGE, current == null ? null : current.getId(), current == null ? null : current.getName(),
                 candidate.getId(), candidate.getName(), currentFingerprint, newFingerprint, p.getId(), p.getSourceExperimentId(),
-                null, membership.getUser(), null, now);
+                null, membership.getUser(), null, now,evaluation.getId(),evaluation.getPolicyRevision(),evaluation.getEngineVersion());
         revisions.saveAndFlush(revision);
 
         p.markApplied(now);
@@ -333,7 +340,8 @@ public class RobotChangeProposalService {
         return new RevisionSummary(r.getId(), r.getRobotId(), r.getRevision(), r.getChangeType(), r.getPreviousPersonaId(),
                 r.getPreviousPersonaNameSnapshot(), r.getNewPersonaId(), r.getNewPersonaNameSnapshot(),
                 r.getPreviousConfigFingerprint(), r.getNewConfigFingerprint(), r.getSourceProposalId(), r.getSourceExperimentId(),
-                r.getRollbackOfRevisionId(), r.getReason(), r.getCreatedAt());
+                r.getRollbackOfRevisionId(), r.getReason(), r.getCreatedAt(),r.getGuardrailEvaluationId(),
+                r.getAdaptivePolicyRevision(),r.getGuardrailEngineVersion());
     }
 
     /**

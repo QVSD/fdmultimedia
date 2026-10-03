@@ -8,7 +8,7 @@ import { DashboardBreakdown, DashboardDimension, DashboardFilters, DashboardMetr
 import { CompareRequest, ComparisonResult, InsightsResponse } from './publication-insights.models';
 import { CampaignCohortComparison, CampaignDimension, CampaignOption, CampaignReview, CampaignReviewListItem, CampaignWindow } from './campaign-performance.models';
 import { OptimizationEligibility, OptimizationProposal } from './optimization-proposal.models';
-import { RobotChangeEligibility, RobotChangeProposal } from './robot-change-proposal.models';
+import { AdaptiveGuardrailEvaluation, RobotChangeEligibility, RobotChangeProposal } from './robot-change-proposal.models';
 
 @Injectable({ providedIn: 'root' })
 export class PublicationAnalyticsService {
@@ -154,5 +154,9 @@ export class PublicationAnalyticsService {
 
   applyRobotChangeProposal(id: string): Observable<RobotChangeProposal> {
     return this.http.post<RobotChangeProposal>(`${environment.apiBaseUrl}/robot-change-proposals/${id}/apply`, {}, { withCredentials: true });
+  }
+
+  robotChangeGuardrails(id: string): Observable<AdaptiveGuardrailEvaluation> {
+    return this.http.get<AdaptiveGuardrailEvaluation>(`${environment.apiBaseUrl}/robot-change-proposals/${id}/guardrails`, { withCredentials: true });
   }
 }

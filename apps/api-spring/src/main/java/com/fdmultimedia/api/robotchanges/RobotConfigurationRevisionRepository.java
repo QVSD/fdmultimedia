@@ -1,6 +1,7 @@
 package com.fdmultimedia.api.robotchanges;
 
 import com.fdmultimedia.api.workspaces.Workspace;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -19,4 +20,7 @@ public interface RobotConfigurationRevisionRepository extends JpaRepository<Robo
     Optional<RobotConfigurationRevision> findTopByRobotIdOrderByRevisionDesc(UUID robotId);
 
     Optional<RobotConfigurationRevision> findByRobotIdAndRollbackOfRevisionId(UUID robotId, UUID rollbackOfRevisionId);
+
+    long countByRobotIdAndChangeTypeAndCreatedAtGreaterThanEqual(UUID robotId,
+            RobotChangeProposalModels.ChangeType changeType, Instant since);
 }

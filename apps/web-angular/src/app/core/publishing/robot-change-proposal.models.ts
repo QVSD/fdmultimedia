@@ -69,4 +69,33 @@ export interface RobotConfigurationRevision {
   rollbackOfRevisionId: string | null;
   reason: string | null;
   createdAt: string;
+  guardrailEvaluationId: string | null;
+  adaptivePolicyRevision: number | null;
+  guardrailEngineVersion: string | null;
+}
+
+export type AdaptiveGuardrailReason = 'POLICY_DISABLED' | 'CHANGE_BUDGET_EXHAUSTED' | 'COOLDOWN_ACTIVE' |
+  'ACTIVE_EXPERIMENT' | 'PENDING_CHANGE_EXISTS' | 'POST_CHANGE_OBSERVATION_REQUIRED';
+
+export interface AdaptiveGuardrailEvaluation {
+  id: string; proposalId: string; robotId: string; engineVersion: string; trigger: 'CREATE' | 'APPROVE' | 'APPLY' | 'CHECK';
+  policyRevision: number; eligible: boolean; reasons: AdaptiveGuardrailReason[];
+  budgetAllowed: number; budgetUsed: number; budgetRemaining: number; budgetWindowDays: number;
+  latestConfigurationRevisionId: string | null; lastConfigurationChangeAt: string | null;
+  cooldownHours: number; cooldownEndsAt: string | null; activeExperimentId: string | null; pendingProposalCount: number;
+  runsSinceRevision: number; publicationsSinceRevision: number; eligibleByAgeCount: number;
+  analyticsPublicationCount: number; metricSampleCount: number; coverage: number | null;
+  requiredSampleCount: number; requiredCoverage: number; observationWindow: 'H72'; evaluatedAt: string;
+}
+
+export interface RobotAdaptivePolicy {
+  robotId: string; revision: number; persisted: boolean; enabled: boolean;
+  maxAppliedChangesPerWindow: number; changeBudgetWindowDays: number; cooldownHours: number;
+  requireNoActiveExperiment: boolean; requireNoPendingChange: boolean; requirePostChangeObservation: boolean;
+  updatedAt: string | null;
+}
+
+export interface RobotAdaptivePolicyRevision {
+  id: string; robotId: string; revision: number; previousValues: string | null; newValues: string;
+  actorUserId: string; createdAt: string;
 }

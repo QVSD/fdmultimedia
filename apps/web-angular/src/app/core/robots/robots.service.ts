@@ -4,7 +4,7 @@ import { Observable } from 'rxjs';
 
 import { environment } from '../../../environments/environment';
 import { CreateRobotRequest, RobotRunSummary, RobotSummary, UpdateRobotRequest } from './robot.models';
-import { RobotConfigurationRevision } from '../publishing/robot-change-proposal.models';
+import { RobotAdaptivePolicy, RobotAdaptivePolicyRevision, RobotConfigurationRevision } from '../publishing/robot-change-proposal.models';
 
 @Injectable({ providedIn: 'root' })
 export class RobotsService {
@@ -55,5 +55,23 @@ export class RobotsService {
     return this.http.post<RobotConfigurationRevision>(
       `${environment.apiBaseUrl}/robots/${robotId}/configuration-revisions/${revisionId}/rollback`,
       reason ? { reason } : {}, { withCredentials: true });
+  }
+
+  adaptivePolicy(robotId: string): Observable<RobotAdaptivePolicy> {
+    return this.http.get<RobotAdaptivePolicy>(`${environment.apiBaseUrl}/robots/${robotId}/adaptive-policy`, { withCredentials: true });
+  }
+
+  updateAdaptivePolicy(robotId: string, policy: RobotAdaptivePolicy): Observable<RobotAdaptivePolicy> {
+    return this.http.put<RobotAdaptivePolicy>(`${environment.apiBaseUrl}/robots/${robotId}/adaptive-policy`, {
+      expectedRevision: policy.revision, enabled: policy.enabled,
+      maxAppliedChangesPerWindow: policy.maxAppliedChangesPerWindow,
+      changeBudgetWindowDays: policy.changeBudgetWindowDays, cooldownHours: policy.cooldownHours,
+      requireNoActiveExperiment: policy.requireNoActiveExperiment, requireNoPendingChange: policy.requireNoPendingChange,
+      requirePostChangeObservation: policy.requirePostChangeObservation,
+    }, { withCredentials: true });
+  }
+
+  adaptivePolicyHistory(robotId: string): Observable<RobotAdaptivePolicyRevision[]> {
+    return this.http.get<RobotAdaptivePolicyRevision[]>(`${environment.apiBaseUrl}/robots/${robotId}/adaptive-policy/revisions`, { withCredentials: true });
   }
 }

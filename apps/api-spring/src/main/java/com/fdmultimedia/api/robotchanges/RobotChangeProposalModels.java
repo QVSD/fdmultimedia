@@ -31,5 +31,6 @@ public final class RobotChangeProposalModels {
     public record RevisionSummary(UUID id, UUID robotId, int revision, ChangeType changeType,
             UUID previousPersonaId, String previousPersonaNameSnapshot, UUID newPersonaId, String newPersonaNameSnapshot,
             String previousConfigFingerprint, String newConfigFingerprint, UUID sourceProposalId, UUID sourceExperimentId,
-            UUID rollbackOfRevisionId, String reason, Instant createdAt) {}
+            UUID rollbackOfRevisionId, String reason, Instant createdAt, UUID guardrailEvaluationId,
+            Integer adaptivePolicyRevision, String guardrailEngineVersion) {}
 }

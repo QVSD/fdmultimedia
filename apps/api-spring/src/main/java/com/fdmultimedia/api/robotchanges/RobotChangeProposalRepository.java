@@ -18,6 +18,9 @@ public interface RobotChangeProposalRepository extends JpaRepository<RobotChange
 
     List<RobotChangeProposal> findByWorkspaceAndTargetRobotIdOrderByCreatedAtDesc(Workspace workspace, UUID targetRobotId);
 
+    List<RobotChangeProposal> findByWorkspaceAndTargetRobotIdOrderByCreatedAtAsc(
+            Workspace workspace, UUID targetRobotId, Pageable pageable);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select p from RobotChangeProposal p where p.workspace=:workspace and p.id=:id")
     Optional<RobotChangeProposal> findByWorkspaceAndIdForUpdate(@Param("workspace") Workspace workspace, @Param("id") UUID id);

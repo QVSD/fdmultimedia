@@ -23,7 +23,7 @@ import {
   CampaignCohortComparison, CampaignDimension, CampaignOption, CampaignReview, CampaignWindow,
 } from '../../core/publishing/campaign-performance.models';
 import { OptimizationEligibility, OptimizationProposal } from '../../core/publishing/optimization-proposal.models';
-import { RobotChangeEligibility, RobotChangeProposal } from '../../core/publishing/robot-change-proposal.models';
+import { AdaptiveGuardrailEvaluation, RobotChangeEligibility, RobotChangeProposal } from '../../core/publishing/robot-change-proposal.models';
 import { RobotsService } from '../../core/robots/robots.service';
 import { RobotSummary } from '../../core/robots/robot.models';
 
@@ -93,6 +93,7 @@ export class Analytics implements OnInit, OnDestroy {
   protected readonly robotChangeEligibilities = signal<Record<string, RobotChangeEligibility>>({});
   protected readonly robotChangeBusy = signal(false);
   protected readonly robotChangeMessage = signal<string | null>(null);
+  protected readonly robotChangeGuardrails = signal<Record<string, AdaptiveGuardrailEvaluation>>({});
   private readonly subscriptions = new Subscription();
   private dashboardSubscription?: Subscription;
   private insightsSubscription?: Subscription;
@@ -369,7 +370,10 @@ export class Analytics implements OnInit, OnDestroy {
         : this.analytics.applyRobotChangeProposal(proposal.id);
     this.subscriptions.add(request.subscribe({
       next: (updated) => { this.upsertRobotChangeProposal(updated); this.robotChangeBusy.set(false);
+        if(updated.status==='APPROVED')this.loadRobotChangeGuardrails(updated.id);
+        const blocked=action==='apply'&&updated.status==='APPROVED';
         this.robotChangeMessage.set(updated.status === 'STALE' ? 'This proposal is stale: the Robot or the proposed Persona changed since the proposal was created. Applying has been blocked.'
+          : blocked ? 'The proposal remains approved, but current adaptive guardrails block Apply. Review the evidence below.'
           : action === 'apply' ? 'Apply approved change: the Robot now uses the proposed Persona for future runs. Historical runs keep their original Persona.'
             : `Proposal ${action === 'approve' ? 'approved' : 'rejected'}.`); },
       error: (error: HttpErrorResponse) => { this.robotChangeBusy.set(false); this.robotChangeMessage.set(this.robotChangeError(error)); },
@@ -378,12 +382,19 @@ export class Analytics implements OnInit, OnDestroy {
 
   private loadRobotChangeProposals(): void {
     this.subscriptions.add(this.analytics.robotChangeProposals().subscribe({
-      next: (rows) => this.robotChangeProposals.set(rows), error: () => this.robotChangeProposals.set([]),
+      next: (rows) => { this.robotChangeProposals.set(rows); rows.filter(r=>r.status==='APPROVED').forEach(r=>this.loadRobotChangeGuardrails(r.id)); }, error: () => this.robotChangeProposals.set([]),
     }));
   }
 
   private upsertRobotChangeProposal(proposal: RobotChangeProposal): void {
     this.robotChangeProposals.update((rows) => [proposal, ...rows.filter((row) => row.id !== proposal.id)]);
+  }
+
+  private loadRobotChangeGuardrails(id:string):void {
+    this.subscriptions.add(this.analytics.robotChangeGuardrails(id).subscribe({
+      next:g=>this.robotChangeGuardrails.update(all=>({...all,[id]:g})),
+      error:()=>undefined,
+    }));
   }
 
   private robotChangeError(error: HttpErrorResponse): string {

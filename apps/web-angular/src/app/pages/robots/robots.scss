@@ -226,6 +226,17 @@ button.button-secondary {
   }
 }
 
+.adaptive-policy__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 0.65rem 1rem;
+  margin: 0.75rem 0;
+
+  label { display: grid; gap: 0.25rem; font-size: 0.82rem; }
+  input[type='checkbox'] { justify-self: start; }
+  input[type='number'] { width: 100%; max-width: 12rem; }
+}
+
 .robots__badge {
   display: inline-block;
   min-width: 5.6rem;

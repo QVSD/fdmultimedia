@@ -103,7 +103,7 @@ describe('Analytics', () => {
     'optimizationEligibility' | 'optimizationProposals' | 'createOptimizationProposal' |
     'approveOptimizationProposal' | 'rejectOptimizationProposal' | 'materializeOptimizationProposal' |
     'robotChangeEligibility' | 'robotChangeProposals' | 'createRobotChangeProposal' |
-    'approveRobotChangeProposal' | 'rejectRobotChangeProposal' | 'applyRobotChangeProposal'>;
+    'approveRobotChangeProposal' | 'rejectRobotChangeProposal' | 'applyRobotChangeProposal' | 'robotChangeGuardrails'>;
   let robotsService: Pick<RobotsService, 'list'>;
   let publications: Subject<PublicationSummary[]>;
 
@@ -145,6 +145,13 @@ describe('Analytics', () => {
       approveRobotChangeProposal: vi.fn().mockReturnValue(of(robotChangeProposal('APPROVED'))),
       rejectRobotChangeProposal: vi.fn().mockReturnValue(of(robotChangeProposal('REJECTED'))),
       applyRobotChangeProposal: vi.fn().mockReturnValue(of(robotChangeProposal('APPLIED'))),
+      robotChangeGuardrails: vi.fn().mockReturnValue(of({ id: 'evaluation-1', proposalId: 'change-proposal-1', robotId: 'robot-1',
+        engineVersion: 'ADAPTIVE_GUARDRAILS_V1', trigger: 'CHECK', policyRevision: 0, eligible: true, reasons: [],
+        budgetAllowed: 2, budgetUsed: 0, budgetRemaining: 2, budgetWindowDays: 30,
+        latestConfigurationRevisionId: null, lastConfigurationChangeAt: null, cooldownHours: 72, cooldownEndsAt: null,
+        activeExperimentId: null, pendingProposalCount: 0, runsSinceRevision: 0, publicationsSinceRevision: 0,
+        eligibleByAgeCount: 0, analyticsPublicationCount: 0, metricSampleCount: 0, coverage: null,
+        requiredSampleCount: 5, requiredCoverage: 0.6, observationWindow: 'H72', evaluatedAt: '2026-10-03T00:00:00Z' })),
     };
     robotsService = {
       list: vi.fn().mockReturnValue(of([
@@ -295,6 +302,28 @@ describe('Analytics', () => {
     const component = fixture.componentInstance as any;
     component.robotChangeAction(robotChangeProposal('APPROVED'), 'apply');
     expect(component.robotChangeMessage()).toContain('stale');
+  });
+
+  it('shows temporary guardrail blockers and disables Apply without terminally failing the proposal', () => {
+    const proposal = robotChangeProposal('APPROVED');
+    (fixture.componentInstance as any).tab.set('campaigns');
+    (fixture.componentInstance as any).robotChangeProposals.set([proposal]);
+    (fixture.componentInstance as any).robotChangeGuardrails.set({ [proposal.id]: {
+      id: 'evaluation-2', proposalId: proposal.id, robotId: 'robot-1', engineVersion: 'ADAPTIVE_GUARDRAILS_V1',
+      trigger: 'CHECK', policyRevision: 1, eligible: false,
+      reasons: ['COOLDOWN_ACTIVE', 'POST_CHANGE_OBSERVATION_REQUIRED'], budgetAllowed: 2, budgetUsed: 1,
+      budgetRemaining: 1, budgetWindowDays: 30, latestConfigurationRevisionId: 'revision-1',
+      lastConfigurationChangeAt: '2026-10-03T00:00:00Z', cooldownHours: 72,
+      cooldownEndsAt: '2026-10-06T00:00:00Z', activeExperimentId: null, pendingProposalCount: 0,
+      runsSinceRevision: 1, publicationsSinceRevision: 0, eligibleByAgeCount: 0, analyticsPublicationCount: 0,
+      metricSampleCount: 0, coverage: null, requiredSampleCount: 5, requiredCoverage: 0.6,
+      observationWindow: 'H72', evaluatedAt: '2026-10-03T00:00:00Z',
+    } });
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('Approved, temporarily blocked');
+    expect(fixture.nativeElement.textContent).toContain('COOLDOWN_ACTIVE');
+    const buttons = Array.from(fixture.nativeElement.querySelectorAll('button')) as HTMLButtonElement[];
+    expect(buttons.find((button) => button.textContent?.includes('Apply approved change'))?.disabled).toBe(true);
   });
 
   it('renders the historical cohort comparison table with neutral segment labels, no leaderboard styling', () => {

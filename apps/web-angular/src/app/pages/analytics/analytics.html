@@ -487,13 +487,27 @@
             @if (proposal.status === 'STALE') {
               <p role="note">This proposal is stale: the Robot configuration or the proposed Persona changed since it was created. It cannot be applied.</p>
             }
+            @if (robotChangeGuardrails()[proposal.id]; as guardrail) {
+              <section aria-label="Adaptive guardrails">
+                <h3>Guardrails</h3>
+                <p><strong>{{ guardrail.eligible ? 'Eligible' : 'Approved, temporarily blocked' }}</strong> · Policy revision {{ guardrail.policyRevision }} · {{ guardrail.engineVersion }}</p>
+                @if (!guardrail.eligible) { <p class="analytics__muted">{{ guardrail.reasons.join(', ') }}</p> }
+                <dl>
+                  <div><dt>Change budget</dt><dd>{{ guardrail.budgetUsed }} used · {{ guardrail.budgetRemaining }} remaining / {{ guardrail.budgetWindowDays }} days</dd></div>
+                  <div><dt>Cooldown</dt><dd>{{ guardrail.cooldownEndsAt ? ('Until ' + (guardrail.cooldownEndsAt | date:'medium')) : 'Clear' }}</dd></div>
+                  <div><dt>Post-change observation</dt><dd>{{ guardrail.metricSampleCount }}/{{ guardrail.requiredSampleCount }} H72 samples · coverage {{ guardrail.coverage === null ? 'unavailable' : (guardrail.coverage * 100).toFixed(0) + '%' }}</dd></div>
+                  <div><dt>Pending changes</dt><dd>{{ guardrail.pendingProposalCount }}</dd></div>
+                </dl>
+                <p class="analytics__muted">Guardrails determine current eligibility only. They never approve or apply a change automatically.</p>
+              </section>
+            }
             <div class="analytics__actions">
               @if (proposal.status === 'READY_FOR_REVIEW') {
                 <button type="button" (click)="robotChangeAction(proposal, 'approve')" [disabled]="robotChangeBusy()">Approve</button>
                 <button type="button" class="button-secondary" (click)="robotChangeAction(proposal, 'reject')" [disabled]="robotChangeBusy()">Reject</button>
               }
               @if (proposal.status === 'APPROVED') {
-                <button type="button" (click)="robotChangeAction(proposal, 'apply')" [disabled]="robotChangeBusy()">Apply approved change</button>
+                <button type="button" (click)="robotChangeAction(proposal, 'apply')" [disabled]="robotChangeBusy() || robotChangeGuardrails()[proposal.id]?.eligible === false">Apply approved change</button>
               }
               <a [routerLink]="['/robots']" [queryParams]="{ robotId: proposal.targetRobotId }">Open Robot</a>
             </div>

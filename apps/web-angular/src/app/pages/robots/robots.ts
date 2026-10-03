@@ -43,7 +43,7 @@ import {
   CampaignCopySetStatus,
   CampaignCopySetSummary,
 } from '../../core/campaign-copy/campaign-copy.models';
-import { RobotConfigurationRevision } from '../../core/publishing/robot-change-proposal.models';
+import { RobotAdaptivePolicy, RobotAdaptivePolicyRevision, RobotConfigurationRevision } from '../../core/publishing/robot-change-proposal.models';
 
 type LoadState = 'loading' | 'ready' | 'error';
 
@@ -121,6 +121,11 @@ export class Robots implements OnInit, OnDestroy {
   protected readonly rollbackConfirming = signal<Record<string, boolean>>({});
   protected readonly rollbackBusy = signal<Record<string, boolean>>({});
   protected readonly rollbackErrors = signal<Record<string, string | null>>({});
+  protected readonly adaptivePolicyExpanded = signal<Record<string, boolean>>({});
+  protected readonly adaptivePolicies = signal<Record<string, RobotAdaptivePolicy>>({});
+  protected readonly adaptivePolicyHistory = signal<Record<string, RobotAdaptivePolicyRevision[]>>({});
+  protected readonly adaptivePolicyBusy = signal<Record<string, boolean>>({});
+  protected readonly adaptivePolicyErrors = signal<Record<string, string | null>>({});
 
   private robotsSubscription?: Subscription;
   private approvalsSubscription?: Subscription;
@@ -827,5 +832,41 @@ export class Robots implements OnInit, OnDestroy {
 
   protected changeTypeLabel(type: RobotConfigurationRevision['changeType']): string {
     return type === 'ROLLBACK' ? 'Rolled back' : 'Persona change';
+  }
+
+  protected isAdaptivePolicyExpanded(robot: RobotSummary): boolean { return this.adaptivePolicyExpanded()[robot.id] ?? false; }
+  protected toggleAdaptivePolicy(robot: RobotSummary): void {
+    const expanded = !this.isAdaptivePolicyExpanded(robot);
+    this.adaptivePolicyExpanded.update((v) => ({ ...v, [robot.id]: expanded }));
+    if (expanded && !this.adaptivePolicies()[robot.id]) this.loadAdaptivePolicy(robot.id);
+  }
+  protected adaptivePolicyFor(robot: RobotSummary): RobotAdaptivePolicy | null { return this.adaptivePolicies()[robot.id] ?? null; }
+  protected adaptivePolicyHistoryFor(robot: RobotSummary): RobotAdaptivePolicyRevision[] { return this.adaptivePolicyHistory()[robot.id] ?? []; }
+  protected updateAdaptivePolicyField(robot: RobotSummary, field: keyof RobotAdaptivePolicy, value: boolean | number): void {
+    const policy = this.adaptivePolicyFor(robot); if (!policy) return;
+    this.adaptivePolicies.update((all) => ({ ...all, [robot.id]: { ...policy, [field]: value } }));
+  }
+  protected saveAdaptivePolicy(robot: RobotSummary): void {
+    const policy=this.adaptivePolicyFor(robot); if(!policy)return;
+    this.adaptivePolicyBusy.update(v=>({...v,[robot.id]:true}));this.adaptivePolicyErrors.update(v=>({...v,[robot.id]:null}));
+    this.robotsService.updateAdaptivePolicy(robot.id, policy)
+      .pipe(finalize(() => this.adaptivePolicyBusy.update((v) => ({ ...v, [robot.id]: false }))))
+      .subscribe({
+        next: (saved) => { this.adaptivePolicies.update((v) => ({ ...v, [robot.id]: saved })); this.loadAdaptivePolicyHistory(robot.id); },
+        error: () => this.adaptivePolicyErrors.update((v) => ({ ...v, [robot.id]: 'Policy update failed. Reload before retrying.' })),
+      });
+  }
+  private loadAdaptivePolicy(robotId:string):void {
+    this.robotsService.adaptivePolicy(robotId).subscribe({
+      next: (p) => this.adaptivePolicies.update((v) => ({ ...v, [robotId]: p })),
+      error: () => this.adaptivePolicyErrors.update((v) => ({ ...v, [robotId]: 'Adaptive policy could not be loaded.' })),
+    });
+    this.loadAdaptivePolicyHistory(robotId);
+  }
+  private loadAdaptivePolicyHistory(robotId:string):void {
+    this.robotsService.adaptivePolicyHistory(robotId).subscribe({
+      next: (h) => this.adaptivePolicyHistory.update((v) => ({ ...v, [robotId]: h })),
+      error: () => this.adaptivePolicyHistory.update((v) => ({ ...v, [robotId]: [] })),
+    });
   }
 }

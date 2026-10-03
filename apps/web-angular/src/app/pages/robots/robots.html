@@ -282,6 +282,9 @@
                     <button class="button-secondary" type="button" (click)="toggleConfigurationHistory(robot)" [attr.aria-expanded]="isConfigurationHistoryExpanded(robot)">
                       {{ isConfigurationHistoryExpanded(robot) ? 'Hide Configuration History' : 'Configuration History' }}
                     </button>
+                    <button class="button-secondary" type="button" (click)="toggleAdaptivePolicy(robot)" [attr.aria-expanded]="isAdaptivePolicyExpanded(robot)">
+                      {{ isAdaptivePolicyExpanded(robot) ? 'Hide Adaptive Policy' : 'Adaptive Policy' }}
+                    </button>
                   </div>
                 </div>
 
@@ -320,6 +323,38 @@
                         </div>
                       }
                     }
+                  </div>
+                }
+                @if (isAdaptivePolicyExpanded(robot)) {
+                  <div class="robot-card__runs" aria-label="Adaptive Policy">
+                    <h3>Adaptive Policy</h3>
+                    <p class="robots__muted">These controls limit human-approved adaptive changes. They do not enable automatic Robot modification.</p>
+                    @if (adaptivePolicyFor(robot); as policy) {
+                      <div class="adaptive-policy__grid">
+                        <label><input type="checkbox" [checked]="policy.enabled" (change)="updateAdaptivePolicyField(robot, 'enabled', $any($event.target).checked)"> Enabled</label>
+                        <label>Forward changes per window
+                          <input type="number" min="1" max="10" [value]="policy.maxAppliedChangesPerWindow" (change)="updateAdaptivePolicyField(robot, 'maxAppliedChangesPerWindow', +$any($event.target).value)">
+                        </label>
+                        <label>Window days
+                          <input type="number" min="1" max="365" [value]="policy.changeBudgetWindowDays" (change)="updateAdaptivePolicyField(robot, 'changeBudgetWindowDays', +$any($event.target).value)">
+                        </label>
+                        <label>Cooldown hours
+                          <input type="number" min="0" max="2160" [value]="policy.cooldownHours" (change)="updateAdaptivePolicyField(robot, 'cooldownHours', +$any($event.target).value)">
+                        </label>
+                        <label><input type="checkbox" [checked]="policy.requireNoActiveExperiment" (change)="updateAdaptivePolicyField(robot, 'requireNoActiveExperiment', $any($event.target).checked)"> Require no active Experiment</label>
+                        <label><input type="checkbox" [checked]="policy.requireNoPendingChange" (change)="updateAdaptivePolicyField(robot, 'requireNoPendingChange', $any($event.target).checked)"> Require no older pending change</label>
+                        <label><input type="checkbox" [checked]="policy.requirePostChangeObservation" (change)="updateAdaptivePolicyField(robot, 'requirePostChangeObservation', $any($event.target).checked)"> Require H72 post-change observation</label>
+                      </div>
+                      <button type="button" (click)="saveAdaptivePolicy(robot)" [disabled]="adaptivePolicyBusy()[robot.id]">{{ adaptivePolicyBusy()[robot.id] ? 'Saving...' : 'Save policy' }}</button>
+                      <p class="robots__muted">Effective revision {{ policy.revision }}{{ policy.persisted ? '' : ' (defaults)' }}</p>
+                      @if (adaptivePolicyErrors()[robot.id]) { <p class="robots__error" role="alert">{{ adaptivePolicyErrors()[robot.id] }}</p> }
+                      <details><summary>Policy history</summary>
+                        @if (adaptivePolicyHistoryFor(robot).length === 0) { <p class="robots__muted">No explicit policy revisions yet.</p> }
+                        @for (entry of adaptivePolicyHistoryFor(robot); track entry.id) {
+                          <p class="robots__muted">Revision {{ entry.revision }} · {{ entry.createdAt | date:'medium' }}<br>{{ entry.previousValues ?? 'defaults' }} → {{ entry.newValues }}</p>
+                        }
+                      </details>
+                    } @else { <p class="robots__muted">Loading adaptive policy...</p> }
                   </div>
                 }
                 @if (runNowErrors()[robot.id]) {

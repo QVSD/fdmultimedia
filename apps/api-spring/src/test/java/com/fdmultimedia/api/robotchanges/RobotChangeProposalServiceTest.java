@@ -25,6 +25,7 @@ import com.fdmultimedia.api.workspaces.WorkspaceMembership;
 import com.fdmultimedia.api.workspaces.WorkspaceRole;
 import java.math.BigDecimal;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.*;
@@ -44,8 +45,9 @@ class RobotChangeProposalServiceTest {
     private final ExperimentAnalysisService analysisService = mock(ExperimentAnalysisService.class);
     private final RobotRepository robots = mock(RobotRepository.class);
     private final PersonaRepository personas = mock(PersonaRepository.class);
+    private final AdaptiveGuardrailService guardrails = mock(AdaptiveGuardrailService.class);
     private final RobotChangeProposalService service = new RobotChangeProposalService(auth, proposals, revisions,
-            optimizationProposals, experiments, variants, analysisService, robots, personas, Clock.fixed(NOW, ZoneOffset.UTC));
+            optimizationProposals, experiments, variants, analysisService, robots, personas, guardrails, Clock.fixed(NOW, ZoneOffset.UTC));
 
     private final Workspace workspace = new Workspace("Test", "test");
     private final AppUser owner = new AppUser("owner@example.test", "hash", "Owner");
@@ -66,6 +68,10 @@ class RobotChangeProposalServiceTest {
     @BeforeEach
     void setUp() {
         when(auth.currentMembershipFor(principal)).thenReturn(new WorkspaceMembership(workspace, owner, WorkspaceRole.OWNER));
+        when(guardrails.evaluateAndPersist(any(),any(),any(),any())).thenAnswer(invocation ->
+                new AdaptiveGuardrailEvaluation(workspace, invocation.<RobotChangeProposal>getArgument(2).getId(),
+                        invocation.<Robot>getArgument(1).getId(), invocation.getArgument(3), 0, List.of(), 2, 0, 30,
+                        null, null, 72, null, null, 0, RobotAdaptivePolicyModels.Observation.empty(), NOW));
 
         robot = new Robot(workspace, "Robot", "d", RobotAutonomyMode.REVIEW_REQUIRED, RobotSourcePolicy.EXISTING_ASSET, null,
                 null, null, null, RobotCadenceType.MANUAL_ONLY, null, null, 5, RobotAiPolicy.GENERATE_FOR_REVIEW, currentPersona,
@@ -213,7 +219,7 @@ class RobotChangeProposalServiceTest {
         clearInvocations(robots);
         Summary approved = service.approve(principal, p.getId());
         assertThat(approved.status()).isEqualTo(Status.APPROVED);
-        verifyNoInteractions(robots);
+        verify(robots,never()).saveAndFlush(any());
         verifyNoInteractions(revisions);
 
         RobotChangeProposal p2 = createEntity();
@@ -221,7 +227,7 @@ class RobotChangeProposalServiceTest {
         clearInvocations(robots);
         Summary rejected = service.reject(principal, p2.getId());
         assertThat(rejected.status()).isEqualTo(Status.REJECTED);
-        verifyNoInteractions(robots);
+        verify(robots,never()).saveAndFlush(any());
         verifyNoInteractions(revisions);
     }
 
@@ -260,6 +266,8 @@ class RobotChangeProposalServiceTest {
         assertThat(savedRevisions.get(0).getNewPersonaId()).isEqualTo(candidatePersona.getId());
         assertThat(savedRevisions.get(0).getPreviousPersonaId()).isEqualTo(currentPersona.getId());
         assertThat(savedRevisions.get(0).getSourceProposalId()).isEqualTo(p.getId());
+        assertThat(savedRevisions.get(0).getGuardrailEvaluationId()).isNotNull();
+        assertThat(savedRevisions.get(0).getGuardrailEngineVersion()).isEqualTo(AdaptiveGuardrailService.ENGINE_VERSION);
     }
 
     @Test void applyIsIdempotentAndNeverCreatesASecondRevision() {
@@ -274,6 +282,23 @@ class RobotChangeProposalServiceTest {
         assertThat(second.status()).isEqualTo(Status.APPLIED);
         verify(robots, times(1)).saveAndFlush(any());
         assertThat(savedRevisions).hasSize(1);
+    }
+
+    @Test void temporaryGuardrailBlockKeepsApprovedProposalAndRobotUnchanged() {
+        RobotChangeProposal p=createEntity();p.approve(NOW);
+        when(proposals.findByWorkspaceAndIdForUpdate(workspace,p.getId())).thenReturn(Optional.of(p));
+        when(robots.findByWorkspaceAndIdForUpdate(workspace,robot.getId())).thenReturn(Optional.of(robot));
+        doReturn(new AdaptiveGuardrailEvaluation(workspace,p.getId(),robot.getId(),RobotAdaptivePolicyModels.Trigger.APPLY,
+                        1,List.of(RobotAdaptivePolicyModels.Reason.COOLDOWN_ACTIVE),2,1,30,UUID.randomUUID(),NOW,
+                        72,NOW.plus(Duration.ofHours(72)),null,0,RobotAdaptivePolicyModels.Observation.empty(),NOW))
+                .when(guardrails).evaluateAndPersist(workspace,robot,p,RobotAdaptivePolicyModels.Trigger.APPLY);
+
+        Summary result=service.apply(principal,p.getId());
+
+        assertThat(result.status()).isEqualTo(Status.APPROVED);
+        assertThat(robot.getPersona().getId()).isEqualTo(currentPersona.getId());
+        verify(robots,never()).saveAndFlush(any());
+        assertThat(savedRevisions).isEmpty();
     }
 
     @Test void applyRejectsAndMarksStaleWhenRobotConfigDiverged() {

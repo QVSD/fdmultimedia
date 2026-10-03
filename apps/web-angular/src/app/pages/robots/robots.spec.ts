@@ -25,7 +25,7 @@ import { Robots } from './robots';
 describe('Robots', () => {
   let component: Robots;
   let fixture: ComponentFixture<Robots>;
-  let robotsService: Pick<RobotsService, 'list' | 'create' | 'runNow' | 'pause' | 'resume' | 'runsForRobot' | 'allRuns' | 'cancelRun' | 'configurationRevisions' | 'rollbackConfigurationRevision'>;
+  let robotsService: Pick<RobotsService, 'list' | 'create' | 'runNow' | 'pause' | 'resume' | 'runsForRobot' | 'allRuns' | 'cancelRun' | 'configurationRevisions' | 'rollbackConfigurationRevision' | 'adaptivePolicy' | 'updateAdaptivePolicy' | 'adaptivePolicyHistory'>;
   let approvalsService: Pick<RobotApprovalsService, 'list' | 'approve' | 'reject'>;
   let assetsService: Pick<AssetsService, 'list'>;
   let socialAccountsService: Pick<SocialAccountsService, 'list'>;
@@ -47,6 +47,11 @@ describe('Robots', () => {
       cancelRun: vi.fn().mockReturnValue(of(run('CANCELLED'))),
       configurationRevisions: vi.fn().mockReturnValue(of([])),
       rollbackConfigurationRevision: vi.fn().mockReturnValue(of(configurationRevision(2, 'ROLLBACK'))),
+      adaptivePolicy: vi.fn().mockReturnValue(of({ robotId: 'robot-1', revision: 0, persisted: false, enabled: true,
+        maxAppliedChangesPerWindow: 2, changeBudgetWindowDays: 30, cooldownHours: 72,
+        requireNoActiveExperiment: true, requireNoPendingChange: true, requirePostChangeObservation: true, updatedAt: null })),
+      updateAdaptivePolicy: vi.fn().mockImplementation((_id, policy) => of({ ...policy, revision: 1, persisted: true })),
+      adaptivePolicyHistory: vi.fn().mockReturnValue(of([])),
     };
     approvalsService = {
       list: vi.fn().mockReturnValue(of([])),
@@ -575,6 +580,27 @@ describe('Robots', () => {
     expect(component['rollbackErrors']()[revision.id]).toBeTruthy();
   });
 
+  it('loads conservative adaptive-policy defaults and explains human control', () => {
+    const target = robot('ACTIVE', 'DRAFT_ONLY');
+    component['robots'].set([target]);
+    component['toggleAdaptivePolicy'](target);
+    fixture.detectChanges();
+    expect(robotsService.adaptivePolicy).toHaveBeenCalledWith(target.id);
+    expect(fixture.nativeElement.textContent).toContain('These controls limit human-approved adaptive changes');
+    expect(fixture.nativeElement.textContent).toContain('2');
+    expect(fixture.nativeElement.textContent).toContain('72');
+  });
+
+  it('saves an explicit adaptive-policy revision through the canonical Robot API', () => {
+    const target = robot('ACTIVE', 'DRAFT_ONLY');
+    component['robots'].set([target]);
+    component['toggleAdaptivePolicy'](target);
+    component['updateAdaptivePolicyField'](target, 'cooldownHours', 24);
+    component['saveAdaptivePolicy'](target);
+    expect(robotsService.updateAdaptivePolicy).toHaveBeenCalledWith(target.id, expect.objectContaining({ cooldownHours: 24, revision: 0 }));
+    expect(robotsService.adaptivePolicyHistory).toHaveBeenCalledWith(target.id);
+  });
+
   function configurationRevision(revision: number, changeType: RobotConfigurationRevision['changeType']): RobotConfigurationRevision {
     return {
       id: `revision-${revision}`,
@@ -592,6 +618,9 @@ describe('Robots', () => {
       rollbackOfRevisionId: null,
       reason: null,
       createdAt: '2026-09-20T08:00:00Z',
+      guardrailEvaluationId: null,
+      adaptivePolicyRevision: null,
+      guardrailEngineVersion: null,
     };
   }
 

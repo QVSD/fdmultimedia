@@ -33,6 +33,9 @@ public class RobotConfigurationRevision {
     @Column(name = "source_proposal_id") private UUID sourceProposalId;
     @Column(name = "source_experiment_id") private UUID sourceExperimentId;
     @Column(name = "rollback_of_revision_id") private UUID rollbackOfRevisionId;
+    @Column(name = "guardrail_evaluation_id") private UUID guardrailEvaluationId;
+    @Column(name = "adaptive_policy_revision") private Integer adaptivePolicyRevision;
+    @Column(name = "guardrail_engine_version") private String guardrailEngineVersion;
     @ManyToOne(fetch = FetchType.LAZY, optional = false) @JoinColumn(name = "actor_user_id") private AppUser actor;
     @Column private String reason;
     @Column(name = "created_at", nullable = false) private Instant createdAt;
@@ -43,13 +46,24 @@ public class RobotConfigurationRevision {
             UUID previousPersonaId, String previousPersonaNameSnapshot, UUID newPersonaId, String newPersonaNameSnapshot,
             String previousConfigFingerprint, String newConfigFingerprint, UUID sourceProposalId, UUID sourceExperimentId,
             UUID rollbackOfRevisionId, AppUser actor, String reason, Instant now) {
+        this(workspace,robotId,revision,changeType,previousPersonaId,previousPersonaNameSnapshot,newPersonaId,
+                newPersonaNameSnapshot,previousConfigFingerprint,newConfigFingerprint,sourceProposalId,sourceExperimentId,
+                rollbackOfRevisionId,actor,reason,now,null,null,null);
+    }
+
+    public RobotConfigurationRevision(Workspace workspace, UUID robotId, int revision, ChangeType changeType,
+            UUID previousPersonaId, String previousPersonaNameSnapshot, UUID newPersonaId, String newPersonaNameSnapshot,
+            String previousConfigFingerprint, String newConfigFingerprint, UUID sourceProposalId, UUID sourceExperimentId,
+            UUID rollbackOfRevisionId, AppUser actor, String reason, Instant now, UUID guardrailEvaluationId,
+            Integer adaptivePolicyRevision, String guardrailEngineVersion) {
         this.id = UUID.randomUUID(); this.workspace = workspace; this.robotId = robotId; this.revision = revision;
         this.changeType = changeType; this.previousPersonaId = previousPersonaId;
         this.previousPersonaNameSnapshot = previousPersonaNameSnapshot; this.newPersonaId = newPersonaId;
         this.newPersonaNameSnapshot = newPersonaNameSnapshot; this.previousConfigFingerprint = previousConfigFingerprint;
         this.newConfigFingerprint = newConfigFingerprint; this.sourceProposalId = sourceProposalId;
         this.sourceExperimentId = sourceExperimentId; this.rollbackOfRevisionId = rollbackOfRevisionId;
-        this.actor = actor; this.reason = reason; this.createdAt = now;
+        this.actor = actor; this.reason = reason; this.createdAt = now;this.guardrailEvaluationId=guardrailEvaluationId;
+        this.adaptivePolicyRevision=adaptivePolicyRevision;this.guardrailEngineVersion=guardrailEngineVersion;
     }
 
     public UUID getId() { return id; } public Workspace getWorkspace() { return workspace; } public UUID getRobotId() { return robotId; }
@@ -59,5 +73,7 @@ public class RobotConfigurationRevision {
     public String getPreviousConfigFingerprint() { return previousConfigFingerprint; } public String getNewConfigFingerprint() { return newConfigFingerprint; }
     public UUID getSourceProposalId() { return sourceProposalId; } public UUID getSourceExperimentId() { return sourceExperimentId; }
     public UUID getRollbackOfRevisionId() { return rollbackOfRevisionId; } public AppUser getActor() { return actor; }
+    public UUID getGuardrailEvaluationId(){return guardrailEvaluationId;} public Integer getAdaptivePolicyRevision(){return adaptivePolicyRevision;}
+    public String getGuardrailEngineVersion(){return guardrailEngineVersion;}
     public String getReason() { return reason; } public Instant getCreatedAt() { return createdAt; }
 }
