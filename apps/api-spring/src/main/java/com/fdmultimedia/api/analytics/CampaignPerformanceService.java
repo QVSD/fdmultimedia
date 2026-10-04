@@ -18,6 +18,8 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.beans.factory.annotation.Autowired;
 
 @Service
 public class CampaignPerformanceService {
@@ -34,6 +36,7 @@ public class CampaignPerformanceService {
     private final CampaignPerformanceStore store;
     private final PerformanceInsightProperties thresholds;
     private final Clock clock;
+    @Autowired(required=false) private ApplicationEventPublisher events;
 
     public CampaignPerformanceService(AuthService auth,RobotRunRepository runs,CampaignPerformanceReviewRepository reviews,
             CampaignPerformanceReviewOutputRepository outputs,CampaignPerformanceRecommendationRepository recommendations,
@@ -68,6 +71,7 @@ public class CampaignPerformanceService {
             recommendations.save(new CampaignPerformanceRecommendation(review,sequence++,draft.type(),metric,draft.dimension(),
                     draft.evidence(),draft.message(),limitations(evidence),now));
         }
+        if(events!=null)events.publishEvent(new CampaignPerformanceReviewCreatedEvent(review.getId(),run.getRobot().getId()));
         return detail(review);
     }
 

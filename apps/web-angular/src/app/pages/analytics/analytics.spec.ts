@@ -241,6 +241,8 @@ describe('Analytics', () => {
       rationale: 'Observed medians differ; this is a hypothesis to test, not proof of causation.',
       limitation: 'Historical Persona differences are observational and may be confounded.',
       materializedExperimentId: 'experiment-1', createdAt: '2026-09-20T00:00:00Z', reviewedAt: '2026-09-20T01:00:00Z', materializedAt: '2026-09-20T02:00:00Z',
+      origin: 'AUTO_PROPOSE', automationEngineVersion: 'AUTONOMOUS_PROPOSALS_V1', automationRobotId: 'robot-1',
+      automationPolicyRevision: 2, automationTrigger: 'RECONCILIATION', automationOpportunityFingerprint: 'opportunity',
     };
     (fixture.componentInstance as any).tab.set('campaigns');
     (fixture.componentInstance as any).optimizationProposals.set([proposal]);
@@ -248,6 +250,7 @@ describe('Analytics', () => {
     const text = fixture.nativeElement.textContent as string;
     expect(text).toContain('PERSONA proposal'); expect(text).toContain('Persona A'); expect(text).toContain('Persona B');
     expect(text).toContain('Experiment created as DRAFT'); expect(text).toContain('No Robot has been enrolled');
+    expect(text).toContain('Automatically generated'); expect(text).not.toContain('awaiting human review');
     expect(text).toContain('synthetic and deterministic'); expect(text.toLowerCase()).not.toContain('winner');
   });
 

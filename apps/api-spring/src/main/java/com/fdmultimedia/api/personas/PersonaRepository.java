@@ -9,6 +9,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+import org.springframework.data.domain.Pageable;
 
 public interface PersonaRepository extends JpaRepository<Persona, UUID> {
 
@@ -19,4 +20,6 @@ public interface PersonaRepository extends JpaRepository<Persona, UUID> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select p from Persona p where p.workspace = :workspace and p.id = :id")
     Optional<Persona> findByWorkspaceAndIdForUpdate(@Param("workspace") Workspace workspace, @Param("id") UUID id);
+
+    List<Persona> findByWorkspaceAndStatusOrderByIdAsc(Workspace workspace,PersonaStatus status,Pageable pageable);
 }

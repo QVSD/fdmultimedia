@@ -25,7 +25,7 @@ import { Robots } from './robots';
 describe('Robots', () => {
   let component: Robots;
   let fixture: ComponentFixture<Robots>;
-  let robotsService: Pick<RobotsService, 'list' | 'create' | 'runNow' | 'pause' | 'resume' | 'runsForRobot' | 'allRuns' | 'cancelRun' | 'configurationRevisions' | 'rollbackConfigurationRevision' | 'adaptivePolicy' | 'updateAdaptivePolicy' | 'adaptivePolicyHistory'>;
+  let robotsService: Pick<RobotsService, 'list' | 'create' | 'runNow' | 'pause' | 'resume' | 'runsForRobot' | 'allRuns' | 'cancelRun' | 'configurationRevisions' | 'rollbackConfigurationRevision' | 'adaptivePolicy' | 'updateAdaptivePolicy' | 'adaptivePolicyHistory' | 'adaptiveProposalEligibility'>;
   let approvalsService: Pick<RobotApprovalsService, 'list' | 'approve' | 'reject'>;
   let assetsService: Pick<AssetsService, 'list'>;
   let socialAccountsService: Pick<SocialAccountsService, 'list'>;
@@ -49,9 +49,13 @@ describe('Robots', () => {
       rollbackConfigurationRevision: vi.fn().mockReturnValue(of(configurationRevision(2, 'ROLLBACK'))),
       adaptivePolicy: vi.fn().mockReturnValue(of({ robotId: 'robot-1', revision: 0, persisted: false, enabled: true,
         maxAppliedChangesPerWindow: 2, changeBudgetWindowDays: 30, cooldownHours: 72,
-        requireNoActiveExperiment: true, requireNoPendingChange: true, requirePostChangeObservation: true, updatedAt: null })),
+        requireNoActiveExperiment: true, requireNoPendingChange: true, requirePostChangeObservation: true,
+        proposalAutomationMode: 'MANUAL_ONLY', updatedAt: null })),
       updateAdaptivePolicy: vi.fn().mockImplementation((_id, policy) => of({ ...policy, revision: 1, persisted: true })),
       adaptivePolicyHistory: vi.fn().mockReturnValue(of([])),
+      adaptiveProposalEligibility: vi.fn().mockReturnValue(of({ robotId: 'robot-1', eligible: false,
+        reasons: ['MANUAL_ONLY'], policyRevision: 0, sourceReviewId: null, candidateCountConsidered: 0,
+        selectedCandidatePersonaId: null, evidenceFingerprint: null, opportunityFingerprint: null, existingProposalId: null })),
     };
     approvalsService = {
       list: vi.fn().mockReturnValue(of([])),
@@ -587,8 +591,18 @@ describe('Robots', () => {
     fixture.detectChanges();
     expect(robotsService.adaptivePolicy).toHaveBeenCalledWith(target.id);
     expect(fixture.nativeElement.textContent).toContain('These controls limit human-approved adaptive changes');
+    expect(fixture.nativeElement.textContent).toContain('Manual only');
+    expect(fixture.nativeElement.textContent).toContain('never approves experiments or changes Robot configuration');
     expect(fixture.nativeElement.textContent).toContain('2');
     expect(fixture.nativeElement.textContent).toContain('72');
+  });
+
+  it('checks autonomous proposal eligibility without changing policy or Robot configuration', () => {
+    const target = robot('ACTIVE', 'DRAFT_ONLY'); component['robots'].set([target]); component['toggleAdaptivePolicy'](target);
+    component['checkAdaptiveProposalEligibility'](target); fixture.detectChanges();
+    expect(robotsService.adaptiveProposalEligibility).toHaveBeenCalledWith(target.id);
+    expect(fixture.nativeElement.textContent).toContain('Not eligible: MANUAL_ONLY');
+    expect(robotsService.updateAdaptivePolicy).not.toHaveBeenCalled();
   });
 
   it('saves an explicit adaptive-policy revision through the canonical Robot API', () => {

@@ -2,6 +2,7 @@ import { DashboardMetric } from './publication-dashboard.models';
 import { CampaignWindow } from './campaign-performance.models';
 
 export type OptimizationProposalStatus = 'READY_FOR_REVIEW' | 'APPROVED' | 'REJECTED' | 'MATERIALIZED' | 'STALE' | 'FAILED';
+export type OptimizationProposalOrigin = 'MANUAL' | 'AUTO_PROPOSE';
 export interface OptimizationEligibility {
   eligible: boolean; reasonCode: string | null; baselinePersonaId: string | null; baselinePersonaName: string | null;
   metric: DashboardMetric; observationWindow: CampaignWindow; provider: string | null;
@@ -18,4 +19,7 @@ export interface OptimizationProposal {
   direction: 'HIGHER_OBSERVED' | 'LOWER_OBSERVED' | 'SIMILAR_OBSERVED'; evidenceFingerprint: string;
   rationale: string; limitation: string; materializedExperimentId: string | null;
   createdAt: string; reviewedAt: string | null; materializedAt: string | null;
+  origin: OptimizationProposalOrigin; automationEngineVersion: string | null; automationRobotId: string | null;
+  automationPolicyRevision: number | null; automationTrigger: string | null;
+  automationOpportunityFingerprint: string | null;
 }

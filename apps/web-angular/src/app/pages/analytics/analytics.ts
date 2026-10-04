@@ -22,7 +22,7 @@ import {
 import {
   CampaignCohortComparison, CampaignDimension, CampaignOption, CampaignReview, CampaignWindow,
 } from '../../core/publishing/campaign-performance.models';
-import { OptimizationEligibility, OptimizationProposal } from '../../core/publishing/optimization-proposal.models';
+import { OptimizationEligibility, OptimizationProposal, OptimizationProposalOrigin } from '../../core/publishing/optimization-proposal.models';
 import { AdaptiveGuardrailEvaluation, RobotChangeEligibility, RobotChangeProposal } from '../../core/publishing/robot-change-proposal.models';
 import { RobotsService } from '../../core/robots/robots.service';
 import { RobotSummary } from '../../core/robots/robot.models';
@@ -87,6 +87,7 @@ export class Analytics implements OnInit, OnDestroy {
   protected readonly optimizationCandidateId = signal('');
   protected readonly optimizationBusy = signal(false);
   protected readonly optimizationMessage = signal<string | null>(null);
+  protected readonly optimizationOrigin = signal<'ALL' | OptimizationProposalOrigin>('ALL');
   protected readonly robotChangeRobots = signal<RobotSummary[]>([]);
   protected readonly robotChangeProposals = signal<RobotChangeProposal[]>([]);
   protected readonly robotChangeTargets = signal<Record<string, string>>({});
@@ -276,6 +277,9 @@ export class Analytics implements OnInit, OnDestroy {
   }
 
   protected chooseOptimizationCandidate(value: string): void { this.optimizationCandidateId.set(value); }
+  protected chooseOptimizationOrigin(value: 'ALL' | OptimizationProposalOrigin): void {
+    this.optimizationOrigin.set(value); this.loadOptimizationProposals();
+  }
 
   protected createOptimizationProposal(): void {
     const review = this.campaignReview(); const candidate = this.optimizationCandidateId();
@@ -312,7 +316,8 @@ export class Analytics implements OnInit, OnDestroy {
   }
 
   private loadOptimizationProposals(): void {
-    this.subscriptions.add(this.analytics.optimizationProposals().subscribe({
+    const origin=this.optimizationOrigin();
+    this.subscriptions.add(this.analytics.optimizationProposals(50,origin==='ALL'?undefined:origin).subscribe({
       next: (rows) => this.optimizationProposals.set(rows), error: () => this.optimizationProposals.set([]),
     }));
   }

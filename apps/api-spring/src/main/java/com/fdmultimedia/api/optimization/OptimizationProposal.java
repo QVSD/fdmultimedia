@@ -5,6 +5,7 @@ import com.fdmultimedia.api.analytics.DashboardQuery;
 import com.fdmultimedia.api.optimization.OptimizationProposalModels.Direction;
 import com.fdmultimedia.api.optimization.OptimizationProposalModels.Statistic;
 import com.fdmultimedia.api.optimization.OptimizationProposalModels.Status;
+import com.fdmultimedia.api.optimization.OptimizationProposalModels.Origin;
 import com.fdmultimedia.api.users.AppUser;
 import com.fdmultimedia.api.workspaces.Workspace;
 import jakarta.persistence.*;
@@ -50,6 +51,12 @@ public class OptimizationProposal {
     @Column(nullable=false) private String rationale;
     @Column(nullable=false) private String limitation;
     @Column(name="materialized_experiment_id") private UUID materializedExperimentId;
+    @Enumerated(EnumType.STRING) @Column(nullable=false) private Origin origin;
+    @Column(name="automation_engine_version") private String automationEngineVersion;
+    @Column(name="automation_robot_id") private UUID automationRobotId;
+    @Column(name="automation_policy_revision") private Integer automationPolicyRevision;
+    @Column(name="automation_trigger") private String automationTrigger;
+    @Column(name="automation_opportunity_fingerprint") private String automationOpportunityFingerprint;
     @ManyToOne(fetch=FetchType.LAZY,optional=false) @JoinColumn(name="created_by_user_id") private AppUser createdByUser;
     @Column(name="created_at",nullable=false) private Instant createdAt;
     @Column(name="reviewed_at") private Instant reviewedAt;
@@ -65,6 +72,23 @@ public class OptimizationProposal {
             BigDecimal baselineValue, BigDecimal candidateValue, BigDecimal absoluteDifference,
             BigDecimal relativeDifferencePercent, Direction direction, String fingerprint,
             String rationale, String limitation, AppUser createdByUser, Instant now) {
+        this(workspace,sourceReview,revision,baselinePersonaId,baselinePersonaName,baselinePersonaFingerprint,
+                candidatePersonaId,candidatePersonaName,candidatePersonaFingerprint,metric,window,provider,cohortFrom,
+                cohortTo,baselineSample,candidateSample,baselineEligible,candidateEligible,baselineCoverage,
+                candidateCoverage,baselineValue,candidateValue,absoluteDifference,relativeDifferencePercent,direction,
+                fingerprint,rationale,limitation,createdByUser,now,Origin.MANUAL,null,null,null,null,fingerprint);
+    }
+    public OptimizationProposal(Workspace workspace, CampaignPerformanceReview sourceReview, int revision,
+            UUID baselinePersonaId, String baselinePersonaName, String baselinePersonaFingerprint,
+            UUID candidatePersonaId, String candidatePersonaName, String candidatePersonaFingerprint,
+            DashboardQuery.Metric metric, DashboardQuery.Window window, String provider,
+            Instant cohortFrom, Instant cohortTo, int baselineSample, int candidateSample,
+            int baselineEligible, int candidateEligible, BigDecimal baselineCoverage, BigDecimal candidateCoverage,
+            BigDecimal baselineValue, BigDecimal candidateValue, BigDecimal absoluteDifference,
+            BigDecimal relativeDifferencePercent, Direction direction, String fingerprint,
+            String rationale, String limitation, AppUser createdByUser, Instant now, Origin origin,
+            String automationEngineVersion, UUID automationRobotId, Integer automationPolicyRevision,
+            String automationTrigger, String automationOpportunityFingerprint) {
         this.id=UUID.randomUUID(); this.workspace=workspace; this.sourceReview=sourceReview; this.revision=revision;
         this.current=true; this.engineVersion=OptimizationProposalService.ENGINE_VERSION; this.factor="PERSONA";
         this.status=Status.READY_FOR_REVIEW; this.baselinePersonaId=baselinePersonaId;
@@ -79,7 +103,10 @@ public class OptimizationProposal {
         this.baselineValue=baselineValue; this.candidateValue=candidateValue;
         this.absoluteDifference=absoluteDifference; this.relativeDifferencePercent=relativeDifferencePercent;
         this.direction=direction; this.evidenceFingerprint=fingerprint; this.rationale=rationale;
-        this.limitation=limitation; this.createdByUser=createdByUser; this.createdAt=now;
+        this.limitation=limitation; this.createdByUser=createdByUser; this.createdAt=now;this.origin=origin;
+        this.automationEngineVersion=automationEngineVersion;this.automationRobotId=automationRobotId;
+        this.automationPolicyRevision=automationPolicyRevision;this.automationTrigger=automationTrigger;
+        this.automationOpportunityFingerprint=automationOpportunityFingerprint;
     }
     public void supersede(){this.current=false;}
     public void approve(Instant now){require(Status.READY_FOR_REVIEW);status=Status.APPROVED;reviewedAt=now;}
@@ -107,4 +134,7 @@ public class OptimizationProposal {
     public String getRationale(){return rationale;} public String getLimitation(){return limitation;}
     public UUID getMaterializedExperimentId(){return materializedExperimentId;} public Instant getCreatedAt(){return createdAt;}
     public Instant getReviewedAt(){return reviewedAt;} public Instant getMaterializedAt(){return materializedAt;}
+    public Origin getOrigin(){return origin;} public String getAutomationEngineVersion(){return automationEngineVersion;}
+    public UUID getAutomationRobotId(){return automationRobotId;} public Integer getAutomationPolicyRevision(){return automationPolicyRevision;}
+    public String getAutomationTrigger(){return automationTrigger;} public String getAutomationOpportunityFingerprint(){return automationOpportunityFingerprint;}
 }

@@ -8,6 +8,8 @@ import java.util.UUID;
 public final class RobotAdaptivePolicyModels {
     private RobotAdaptivePolicyModels() {}
 
+    public enum ProposalAutomationMode { MANUAL_ONLY, AUTO_PROPOSE }
+
     public enum Trigger { CREATE, APPROVE, APPLY, CHECK }
     public enum Reason {
         POLICY_DISABLED,
@@ -20,12 +22,29 @@ public final class RobotAdaptivePolicyModels {
 
     public record UpdateRequest(Integer expectedRevision, Boolean enabled, Integer maxAppliedChangesPerWindow,
             Integer changeBudgetWindowDays, Integer cooldownHours, Boolean requireNoActiveExperiment,
-            Boolean requireNoPendingChange, Boolean requirePostChangeObservation) {}
+            Boolean requireNoPendingChange, Boolean requirePostChangeObservation,
+            ProposalAutomationMode proposalAutomationMode) {
+        public UpdateRequest(Integer expectedRevision, Boolean enabled, Integer maxAppliedChangesPerWindow,
+                Integer changeBudgetWindowDays, Integer cooldownHours, Boolean requireNoActiveExperiment,
+                Boolean requireNoPendingChange, Boolean requirePostChangeObservation) {
+            this(expectedRevision, enabled, maxAppliedChangesPerWindow, changeBudgetWindowDays, cooldownHours,
+                    requireNoActiveExperiment, requireNoPendingChange, requirePostChangeObservation, null);
+        }
+    }
 
     public record PolicySummary(UUID robotId, int revision, boolean persisted, boolean enabled,
             int maxAppliedChangesPerWindow, int changeBudgetWindowDays, int cooldownHours,
             boolean requireNoActiveExperiment, boolean requireNoPendingChange,
-            boolean requirePostChangeObservation, Instant updatedAt) {}
+            boolean requirePostChangeObservation, ProposalAutomationMode proposalAutomationMode, Instant updatedAt) {
+        public PolicySummary(UUID robotId, int revision, boolean persisted, boolean enabled,
+                int maxAppliedChangesPerWindow, int changeBudgetWindowDays, int cooldownHours,
+                boolean requireNoActiveExperiment, boolean requireNoPendingChange,
+                boolean requirePostChangeObservation, Instant updatedAt) {
+            this(robotId, revision, persisted, enabled, maxAppliedChangesPerWindow, changeBudgetWindowDays,
+                    cooldownHours, requireNoActiveExperiment, requireNoPendingChange,
+                    requirePostChangeObservation, ProposalAutomationMode.MANUAL_ONLY, updatedAt);
+        }
+    }
 
     public record PolicyRevisionSummary(UUID id, UUID robotId, int revision, String previousValues,
             String newValues, UUID actorUserId, Instant createdAt) {}

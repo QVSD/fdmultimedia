@@ -11,6 +11,7 @@ public final class OptimizationProposalModels {
     public enum Status { READY_FOR_REVIEW, APPROVED, REJECTED, MATERIALIZED, STALE, FAILED }
     public enum Statistic { MEDIAN }
     public enum Direction { HIGHER_OBSERVED, LOWER_OBSERVED, SIMILAR_OBSERVED }
+    public enum Origin { MANUAL, AUTO_PROPOSE }
     public record CreateRequest(UUID sourceReviewId, UUID candidatePersonaId) {}
     public record Summary(UUID id, UUID sourceReviewId, int revision, boolean current,
             String engineVersion, String factor, Status status,
@@ -23,9 +24,16 @@ public final class OptimizationProposalModels {
             BigDecimal baselineValue, BigDecimal candidateValue,
             BigDecimal absoluteDifference, BigDecimal relativeDifferencePercent,
             Direction direction, String evidenceFingerprint, String rationale, String limitation,
-            UUID materializedExperimentId, Instant createdAt, Instant reviewedAt, Instant materializedAt) {}
+            UUID materializedExperimentId, Instant createdAt, Instant reviewedAt, Instant materializedAt,
+            Origin origin, String automationEngineVersion, UUID automationRobotId,
+            Integer automationPolicyRevision, String automationTrigger, String automationOpportunityFingerprint) {}
     public record Eligibility(boolean eligible, String reasonCode, UUID baselinePersonaId,
             String baselinePersonaName, DashboardQuery.Metric metric, DashboardQuery.Window observationWindow,
             String provider, int minimumSample, BigDecimal minimumCoverage,
             BigDecimal materialDifferencePercent, List<String> limitations) {}
+
+    public record AutonomousEvidence(UUID sourceReviewId, UUID baselinePersonaId, String baselinePersonaName,
+            UUID candidatePersonaId, String candidatePersonaName, DashboardQuery.Metric metric,
+            DashboardQuery.Window observationWindow, String provider, Direction direction,
+            String evidenceFingerprint, String semanticEvidenceFingerprint) {}
 }

@@ -164,5 +164,7 @@ class OptimizationProposalServiceTest {
     private OptimizationProposal createEntity(){service.create(principal,new CreateRequest(review.getId(),candidate.getId()));return saved.get();}
     private Persona persona(String name){return new Persona(workspace,name,null,SuggestionLanguage.AUTO,SuggestionTone.NEUTRAL,"Audience","Voice",null,null,null,null,owner,NOW);}
     private CampaignPerformanceReview review(){return review(EvidenceStatus.READY);}
-    private CampaignPerformanceReview review(EvidenceStatus status){RobotRun run=mock(RobotRun.class);when(run.getWorkspace()).thenReturn(workspace);when(run.getStatus()).thenReturn(RobotRunStatus.SUCCEEDED);return new CampaignPerformanceReview(run,1,DashboardQuery.Window.H72,DashboardQuery.Metric.VIEWS,CampaignPerformanceService.ENGINE_VERSION,CampaignPerformanceService.RECOMMENDATION_VERSION,status,5,5,5,0,5,5,NOW,owner,NOW);}
+    private CampaignPerformanceReview review(EvidenceStatus status){RobotRun run=mock(RobotRun.class);Robot robot=mock(Robot.class);
+        when(robot.getId()).thenReturn(UUID.randomUUID());when(run.getRobot()).thenReturn(robot);when(run.getWorkspace()).thenReturn(workspace);
+        when(run.getStatus()).thenReturn(RobotRunStatus.SUCCEEDED);return new CampaignPerformanceReview(run,1,DashboardQuery.Window.H72,DashboardQuery.Metric.VIEWS,CampaignPerformanceService.ENGINE_VERSION,CampaignPerformanceService.RECOMMENDATION_VERSION,status,5,5,5,0,5,5,NOW,owner,NOW);}
 }

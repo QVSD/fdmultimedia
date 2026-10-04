@@ -21,6 +21,10 @@ public interface RobotRepository extends JpaRepository<Robot, UUID> {
     @Query("select r from Robot r where r.workspace = :workspace and r.id = :id")
     Optional<Robot> findByWorkspaceAndIdForUpdate(@Param("workspace") Workspace workspace, @Param("id") UUID id);
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select r from Robot r where r.id=:id")
+    Optional<Robot> findByIdForUpdate(@Param("id") UUID id);
+
     /**
      * Global (not workspace-scoped) due-Robot claim for the central
      * scheduler — mirrors {@code PublishScheduleRepository.findNextDueForUpdate}

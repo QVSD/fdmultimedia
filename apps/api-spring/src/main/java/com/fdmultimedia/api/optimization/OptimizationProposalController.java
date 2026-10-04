@@ -11,7 +11,8 @@ import org.springframework.web.bind.annotation.*;
 public class OptimizationProposalController {
     private final OptimizationProposalService service;
     public OptimizationProposalController(OptimizationProposalService service){this.service=service;}
-    @GetMapping public List<Summary> list(@AuthenticationPrincipal AuthenticatedUser user,@RequestParam(defaultValue="50") int limit){return service.list(user,limit);}
+    @GetMapping public List<Summary> list(@AuthenticationPrincipal AuthenticatedUser user,@RequestParam(defaultValue="50") int limit,
+            @RequestParam(required=false) Origin origin){return service.list(user,limit,origin);}
     @GetMapping("/{id}") public Summary get(@AuthenticationPrincipal AuthenticatedUser user,@PathVariable UUID id){return service.get(user,id);}
     @GetMapping("/eligibility/{reviewId}") public Eligibility eligibility(@AuthenticationPrincipal AuthenticatedUser user,@PathVariable UUID reviewId){return service.eligibility(user,reviewId);}
     @PostMapping public Summary create(@AuthenticationPrincipal AuthenticatedUser user,@RequestBody CreateRequest request){return service.create(user,request);}

@@ -344,8 +344,24 @@
                         <label><input type="checkbox" [checked]="policy.requireNoActiveExperiment" (change)="updateAdaptivePolicyField(robot, 'requireNoActiveExperiment', $any($event.target).checked)"> Require no active Experiment</label>
                         <label><input type="checkbox" [checked]="policy.requireNoPendingChange" (change)="updateAdaptivePolicyField(robot, 'requireNoPendingChange', $any($event.target).checked)"> Require no older pending change</label>
                         <label><input type="checkbox" [checked]="policy.requirePostChangeObservation" (change)="updateAdaptivePolicyField(robot, 'requirePostChangeObservation', $any($event.target).checked)"> Require H72 post-change observation</label>
+                        <label>Proposal automation
+                          <select [value]="policy.proposalAutomationMode" (change)="updateAdaptivePolicyField(robot, 'proposalAutomationMode', $any($event.target).value)">
+                            <option value="MANUAL_ONLY">Manual only</option>
+                            <option value="AUTO_PROPOSE">Automatically create proposals for review</option>
+                          </select>
+                        </label>
                       </div>
+                      <p class="robots__muted">Automatic proposal generation identifies evidence worth testing. It never approves experiments or changes Robot configuration.</p>
                       <button type="button" (click)="saveAdaptivePolicy(robot)" [disabled]="adaptivePolicyBusy()[robot.id]">{{ adaptivePolicyBusy()[robot.id] ? 'Saving...' : 'Save policy' }}</button>
+                      <button class="button-secondary" type="button" (click)="checkAdaptiveProposalEligibility(robot)" [disabled]="adaptiveProposalEligibilityBusy()[robot.id]">
+                        {{ adaptiveProposalEligibilityBusy()[robot.id] ? 'Checking...' : 'Check eligibility' }}
+                      </button>
+                      @if (adaptiveProposalEligibility()[robot.id]; as evaluation) {
+                        <p class="robots__muted" role="status">
+                          {{ evaluation.eligible ? 'Eligible for an automatically generated review proposal.' : 'Not eligible: ' + evaluation.reasons.join(', ') }}
+                          · {{ evaluation.candidateCountConsidered }} candidate(s) considered
+                        </p>
+                      }
                       <p class="robots__muted">Effective revision {{ policy.revision }}{{ policy.persisted ? '' : ' (defaults)' }}</p>
                       @if (adaptivePolicyErrors()[robot.id]) { <p class="robots__error" role="alert">{{ adaptivePolicyErrors()[robot.id] }}</p> }
                       <details><summary>Policy history</summary>

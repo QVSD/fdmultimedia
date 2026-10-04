@@ -43,7 +43,7 @@ import {
   CampaignCopySetStatus,
   CampaignCopySetSummary,
 } from '../../core/campaign-copy/campaign-copy.models';
-import { RobotAdaptivePolicy, RobotAdaptivePolicyRevision, RobotConfigurationRevision } from '../../core/publishing/robot-change-proposal.models';
+import { AutonomousProposalEligibility, RobotAdaptivePolicy, RobotAdaptivePolicyRevision, RobotConfigurationRevision } from '../../core/publishing/robot-change-proposal.models';
 
 type LoadState = 'loading' | 'ready' | 'error';
 
@@ -126,6 +126,8 @@ export class Robots implements OnInit, OnDestroy {
   protected readonly adaptivePolicyHistory = signal<Record<string, RobotAdaptivePolicyRevision[]>>({});
   protected readonly adaptivePolicyBusy = signal<Record<string, boolean>>({});
   protected readonly adaptivePolicyErrors = signal<Record<string, string | null>>({});
+  protected readonly adaptiveProposalEligibility = signal<Record<string, AutonomousProposalEligibility>>({});
+  protected readonly adaptiveProposalEligibilityBusy = signal<Record<string, boolean>>({});
 
   private robotsSubscription?: Subscription;
   private approvalsSubscription?: Subscription;
@@ -842,9 +844,18 @@ export class Robots implements OnInit, OnDestroy {
   }
   protected adaptivePolicyFor(robot: RobotSummary): RobotAdaptivePolicy | null { return this.adaptivePolicies()[robot.id] ?? null; }
   protected adaptivePolicyHistoryFor(robot: RobotSummary): RobotAdaptivePolicyRevision[] { return this.adaptivePolicyHistory()[robot.id] ?? []; }
-  protected updateAdaptivePolicyField(robot: RobotSummary, field: keyof RobotAdaptivePolicy, value: boolean | number): void {
+  protected updateAdaptivePolicyField(robot: RobotSummary, field: keyof RobotAdaptivePolicy, value: boolean | number | 'MANUAL_ONLY' | 'AUTO_PROPOSE'): void {
     const policy = this.adaptivePolicyFor(robot); if (!policy) return;
     this.adaptivePolicies.update((all) => ({ ...all, [robot.id]: { ...policy, [field]: value } }));
+  }
+  protected checkAdaptiveProposalEligibility(robot: RobotSummary): void {
+    this.adaptiveProposalEligibilityBusy.update((v) => ({ ...v, [robot.id]: true }));
+    this.robotsService.adaptiveProposalEligibility(robot.id)
+      .pipe(finalize(() => this.adaptiveProposalEligibilityBusy.update((v) => ({ ...v, [robot.id]: false }))))
+      .subscribe({
+        next: (result) => this.adaptiveProposalEligibility.update((v) => ({ ...v, [robot.id]: result })),
+        error: () => this.adaptivePolicyErrors.update((v) => ({ ...v, [robot.id]: 'Eligibility could not be checked.' })),
+      });
   }
   protected saveAdaptivePolicy(robot: RobotSummary): void {
     const policy=this.adaptivePolicyFor(robot); if(!policy)return;

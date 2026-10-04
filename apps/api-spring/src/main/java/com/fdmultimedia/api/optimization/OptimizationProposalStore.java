@@ -7,6 +7,7 @@ import java.math.*;
 import java.sql.*;
 import java.time.Instant;
 import java.util.*;
+import org.springframework.jdbc.core.ResultSetExtractor;
 import org.springframework.jdbc.core.namedparam.*;
 import org.springframework.stereotype.Repository;
 
@@ -14,6 +15,11 @@ import org.springframework.stereotype.Repository;
 public class OptimizationProposalStore {
     private final NamedParameterJdbcTemplate jdbc;
     public OptimizationProposalStore(NamedParameterJdbcTemplate jdbc){this.jdbc=jdbc;}
+
+    public void lockOpportunity(String fingerprint){
+        jdbc.query("select pg_advisory_xact_lock(hashtextextended(:fingerprint,0))",
+                new MapSqlParameterSource("fingerprint",fingerprint),(ResultSetExtractor<Void>)ignored->null);
+    }
 
     public ReviewContext reviewContext(UUID workspaceId,UUID reviewId){
         String sql="""

@@ -7,7 +7,7 @@ import { PublicationAnalyticsSnapshot, PublicationAnalyticsState, PublicationAtt
 import { DashboardBreakdown, DashboardDimension, DashboardFilters, DashboardMetric, DashboardOptions, DashboardSummary, DashboardTrend } from './publication-dashboard.models';
 import { CompareRequest, ComparisonResult, InsightsResponse } from './publication-insights.models';
 import { CampaignCohortComparison, CampaignDimension, CampaignOption, CampaignReview, CampaignReviewListItem, CampaignWindow } from './campaign-performance.models';
-import { OptimizationEligibility, OptimizationProposal } from './optimization-proposal.models';
+import { OptimizationEligibility, OptimizationProposal, OptimizationProposalOrigin } from './optimization-proposal.models';
 import { AdaptiveGuardrailEvaluation, RobotChangeEligibility, RobotChangeProposal } from './robot-change-proposal.models';
 
 @Injectable({ providedIn: 'root' })
@@ -107,9 +107,9 @@ export class PublicationAnalyticsService {
       { withCredentials: true });
   }
 
-  optimizationProposals(limit = 50): Observable<OptimizationProposal[]> {
+  optimizationProposals(limit = 50, origin?: OptimizationProposalOrigin): Observable<OptimizationProposal[]> {
     return this.http.get<OptimizationProposal[]>(`${environment.apiBaseUrl}/optimization-proposals`,
-      { params: { limit }, withCredentials: true });
+      { params: origin ? { limit, origin } : { limit }, withCredentials: true });
   }
 
   createOptimizationProposal(sourceReviewId: string, candidatePersonaId: string): Observable<OptimizationProposal> {

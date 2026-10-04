@@ -92,7 +92,15 @@ export interface RobotAdaptivePolicy {
   robotId: string; revision: number; persisted: boolean; enabled: boolean;
   maxAppliedChangesPerWindow: number; changeBudgetWindowDays: number; cooldownHours: number;
   requireNoActiveExperiment: boolean; requireNoPendingChange: boolean; requirePostChangeObservation: boolean;
+  proposalAutomationMode: 'MANUAL_ONLY' | 'AUTO_PROPOSE';
   updatedAt: string | null;
+}
+
+export interface AutonomousProposalEligibility {
+  robotId: string; eligible: boolean; reasons: string[]; policyRevision: number;
+  sourceReviewId: string | null; candidateCountConsidered: number;
+  selectedCandidatePersonaId: string | null; evidenceFingerprint: string | null;
+  opportunityFingerprint: string | null; existingProposalId: string | null;
 }
 
 export interface RobotAdaptivePolicyRevision {

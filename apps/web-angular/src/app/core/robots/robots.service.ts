@@ -4,7 +4,7 @@ import { Observable } from 'rxjs';
 
 import { environment } from '../../../environments/environment';
 import { CreateRobotRequest, RobotRunSummary, RobotSummary, UpdateRobotRequest } from './robot.models';
-import { RobotAdaptivePolicy, RobotAdaptivePolicyRevision, RobotConfigurationRevision } from '../publishing/robot-change-proposal.models';
+import { AutonomousProposalEligibility, RobotAdaptivePolicy, RobotAdaptivePolicyRevision, RobotConfigurationRevision } from '../publishing/robot-change-proposal.models';
 
 @Injectable({ providedIn: 'root' })
 export class RobotsService {
@@ -68,7 +68,13 @@ export class RobotsService {
       changeBudgetWindowDays: policy.changeBudgetWindowDays, cooldownHours: policy.cooldownHours,
       requireNoActiveExperiment: policy.requireNoActiveExperiment, requireNoPendingChange: policy.requireNoPendingChange,
       requirePostChangeObservation: policy.requirePostChangeObservation,
+      proposalAutomationMode: policy.proposalAutomationMode,
     }, { withCredentials: true });
+  }
+
+  adaptiveProposalEligibility(robotId: string): Observable<AutonomousProposalEligibility> {
+    return this.http.get<AutonomousProposalEligibility>(`${environment.apiBaseUrl}/robots/${robotId}/adaptive-proposal-eligibility`,
+      { withCredentials: true });
   }
 
   adaptivePolicyHistory(robotId: string): Observable<RobotAdaptivePolicyRevision[]> {

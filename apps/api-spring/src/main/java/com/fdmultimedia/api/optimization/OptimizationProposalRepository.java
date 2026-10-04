@@ -21,4 +21,17 @@ public interface OptimizationProposalRepository extends JpaRepository<Optimizati
             @Param("candidate") UUID candidate,@Param("metric") DashboardQuery.Metric metric,@Param("statistic") Statistic statistic);
     Optional<OptimizationProposal> findBySourceReviewAndBaselinePersonaIdAndCandidatePersonaIdAndMetricAndStatisticAndCurrentTrue(
             CampaignPerformanceReview review,UUID baseline,UUID candidate,DashboardQuery.Metric metric,Statistic statistic);
+    Optional<OptimizationProposal> findByAutomationOpportunityFingerprint(String fingerprint);
+    List<OptimizationProposal> findByWorkspaceAndOriginOrderByCreatedAtDesc(
+            Workspace workspace, OptimizationProposalModels.Origin origin, Pageable pageable);
+    @Query(value="""
+            SELECT count(*) FROM optimization_proposals p
+            JOIN campaign_performance_reviews r ON r.id=p.source_review_id
+            JOIN robot_runs rr ON rr.id=r.robot_run_id
+            LEFT JOIN experiments e ON e.id=p.materialized_experiment_id
+            WHERE rr.robot_id=:robotId AND p.is_current
+              AND (p.status IN ('READY_FOR_REVIEW','APPROVED')
+                OR (p.status='MATERIALIZED' AND e.status NOT IN ('COMPLETED','CANCELLED')))
+            """,nativeQuery=true)
+    long countUnresolvedForRobot(@Param("robotId") UUID robotId);
 }

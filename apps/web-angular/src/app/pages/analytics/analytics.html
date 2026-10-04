@@ -396,13 +396,21 @@
   </section>
 
   <section class="analytics__band" aria-labelledby="proposal-history-heading">
-    <h2 id="proposal-history-heading">Controlled test proposal history</h2>
+    <div class="analytics__section-heading"><div><h2 id="proposal-history-heading">Controlled test proposal history</h2>
+      <p class="analytics__muted">Automatic proposal generation identifies evidence worth testing. It does not approve experiments or change Robot configuration.</p></div>
+      <label>Origin
+        <select [value]="optimizationOrigin()" (change)="chooseOptimizationOrigin($any($event.target).value)">
+          <option value="ALL">All</option><option value="MANUAL">Manual</option><option value="AUTO_PROPOSE">Automatically generated</option>
+        </select>
+      </label>
+    </div>
     @if (optimizationProposals().length === 0) { <p>No optimization proposals have been created.</p> }
     @else {
       <div class="analytics__insight-grid">
         @for (proposal of optimizationProposals(); track proposal.id) {
           <article class="analytics__insight-card">
             <header><strong>PERSONA proposal · revision {{ proposal.revision }}</strong><span class="analytics__badge">{{ proposal.status }}</span></header>
+            <p class="analytics__muted">{{ proposal.origin === 'AUTO_PROPOSE' ? 'Automatically generated' : 'Manual' }}{{ proposal.origin === 'AUTO_PROPOSE' && proposal.status === 'READY_FOR_REVIEW' ? ' · awaiting human review' : '' }}</p>
             <dl>
               <div><dt>Baseline</dt><dd>{{ proposal.baselinePersonaName }}</dd></div>
               <div><dt>Candidate</dt><dd>{{ proposal.candidatePersonaName }}</dd></div>

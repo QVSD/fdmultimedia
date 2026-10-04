@@ -430,4 +430,12 @@ V3 adds deterministic transcript-semantic reranking over V2 windows, immutable t
 - A Robot-scoped `RobotAdaptivePolicy` adds bounded, human-configurable governance to 17I while preserving the separate Create, Approve, Apply, and Rollback actions.
 - `ADAPTIVE_GUARDRAILS_V1` evaluates policy enabled state, rolling forward-change budget, cooldown, unresolved Experiment, older pending proposal, and H72 post-change data sufficiency. It reports all blockers and never judges Persona quality.
 - Policy edits and Apply evaluations are auditable. A successful `RobotConfigurationRevision` freezes its policy revision and guardrail evaluation; temporary blocks leave the proposal approved, while 17I configuration divergence still commits `STALE`.
-- Rollback is excluded from the forward budget and remains available during cooldown, but its new revision starts a fresh cooldown/observation epoch. No bypass, automatic mutation, automatic rollback, policy learning, multi-factor adaptation, or Phase 17K exists.
+- Rollback is excluded from the forward budget and remains available during cooldown, but its new revision starts a fresh cooldown/observation epoch. No bypass, automatic mutation, automatic rollback, policy learning, or multi-factor adaptation exists.
+
+### Phase 17K — Bounded autonomous proposals (implemented)
+
+- `RobotAdaptivePolicy.proposalAutomationMode` is explicitly `MANUAL_ONLY` (default/backfill) or `AUTO_PROPOSE`; every mode edit remains an immutable policy revision.
+- `AUTONOMOUS_PROPOSALS_V1` discovers at most one Persona test opportunity per Robot evaluation and creates only a Phase 17H `OptimizationProposal` in `READY_FOR_REVIEW`, with durable `AUTO_PROPOSE` origin and automation provenance.
+- Discovery reuses Phase 17H's exact evidence gates, fixes its policy to the newest current-epoch `READY` H72/TOTAL_INTERACTIONS review, and checks at most 20 ACTIVE Personas in stable UUID order. There is no direction preference or metric/window cherry-picking.
+- Review-created events plus an hourly, 100-Robot bounded reconciliation recover missed work. PostgreSQL advisory locking and a unique semantic opportunity fingerprint provide restart/multi-instance idempotency and rejection suppression.
+- Human approval/materialization, Experiment activation/enrollment, RobotChangeProposal creation, Apply, and Rollback remain manual. Automatic Experiment/Robot mutation, LLM candidate choice, broader factors, policy relaxation, bandits/RL, and Phase 17L remain unstarted.

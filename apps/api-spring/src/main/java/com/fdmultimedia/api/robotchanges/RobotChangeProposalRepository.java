@@ -24,4 +24,9 @@ public interface RobotChangeProposalRepository extends JpaRepository<RobotChange
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select p from RobotChangeProposal p where p.workspace=:workspace and p.id=:id")
     Optional<RobotChangeProposal> findByWorkspaceAndIdForUpdate(@Param("workspace") Workspace workspace, @Param("id") UUID id);
+
+    @Query("select count(p) from RobotChangeProposal p where p.workspace=:workspace and p.targetRobotId=:robotId "
+            + "and p.status in (com.fdmultimedia.api.robotchanges.RobotChangeProposalModels.Status.READY_FOR_REVIEW,"
+            + "com.fdmultimedia.api.robotchanges.RobotChangeProposalModels.Status.APPROVED)")
+    long countPendingForRobot(@Param("workspace") Workspace workspace,@Param("robotId") UUID robotId);
 }

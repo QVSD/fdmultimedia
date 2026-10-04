@@ -8,6 +8,7 @@ import com.fdmultimedia.api.experiments.*;
 import com.fdmultimedia.api.optimization.OptimizationProposalModels.*;
 import com.fdmultimedia.api.optimization.OptimizationProposalStore.*;
 import com.fdmultimedia.api.personas.*;
+import com.fdmultimedia.api.users.AppUser;
 import com.fdmultimedia.api.workspaces.Workspace;
 import java.math.*;
 import java.nio.charset.StandardCharsets;
@@ -61,50 +62,37 @@ public class OptimizationProposalService {
         if(request==null||request.sourceReviewId()==null||request.candidatePersonaId()==null)
             throw bad("SOURCE_REVIEW_AND_CANDIDATE_REQUIRED");
         var membership=auth.currentMembershipFor(principal);Workspace workspace=membership.getWorkspace();
-        CampaignPerformanceReview review=requireReview(workspace,request.sourceReviewId());
-        if(review.getEvidenceStatus()!=EvidenceStatus.READY)throw conflict("SOURCE_REVIEW_NOT_READY");
-        ReviewContext context=context(workspace,review);
-        if(context==null)throw conflict("BASELINE_PERSONA_REQUIRED");
-        if(context.personaId().equals(request.candidatePersonaId()))throw bad("SAME_PERSONA");
-        Persona baseline=requireActivePersona(workspace,context.personaId(),"BASELINE_PERSONA_INACTIVE");
-        Persona candidate=requireActivePersona(workspace,request.candidatePersonaId(),"CANDIDATE_PERSONA_INACTIVE");
+        Evaluated e=evaluate(workspace,request.sourceReviewId(),request.candidatePersonaId());
+        UUID robotId=e.review().getRobotRun().getRobot().getId();
+        return persist(e,membership.getUser(),Origin.MANUAL,null,robotId,null,"MANUAL");
+    }
 
-        Instant cutoff=review.getEvidenceCutoffAt();Instant from=cutoff.minus(COHORT_LOOKBACK);
-        Map<UUID,PersonaCohort> rows=store.personaCohorts(workspace.getId(),Set.of(baseline.getId(),candidate.getId()),
-                context.provider(),review.getObservationWindow(),review.getPrimaryMetric(),from,cutoff);
-        PersonaCohort a=rows.get(baseline.getId()),b=rows.get(candidate.getId());
-        requireCohort(a,"BASELINE");requireCohort(b,"CANDIDATE");
-        requireEvidence(a,"BASELINE");requireEvidence(b,"CANDIDATE");
+    @Transactional(readOnly=true,noRollbackFor=ResponseStatusException.class)
+    public AutonomousEvidence evaluateAutonomous(Workspace workspace,UUID reviewId,UUID candidatePersonaId){
+        Evaluated e=evaluate(workspace,reviewId,candidatePersonaId);
+        return new AutonomousEvidence(e.review().getId(),e.baseline().getId(),nonBlank(e.context().personaName(),e.baseline().getName()),
+                e.candidate().getId(),e.candidate().getName(),e.review().getPrimaryMetric(),e.review().getObservationWindow(),
+                e.context().provider(),e.direction(),e.evidenceFingerprint(),e.semanticFingerprint());
+    }
 
-        BigDecimal signed=b.median().subtract(a.median());BigDecimal absolute=signed.abs();
-        BigDecimal relative=a.median().signum()==0?null:absolute.divide(a.median().abs(),8,RoundingMode.HALF_UP).multiply(BigDecimal.valueOf(100));
-        if(relative==null||relative.compareTo(thresholds.getMaterialDifferencePercent())<0)
-            throw conflict("NO_MATERIAL_OBSERVED_DIFFERENCE");
-        Direction direction=signed.signum()>0?Direction.HIGHER_OBSERVED:signed.signum()<0?Direction.LOWER_OBSERVED:Direction.SIMILAR_OBSERVED;
-        String baselineFingerprint=personaFingerprint(baseline),candidateFingerprint=personaFingerprint(candidate);
-        String fingerprint=fingerprint(review,context,baseline,candidate,a,b,relative,baselineFingerprint,candidateFingerprint);
-        var current=proposals.findBySourceReviewAndBaselinePersonaIdAndCandidatePersonaIdAndMetricAndStatisticAndCurrentTrue(
-                review,baseline.getId(),candidate.getId(),review.getPrimaryMetric(),Statistic.MEDIAN);
-        current.ifPresent(OptimizationProposal::supersede);
-        current.ifPresent(proposals::saveAndFlush);
-        int revision=proposals.maxRevision(review,baseline.getId(),candidate.getId(),review.getPrimaryMetric(),Statistic.MEDIAN)+1;
-        Instant now=Instant.now(clock);
-        String baselineNameSnapshot=nonBlank(context.personaName(),baseline.getName());
-        OptimizationProposal proposal=new OptimizationProposal(workspace,review,revision,baseline.getId(),
-                baselineNameSnapshot,baselineFingerprint,candidate.getId(),candidate.getName(),candidateFingerprint,
-                review.getPrimaryMetric(),review.getObservationWindow(),context.provider(),from,cutoff,a.sampleCount(),b.sampleCount(),
-                a.eligibleCount(),b.eligibleCount(),a.coverage(),b.coverage(),a.median(),b.median(),absolute,relative,direction,
-                fingerprint,rationale(baselineNameSnapshot,candidate.getName(),review,direction),String.join(" ",limitations(context.provider())),
-                membership.getUser(),now);
-        return summary(proposals.saveAndFlush(proposal));
+    @Transactional
+    public Summary createAutonomous(Workspace workspace,AppUser actor,UUID reviewId,UUID candidatePersonaId,
+            UUID robotId,int policyRevision,String trigger,String automationEngineVersion){
+        Evaluated e=evaluate(workspace,reviewId,candidatePersonaId);
+        if(!e.review().getRobotRun().getRobot().getId().equals(robotId))throw conflict("AUTOMATION_ROBOT_REVIEW_MISMATCH");
+        return persist(e,actor,Origin.AUTO_PROPOSE,automationEngineVersion,robotId,policyRevision,trigger);
     }
 
     @Transactional(readOnly=true)
-    public List<Summary> list(AuthenticatedUser principal,int limit){
+    public List<Summary> list(AuthenticatedUser principal,int limit,Origin origin){
         Workspace workspace=auth.currentMembershipFor(principal).getWorkspace();
         int bounded=Math.min(Math.max(limit,1),MAX_LIST);
-        return proposals.findByWorkspaceOrderByCreatedAtDesc(workspace,PageRequest.of(0,bounded)).stream().map(this::summary).toList();
+        var rows=origin==null?proposals.findByWorkspaceOrderByCreatedAtDesc(workspace,PageRequest.of(0,bounded)):
+                proposals.findByWorkspaceAndOriginOrderByCreatedAtDesc(workspace,origin,PageRequest.of(0,bounded));
+        return rows.stream().map(this::summary).toList();
     }
+
+    public List<Summary> list(AuthenticatedUser principal,int limit){return list(principal,limit,null);}
 
     @Transactional(readOnly=true)
     public Summary get(AuthenticatedUser principal,UUID id){return summary(require(auth.currentMembershipFor(principal).getWorkspace(),id));}
@@ -158,6 +146,58 @@ public class OptimizationProposalService {
     static String personaFingerprint(Persona p){return sha256(String.join("|",p.getId().toString(),n(p.getName()),n(p.getDescription()),p.getDefaultLanguage().name(),p.getDefaultTone().name(),n(p.getAudience()),n(p.getVoiceDescription()),n(p.getStyleGuidelines()),n(p.getAvoidGuidelines()),n(p.getHashtagGuidelines()),n(p.getExampleCopy())));}
     private static String n(String v){return v==null?"":v;} private static String nonBlank(String v,String fallback){return v==null||v.isBlank()?fallback:v;}
     private static String bounded(String s,int max){return s.length()<=max?s:s.substring(0,max);}
-    private Summary summary(OptimizationProposal p){return new Summary(p.getId(),p.getSourceReview().getId(),p.getRevision(),p.isCurrent(),p.getEngineVersion(),p.getFactor(),p.getStatus(),p.getBaselinePersonaId(),p.getBaselinePersonaNameSnapshot(),p.getCandidatePersonaId(),p.getCandidatePersonaNameSnapshot(),p.getMetric(),p.getStatistic(),p.getObservationWindow(),p.getProvider(),p.getCohortFrom(),p.getCohortTo(),p.getBaselineSample(),p.getCandidateSample(),p.getBaselineEligible(),p.getCandidateEligible(),p.getBaselineCoverage(),p.getCandidateCoverage(),p.getBaselineValue(),p.getCandidateValue(),p.getAbsoluteDifference(),p.getRelativeDifferencePercent(),p.getDirection(),p.getEvidenceFingerprint(),p.getRationale(),p.getLimitation(),p.getMaterializedExperimentId(),p.getCreatedAt(),p.getReviewedAt(),p.getMaterializedAt());}
+    private Summary summary(OptimizationProposal p){return new Summary(p.getId(),p.getSourceReview().getId(),p.getRevision(),p.isCurrent(),p.getEngineVersion(),p.getFactor(),p.getStatus(),p.getBaselinePersonaId(),p.getBaselinePersonaNameSnapshot(),p.getCandidatePersonaId(),p.getCandidatePersonaNameSnapshot(),p.getMetric(),p.getStatistic(),p.getObservationWindow(),p.getProvider(),p.getCohortFrom(),p.getCohortTo(),p.getBaselineSample(),p.getCandidateSample(),p.getBaselineEligible(),p.getCandidateEligible(),p.getBaselineCoverage(),p.getCandidateCoverage(),p.getBaselineValue(),p.getCandidateValue(),p.getAbsoluteDifference(),p.getRelativeDifferencePercent(),p.getDirection(),p.getEvidenceFingerprint(),p.getRationale(),p.getLimitation(),p.getMaterializedExperimentId(),p.getCreatedAt(),p.getReviewedAt(),p.getMaterializedAt(),p.getOrigin(),p.getAutomationEngineVersion(),p.getAutomationRobotId(),p.getAutomationPolicyRevision(),p.getAutomationTrigger(),p.getAutomationOpportunityFingerprint());}
+
+    private Evaluated evaluate(Workspace workspace,UUID reviewId,UUID candidatePersonaId){
+        CampaignPerformanceReview review=requireReview(workspace,reviewId);
+        if(review.getEvidenceStatus()!=EvidenceStatus.READY)throw conflict("SOURCE_REVIEW_NOT_READY");
+        ReviewContext context=context(workspace,review);if(context==null)throw conflict("BASELINE_PERSONA_REQUIRED");
+        if(context.personaId().equals(candidatePersonaId))throw bad("SAME_PERSONA");
+        Persona baseline=requireActivePersona(workspace,context.personaId(),"BASELINE_PERSONA_INACTIVE");
+        Persona candidate=requireActivePersona(workspace,candidatePersonaId,"CANDIDATE_PERSONA_INACTIVE");
+        Instant cutoff=review.getEvidenceCutoffAt(),from=cutoff.minus(COHORT_LOOKBACK);
+        Map<UUID,PersonaCohort> rows=store.personaCohorts(workspace.getId(),Set.of(baseline.getId(),candidate.getId()),
+                context.provider(),review.getObservationWindow(),review.getPrimaryMetric(),from,cutoff);
+        PersonaCohort a=rows.get(baseline.getId()),b=rows.get(candidate.getId());requireCohort(a,"BASELINE");requireCohort(b,"CANDIDATE");
+        requireEvidence(a,"BASELINE");requireEvidence(b,"CANDIDATE");
+        BigDecimal signed=b.median().subtract(a.median()),absolute=signed.abs();
+        BigDecimal relative=a.median().signum()==0?null:absolute.divide(a.median().abs(),8,RoundingMode.HALF_UP).multiply(BigDecimal.valueOf(100));
+        if(relative==null||relative.compareTo(thresholds.getMaterialDifferencePercent())<0)throw conflict("NO_MATERIAL_OBSERVED_DIFFERENCE");
+        Direction direction=signed.signum()>0?Direction.HIGHER_OBSERVED:signed.signum()<0?Direction.LOWER_OBSERVED:Direction.SIMILAR_OBSERVED;
+        String af=personaFingerprint(baseline),bf=personaFingerprint(candidate);
+        String evidence=fingerprint(review,context,baseline,candidate,a,b,relative,af,bf);
+        String semantic=sha256(String.join("|",ENGINE_VERSION,"PERSONA",baseline.getId().toString(),af,candidate.getId().toString(),bf,
+                review.getPrimaryMetric().name(),Statistic.MEDIAN.name(),review.getObservationWindow().name(),context.provider(),
+                Integer.toString(a.sampleCount()),a.coverage().toPlainString(),a.median().toPlainString(),
+                Integer.toString(b.sampleCount()),b.coverage().toPlainString(),b.median().toPlainString(),relative.toPlainString()));
+        return new Evaluated(review,context,baseline,candidate,a,b,from,cutoff,absolute,relative,direction,af,bf,evidence,semantic);
+    }
+
+    private Summary persist(Evaluated e,AppUser actor,Origin origin,String automationEngine,UUID robotId,
+            Integer policyRevision,String trigger){
+        String opportunity=sha256(String.join("|","AUTONOMOUS_OPPORTUNITY_V1",robotId.toString(),e.semanticFingerprint()));
+        store.lockOpportunity(opportunity);
+        Optional<OptimizationProposal> duplicate=proposals.findByAutomationOpportunityFingerprint(opportunity);
+        if(duplicate.isPresent())return summary(duplicate.get());
+        var current=proposals.findBySourceReviewAndBaselinePersonaIdAndCandidatePersonaIdAndMetricAndStatisticAndCurrentTrue(
+                e.review(),e.baseline().getId(),e.candidate().getId(),e.review().getPrimaryMetric(),Statistic.MEDIAN);
+        current.ifPresent(OptimizationProposal::supersede);current.ifPresent(proposals::saveAndFlush);
+        int revision=proposals.maxRevision(e.review(),e.baseline().getId(),e.candidate().getId(),e.review().getPrimaryMetric(),Statistic.MEDIAN)+1;
+        Instant now=Instant.now(clock);String baselineName=nonBlank(e.context().personaName(),e.baseline().getName());
+        OptimizationProposal proposal=new OptimizationProposal(e.baseline().getWorkspace(),e.review(),revision,e.baseline().getId(),
+                baselineName,e.baselineFingerprint(),e.candidate().getId(),e.candidate().getName(),e.candidateFingerprint(),
+                e.review().getPrimaryMetric(),e.review().getObservationWindow(),e.context().provider(),e.from(),e.cutoff(),
+                e.a().sampleCount(),e.b().sampleCount(),e.a().eligibleCount(),e.b().eligibleCount(),e.a().coverage(),e.b().coverage(),
+                e.a().median(),e.b().median(),e.absolute(),e.relative(),e.direction(),e.evidenceFingerprint(),
+                rationale(baselineName,e.candidate().getName(),e.review(),e.direction()),String.join(" ",limitations(e.context().provider())),
+                actor,now,origin,automationEngine,origin==Origin.AUTO_PROPOSE?robotId:null,
+                origin==Origin.AUTO_PROPOSE?policyRevision:null,origin==Origin.AUTO_PROPOSE?trigger:null,opportunity);
+        return summary(proposals.saveAndFlush(proposal));
+    }
+
+    private record Evaluated(CampaignPerformanceReview review,ReviewContext context,Persona baseline,Persona candidate,
+            PersonaCohort a,PersonaCohort b,Instant from,Instant cutoff,BigDecimal absolute,BigDecimal relative,
+            Direction direction,String baselineFingerprint,String candidateFingerprint,String evidenceFingerprint,
+            String semanticFingerprint){}
     private static ResponseStatusException bad(String code){return new ResponseStatusException(HttpStatus.BAD_REQUEST,code);} private static ResponseStatusException conflict(String code){return new ResponseStatusException(HttpStatus.CONFLICT,code);}
 }
