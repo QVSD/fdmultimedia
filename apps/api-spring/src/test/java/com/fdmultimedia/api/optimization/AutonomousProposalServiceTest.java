@@ -51,6 +51,7 @@ class AutonomousProposalServiceTest {
 
     @BeforeEach void setUp(){
         when(memory.screen(any(),any())).thenAnswer(i->new AdaptiveMemoryService.Screen(i.getArgument(0),i.getArgument(1),Map.of(),NOW));
+        when(memory.screenReadOnly(any(),any())).thenAnswer(i->new AdaptiveMemoryService.Screen(i.getArgument(0),i.getArgument(1),Map.of(),NOW));
         when(auth.currentMembershipFor(principal)).thenReturn(new WorkspaceMembership(workspace,owner,WorkspaceRole.OWNER));
         when(robot.getId()).thenReturn(robotId);when(robot.getWorkspace()).thenReturn(workspace);when(robot.getPersona()).thenReturn(baseline);
         when(robots.findByWorkspaceAndId(workspace,robotId)).thenReturn(Optional.of(robot));
@@ -168,7 +169,8 @@ class AutonomousProposalServiceTest {
     private void screenWith(Persona... suppressed){
         Map<com.fdmultimedia.api.adaptivememory.AdaptiveMemoryProjector.Key,com.fdmultimedia.api.adaptivememory.AdaptiveMemoryModels.Memory> map=new HashMap<>();
         for(Persona p:suppressed)map.put(new com.fdmultimedia.api.adaptivememory.AdaptiveMemoryProjector.Key(robotId,baseline.getId(),p.getId()),suppressedMemory(p.getId()));
-        when(memory.screen(any(),any())).thenAnswer(i->new AdaptiveMemoryService.Screen(i.getArgument(0),i.getArgument(1),map,NOW));}
+        when(memory.screen(any(),any())).thenAnswer(i->new AdaptiveMemoryService.Screen(i.getArgument(0),i.getArgument(1),map,NOW));
+        when(memory.screenReadOnly(any(),any())).thenAnswer(i->new AdaptiveMemoryService.Screen(i.getArgument(0),i.getArgument(1),map,NOW));}
     private void autoPropose(){when(policies.findByWorkspaceAndRobotId(workspace,robotId)).thenReturn(Optional.of(policy(true,ProposalAutomationMode.AUTO_PROPOSE)));}
     private void validCandidates(Persona... list){when(personas.findByWorkspaceAndStatusOrderByIdAsc(eq(workspace),eq(PersonaStatus.ACTIVE),any(Pageable.class))).thenReturn(List.of(list));
         for(Persona c:list)when(proposalService.evaluateAutonomous(workspace,reviewId,c.getId())).thenReturn(evidence(c,Direction.LOWER_OBSERVED,"semantic-"+c.getName()));}
@@ -223,6 +225,7 @@ class AutonomousProposalServiceTest {
         Map<com.fdmultimedia.api.adaptivememory.AdaptiveMemoryProjector.Key,com.fdmultimedia.api.adaptivememory.AdaptiveMemoryModels.Memory> map=new HashMap<>();
         map.put(new com.fdmultimedia.api.adaptivememory.AdaptiveMemoryProjector.Key(robotId,baseline.getId(),second.getId()),stableOld);
         when(memory.screen(any(),any())).thenAnswer(i->new AdaptiveMemoryService.Screen(i.getArgument(0),i.getArgument(1),map,NOW));
+        when(memory.screenReadOnly(any(),any())).thenAnswer(i->new AdaptiveMemoryService.Screen(i.getArgument(0),i.getArgument(1),map,NOW));
         assertThat(service.dryRun(principal,robotId).selectedCandidatePersonaId()).isEqualTo(candidate.getId());
     }
 

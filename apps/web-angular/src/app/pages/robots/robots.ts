@@ -46,6 +46,7 @@ import {
   CampaignCopySetSummary,
 } from '../../core/campaign-copy/campaign-copy.models';
 import { AutonomousProposalEligibility, RobotAdaptivePolicy, RobotAdaptivePolicyRevision, RobotConfigurationRevision } from '../../core/publishing/robot-change-proposal.models';
+import { AdaptiveLifecycleState, AdaptiveNextAction, RobotAdaptiveLifecycle } from '../../core/publishing/adaptive-lifecycle.models';
 
 type LoadState = 'loading' | 'ready' | 'error';
 
@@ -135,6 +136,9 @@ export class Robots implements OnInit, OnDestroy {
   protected readonly adaptivePolicyErrors = signal<Record<string, string | null>>({});
   protected readonly adaptiveProposalEligibility = signal<Record<string, AutonomousProposalEligibility>>({});
   protected readonly adaptiveProposalEligibilityBusy = signal<Record<string, boolean>>({});
+  protected readonly adaptiveLifecycleByRobot = signal<Record<string, RobotAdaptiveLifecycle>>({});
+  protected readonly adaptiveLifecycleErrors = signal<Record<string, string | null>>({});
+  protected readonly lifecycleStages = ['Evidence', 'Proposal', 'Authorization', 'Guardrails', 'Apply', 'Observation', 'Safety', 'Memory'];
 
   private robotsSubscription?: Subscription;
   private approvalsSubscription?: Subscription;
@@ -625,6 +629,7 @@ export class Robots implements OnInit, OnDestroy {
     const expanding = !(this.expandedRobots()[robot.id] ?? false);
     this.expandedRobots.update((items) => ({ ...items, [robot.id]: expanding }));
     if (expanding) {
+      this.loadAdaptiveLifecycle(robot.id);
       for (const run of this.runsForRobot(robot)) {
         if (run.campaignPlanId && !this.campaignPlansByRun()[run.id]) {
           this.loadCampaignPlansForRun(run.id);
@@ -634,6 +639,55 @@ export class Robots implements OnInit, OnDestroy {
         }
       }
     }
+  }
+
+  protected adaptiveLifecycleFor(robot: RobotSummary): RobotAdaptiveLifecycle | null {
+    return this.adaptiveLifecycleByRobot()[robot.id] ?? null;
+  }
+
+  protected loadAdaptiveLifecycle(robotId: string): void {
+    this.adaptiveLifecycleErrors.update((all) => ({ ...all, [robotId]: null }));
+    this.robotsService.adaptiveLifecycle(robotId).subscribe({
+      next: (lifecycle) => this.adaptiveLifecycleByRobot.update((all) => ({ ...all, [robotId]: lifecycle })),
+      error: () => this.adaptiveLifecycleErrors.update((all) => ({ ...all, [robotId]: 'Adaptive lifecycle could not be loaded.' })),
+    });
+  }
+
+  protected lifecycleStateLabel(state: AdaptiveLifecycleState): string {
+    const labels: Record<AdaptiveLifecycleState, string> = {
+      MANUAL_ONLY: 'Manual only', WAITING_FOR_EVIDENCE: 'Waiting for evidence', OPPORTUNITY_AVAILABLE: 'Opportunity available',
+      PROPOSAL_AWAITING_REVIEW: 'Proposal awaiting review', PROPOSAL_APPROVED: 'Proposal approved',
+      WAITING_FOR_AUTHORIZATION: 'Waiting for authorization', AUTHORIZED_WAITING_FOR_GUARDRAILS: 'Waiting for guardrails',
+      READY_FOR_APPLY: 'Ready for apply', OBSERVING: 'Observing', STABLE: 'Stable',
+      ROLLBACK_REVIEW_RECOMMENDED: 'Rollback review recommended', MEMORY_SUPPRESSED: 'Temporarily suppressed', BLOCKED: 'Blocked',
+    };
+    return labels[state];
+  }
+
+  protected lifecycleNextActionLabel(action: AdaptiveNextAction): string {
+    const labels: Record<AdaptiveNextAction, string> = {
+      NONE: 'No action currently required', COLLECT_EVIDENCE: 'Collect mature evidence', REVIEW_PROPOSAL: 'Review proposal',
+      MATERIALIZE_EXPERIMENT: 'Materialize a draft controlled experiment', AUTHORIZE_EXECUTION: 'Authorize exact execution',
+      WAIT_FOR_GUARDRAILS: 'Wait for guardrails', APPLY_CHANGE: 'Apply the approved change',
+      WAIT_FOR_OBSERVATION: 'Wait for post-change observation', REVIEW_ROLLBACK: 'Review rollback evidence',
+      RECONSIDER_AFTER_SUPPRESSION: 'Reconsider after suppression expires',
+    };
+    return labels[action];
+  }
+
+  protected lifecycleReasonLabel(reason: string): string {
+    return reason.toLowerCase().replaceAll('_', ' ').replace(/^./, (value) => value.toUpperCase());
+  }
+
+  protected lifecycleStageState(lifecycle: RobotAdaptiveLifecycle, index: number): 'complete' | 'current' | 'future' {
+    const currentByState: Record<AdaptiveLifecycleState, number> = {
+      MANUAL_ONLY: 0, WAITING_FOR_EVIDENCE: 0, OPPORTUNITY_AVAILABLE: 0, MEMORY_SUPPRESSED: 7,
+      PROPOSAL_AWAITING_REVIEW: 1, PROPOSAL_APPROVED: 1, WAITING_FOR_AUTHORIZATION: 2,
+      AUTHORIZED_WAITING_FOR_GUARDRAILS: 3, READY_FOR_APPLY: 4, OBSERVING: 5, STABLE: 6,
+      ROLLBACK_REVIEW_RECOMMENDED: 6, BLOCKED: lifecycle.authorizationId ? 3 : 0,
+    };
+    const current = currentByState[lifecycle.state];
+    return index < current ? 'complete' : index === current ? 'current' : 'future';
   }
 
   protected runsForRobot(robot: RobotSummary): RobotRunSummary[] {

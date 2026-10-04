@@ -2,6 +2,7 @@ package com.fdmultimedia.api.robotchanges;
 
 import com.fdmultimedia.api.workspaces.Workspace;
 import jakarta.persistence.LockModeType;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -20,6 +21,15 @@ public interface RobotChangeProposalRepository extends JpaRepository<RobotChange
 
     List<RobotChangeProposal> findByWorkspaceAndTargetRobotIdOrderByCreatedAtAsc(
             Workspace workspace, UUID targetRobotId, Pageable pageable);
+
+    @Query("select p from RobotChangeProposal p where p.workspace=:workspace and p.targetRobotId=:robotId "
+            + "and p.expectedRobotConfigFingerprint=:fingerprint and p.createdAt>=:epochStart "
+            + "and p.status in (com.fdmultimedia.api.robotchanges.RobotChangeProposalModels.Status.READY_FOR_REVIEW,"
+            + "com.fdmultimedia.api.robotchanges.RobotChangeProposalModels.Status.APPROVED) "
+            + "order by p.createdAt desc, p.id desc")
+    List<RobotChangeProposal> findCurrentForLifecycle(@Param("workspace") Workspace workspace,
+            @Param("robotId") UUID robotId, @Param("fingerprint") String fingerprint,
+            @Param("epochStart") Instant epochStart, Pageable pageable);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select p from RobotChangeProposal p where p.workspace=:workspace and p.id=:id")

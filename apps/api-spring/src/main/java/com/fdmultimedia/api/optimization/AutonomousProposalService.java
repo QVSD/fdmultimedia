@@ -44,20 +44,20 @@ public class AutonomousProposalService {
     @Transactional(readOnly=true)
     public Evaluation dryRun(AuthenticatedUser principal,UUID robotId){Workspace w=auth.currentMembershipFor(principal).getWorkspace();
         Robot robot=robots.findByWorkspaceAndId(w,robotId).orElseThrow(()->new ResponseStatusException(HttpStatus.NOT_FOUND,"Robot not found"));
-        RobotAdaptivePolicy policy=policies.findByWorkspaceAndRobotId(w,robotId).orElse(null);return evaluate(w,robot,policy,false);}
+        RobotAdaptivePolicy policy=policies.findByWorkspaceAndRobotId(w,robotId).orElse(null);return evaluate(w,robot,policy,false,false);}
 
     @Transactional(propagation=Propagation.REQUIRES_NEW)
     public Evaluation evaluateAndCreate(UUID robotId,String trigger){Robot robot=robots.findByIdForUpdate(robotId).orElse(null);
         if(robot==null)return new Evaluation(robotId,false,List.of(Reason.NO_ELIGIBLE_REVIEW),0,null,0,null,null,null,null);
         Workspace w=robot.getWorkspace();RobotAdaptivePolicy policy=policies.findForUpdate(w,robotId).orElse(null);
-        Evaluation evaluation=evaluate(w,robot,policy,true);if(!evaluation.eligible())return evaluation;
+        Evaluation evaluation=evaluate(w,robot,policy,true,true);if(!evaluation.eligible())return evaluation;
         OptimizationProposalModels.Summary created=proposalService.createAutonomous(w,policy.getUpdatedBy(),evaluation.sourceReviewId(),
                 evaluation.selectedCandidatePersonaId(),robotId,policy.getRevision(),trigger,ENGINE_VERSION);
         return new Evaluation(robotId,true,List.of(),policy.getRevision(),evaluation.sourceReviewId(),
                 evaluation.candidateCountConsidered(),evaluation.selectedCandidatePersonaId(),created.evidenceFingerprint(),
                 created.automationOpportunityFingerprint(),created.id(),evaluation.memorySkippedCandidates());}
 
-    private Evaluation evaluate(Workspace w,Robot robot,RobotAdaptivePolicy policy,boolean lockExperiment){List<Reason> reasons=new ArrayList<>();
+    private Evaluation evaluate(Workspace w,Robot robot,RobotAdaptivePolicy policy,boolean lockExperiment,boolean reconcileMemory){List<Reason> reasons=new ArrayList<>();
         if(policy==null||policy.getProposalAutomationMode()!=ProposalAutomationMode.AUTO_PROPOSE)reasons.add(Reason.MANUAL_ONLY);
         if(policy!=null&&!policy.isEnabled())reasons.add(Reason.ADAPTIVE_POLICY_DISABLED);
         if(robot.getPersona()==null)reasons.add(Reason.NO_BASELINE_PERSONA);
@@ -75,7 +75,8 @@ public class AutonomousProposalService {
         if(!reasons.isEmpty())return result(robot,policy,review,reasons,0,null,null,null,null);
         List<Persona> candidates=personas.findByWorkspaceAndStatusOrderByIdAsc(w,PersonaStatus.ACTIVE,PageRequest.of(0,CANDIDATE_LIMIT+1));
         int considered=0;AutonomousEvidence selected=null;List<MemorySkip> skipped=new ArrayList<>();
-        AdaptiveMemoryService.Screen screen=memory.screen(robot.getId(),robot.getPersona().getId()); // memory loaded once, screened in memory
+        AdaptiveMemoryService.Screen screen=reconcileMemory?memory.screen(robot.getId(),robot.getPersona().getId()):
+                memory.screenReadOnly(robot.getId(),robot.getPersona().getId()); // one bounded read; lifecycle/dry-run never writes
         for(Persona candidate:candidates){if(candidate.getId().equals(robot.getPersona().getId()))continue;if(considered>=CANDIDATE_LIMIT)break;considered++;
             try{AutonomousEvidence evidence=proposalService.evaluateAutonomous(w,review.getId(),candidate.getId());
                 if(evidence.baselinePersonaId().equals(robot.getPersona().getId())){

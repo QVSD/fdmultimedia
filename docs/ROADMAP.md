@@ -459,4 +459,12 @@ V3 adds deterministic transcript-semantic reranking over V2 windows, immutable t
 - `ADAPTIVE_MEMORY_V1` projects existing immutable history into directional, Robot-scoped transition memory (immutable events plus a summary row), rebuildable and idempotent, with factual outcomes only (no score, rank or global blacklist).
 - `ADAPTIVE_MEMORY_SCREENING_V1` suppresses a transition for 30 days after a proposal, rejection or apply and 90 days after an observed regression or rollback, with exact boundary semantics, all reasons reported and the latest expiry as `suppressionUntil`.
 - Phase 17K applies memory as a filter after the canonical 17H gate, keeping canonical UUID order and the 20-candidate bound, with `ALL_CANDIDATES_MEMORY_SUPPRESSED` when nothing remains. Manual proposal creation only shows a warning.
-- A read-only Robot "Adaptive history" section and API expose the memory. No machine learning, reward function, Persona ranking, automatic rollback or Phase 17O is implemented.
+- A read-only Robot "Adaptive history" section and API expose the memory. No machine learning, reward function, Persona ranking, or automatic rollback is implemented.
+
+### Phase 17O — Adaptive lifecycle orchestration (implemented)
+
+- `ADAPTIVE_LIFECYCLE_V1` deterministically composes the existing 17J policy/guardrails, 17K opportunity, 17H/17I proposals, 17L authorization, 17M safety and 17N memory into exactly one current Robot lifecycle state.
+- Safety-first precedence gives actionable rollback review and current configuration-epoch observation priority over forward proposal work; stale facts remain historical but never override current evidence.
+- `GET /api/robots/{id}/adaptive-lifecycle` is workspace-scoped, bounded and side-effect-free. It exposes ordered reasons, evidence and memory summaries, next action, and explicit human-versus-existing-automation ownership; it has no command or generic status mutation API.
+- The Robot detail page adds a responsive, accessible eight-stage lifecycle timeline. Existing mutation paths, approvals, authorizations, guardrails, Apply and rollback remain authoritative and unchanged.
+- No V44 migration or lifecycle snapshot table is added because the state is reconstructable from durable source facts. Dedicated lifecycle history/reconciliation, automatic rollback, broader factors and Phase 17P remain out of scope.

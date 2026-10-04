@@ -56,6 +56,11 @@ public class AdaptiveMemoryService {
         return new Screen(robotId, robotPersonaId, store.loadMemory(robotId), Instant.now(clock));
     }
 
+    /** Pure read path for composed read models. Projection reconciliation remains an explicit/background concern. */
+    public Screen screenReadOnly(UUID robotId, UUID robotPersonaId) {
+        return new Screen(robotId, robotPersonaId, store.loadMemory(robotId), Instant.now(clock));
+    }
+
     public RobotMemory memory(AuthenticatedUser user, UUID robotId) {
         Workspace workspace = auth.currentMembershipFor(user).getWorkspace();
         Robot robot = robots.findByWorkspaceAndId(workspace, robotId).orElseThrow(AdaptiveMemoryService::notFound);

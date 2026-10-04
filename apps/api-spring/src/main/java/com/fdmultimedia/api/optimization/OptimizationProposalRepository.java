@@ -5,6 +5,7 @@ import com.fdmultimedia.api.analytics.DashboardQuery;
 import com.fdmultimedia.api.optimization.OptimizationProposalModels.Statistic;
 import com.fdmultimedia.api.workspaces.Workspace;
 import jakarta.persistence.LockModeType;
+import java.time.Instant;
 import java.util.*;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.*;
@@ -24,6 +25,16 @@ public interface OptimizationProposalRepository extends JpaRepository<Optimizati
     Optional<OptimizationProposal> findByAutomationOpportunityFingerprint(String fingerprint);
     List<OptimizationProposal> findByWorkspaceAndOriginOrderByCreatedAtDesc(
             Workspace workspace, OptimizationProposalModels.Origin origin, Pageable pageable);
+    @Query("select p from OptimizationProposal p where p.workspace=:workspace "
+            + "and p.sourceReview.robotRun.robot.id=:robotId and p.baselinePersonaId=:baselinePersonaId "
+            + "and p.current=true and p.createdAt>=:epochStart "
+            + "and p.status in (com.fdmultimedia.api.optimization.OptimizationProposalModels.Status.READY_FOR_REVIEW,"
+            + "com.fdmultimedia.api.optimization.OptimizationProposalModels.Status.APPROVED,"
+            + "com.fdmultimedia.api.optimization.OptimizationProposalModels.Status.MATERIALIZED) "
+            + "order by p.createdAt desc, p.id desc")
+    List<OptimizationProposal> findCurrentForLifecycle(@Param("workspace") Workspace workspace,
+            @Param("robotId") UUID robotId, @Param("baselinePersonaId") UUID baselinePersonaId,
+            @Param("epochStart") Instant epochStart, Pageable pageable);
     @Query(value="""
             SELECT count(*) FROM optimization_proposals p
             JOIN campaign_performance_reviews r ON r.id=p.source_review_id

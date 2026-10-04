@@ -981,3 +981,13 @@ Backend coverage: `PostChangeSafetyEvaluatorTest`, `PostChangeSafetyServiceTest`
 4. Several API replicas and restarts converge: events are unique per source fact and writers serialize on a per-Robot advisory lock. HTTP sessions are per instance, so use one instance for authenticated runtime checks.
 
 Backend coverage: `AdaptiveMemoryProjectorTest`, `AdaptiveMemoryServicesTest` (in-memory `FakeAdaptiveMemoryStore` mirroring V43), `AdaptiveMemoryArchitectureTest` and the added 17K screening tests in `AutonomousProposalServiceTest`; PostgreSQL concurrency is proven at runtime. Frontend: `robots.spec.ts` and `analytics.spec.ts`.
+
+## Testing adaptive lifecycle orchestration locally
+
+1. `GET /api/robots/{robotId}/adaptive-lifecycle` returns one `ADAPTIVE_LIFECYCLE_V1` state plus ordered reasons, evidence, memory, next action and human/automatic ownership. The endpoint is workspace-scoped and GET-only.
+2. Repeat the GET and compare counts for optimization proposals, change proposals, authorizations, guardrail/safety evaluations, recommendations, configuration revisions and adaptive-memory rows. Every count must remain unchanged. The read-only 17K path deliberately calls `screenReadOnly`; only autonomous proposal creation retains on-demand memory reconciliation.
+3. Exercise representative facts through their existing APIs, then re-read the lifecycle: an AUTO_PROPOSE opportunity, pending optimization proposal, approved Robot-change proposal without/with authorization, guardrail block, current-epoch safety observation, stable evidence and actionable rollback recommendation. Do not insert a lifecycle status directly; it is always derived.
+4. Restart the API or issue concurrent GETs. The same source facts must produce the same state and no duplicate rows. Expired authorization status is derived from `expiresAt` at read time; stale proposals/recommendations from older configuration epochs do not outrank the current epoch.
+5. In the Robot UI open Details and inspect the Adaptive lifecycle panel at desktop and mobile widths. Confirm the eight-stage timeline, text labels (not color alone), evidence/memory summary, next-action ownership and links to Analytics/configuration history. Historical Robots with sparse adaptive data must render `MANUAL_ONLY` or `WAITING_FOR_EVIDENCE`, never fail.
+
+There is intentionally no V44 migration, lifecycle snapshot table, lifecycle history endpoint or lifecycle reconciler. Existing immutable domain records are the audit history; Phase 17O only composes them. Backend coverage is `AdaptiveLifecycleEngineTest`, `AdaptiveLifecycleArchitectureTest` and the updated `AutonomousProposalServiceTest`; frontend coverage is `robots.spec.ts`. Phase 17P is not started.

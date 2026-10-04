@@ -7,6 +7,7 @@ import { CreateRobotRequest, RobotRunSummary, RobotSummary, UpdateRobotRequest }
 import { RobotAdaptiveMemory } from '../publishing/adaptive-memory.models';
 import { PostChangeSafetyEvaluation, RevisionSafety, RollbackRecommendation, SafetyWindow } from '../publishing/post-change-safety.models';
 import { AutonomousProposalEligibility, RobotAdaptivePolicy, RobotAdaptivePolicyRevision, RobotConfigurationRevision } from '../publishing/robot-change-proposal.models';
+import { RobotAdaptiveLifecycle } from '../publishing/adaptive-lifecycle.models';
 
 @Injectable({ providedIn: 'root' })
 export class RobotsService {
@@ -108,5 +109,10 @@ export class RobotsService {
 
   adaptivePolicyHistory(robotId: string): Observable<RobotAdaptivePolicyRevision[]> {
     return this.http.get<RobotAdaptivePolicyRevision[]>(`${environment.apiBaseUrl}/robots/${robotId}/adaptive-policy/revisions`, { withCredentials: true });
+  }
+
+  adaptiveLifecycle(robotId: string): Observable<RobotAdaptiveLifecycle> {
+    return this.http.get<RobotAdaptiveLifecycle>(`${environment.apiBaseUrl}/robots/${robotId}/adaptive-lifecycle`,
+      { withCredentials: true });
   }
 }

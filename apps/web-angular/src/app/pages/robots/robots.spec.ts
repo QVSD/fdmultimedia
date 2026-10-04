@@ -22,12 +22,13 @@ import { CampaignCopySetSummary } from '../../core/campaign-copy/campaign-copy.m
 import { RobotConfigurationRevision } from '../../core/publishing/robot-change-proposal.models';
 import { AdaptiveMemoryTransition } from '../../core/publishing/adaptive-memory.models';
 import { RevisionSafety, RollbackRecommendation } from '../../core/publishing/post-change-safety.models';
+import { AdaptiveLifecycleState, RobotAdaptiveLifecycle } from '../../core/publishing/adaptive-lifecycle.models';
 import { Robots } from './robots';
 
 describe('Robots', () => {
   let component: Robots;
   let fixture: ComponentFixture<Robots>;
-  let robotsService: Pick<RobotsService, 'list' | 'create' | 'runNow' | 'pause' | 'resume' | 'runsForRobot' | 'allRuns' | 'cancelRun' | 'configurationRevisions' | 'rollbackConfigurationRevision' | 'adaptivePolicy' | 'updateAdaptivePolicy' | 'adaptivePolicyHistory' | 'adaptiveProposalEligibility' | 'postChangeSafety' | 'adaptiveMemory' | 'acknowledgeRollbackRecommendation' | 'dismissRollbackRecommendation' | 'rollbackFromRecommendation'>;
+  let robotsService: Pick<RobotsService, 'list' | 'create' | 'runNow' | 'pause' | 'resume' | 'runsForRobot' | 'allRuns' | 'cancelRun' | 'configurationRevisions' | 'rollbackConfigurationRevision' | 'adaptivePolicy' | 'updateAdaptivePolicy' | 'adaptivePolicyHistory' | 'adaptiveProposalEligibility' | 'adaptiveLifecycle' | 'postChangeSafety' | 'adaptiveMemory' | 'acknowledgeRollbackRecommendation' | 'dismissRollbackRecommendation' | 'rollbackFromRecommendation'>;
   let approvalsService: Pick<RobotApprovalsService, 'list' | 'approve' | 'reject'>;
   let assetsService: Pick<AssetsService, 'list'>;
   let socialAccountsService: Pick<SocialAccountsService, 'list'>;
@@ -63,6 +64,7 @@ describe('Robots', () => {
       adaptiveProposalEligibility: vi.fn().mockReturnValue(of({ robotId: 'robot-1', eligible: false,
         reasons: ['MANUAL_ONLY'], policyRevision: 0, sourceReviewId: null, candidateCountConsidered: 0,
         selectedCandidatePersonaId: null, evidenceFingerprint: null, opportunityFingerprint: null, existingProposalId: null })),
+      adaptiveLifecycle: vi.fn().mockReturnValue(of(adaptiveLifecycle('MANUAL_ONLY'))),
     };
     approvalsService = {
       list: vi.fn().mockReturnValue(of([])),
@@ -128,6 +130,44 @@ describe('Robots', () => {
     fixture.detectChanges();
 
     expect(fixture.nativeElement.textContent).toContain('No robots yet.');
+  });
+
+  it('renders the derived adaptive lifecycle with human-action wording and timeline', async () => {
+    const row = robot('ACTIVE', 'DRAFT_ONLY');
+    vi.mocked(robotsService.list).mockReturnValue(of([row]));
+    vi.mocked(robotsService.adaptiveLifecycle).mockReturnValue(of({
+      ...adaptiveLifecycle('PROPOSAL_AWAITING_REVIEW'), nextAction: 'REVIEW_PROPOSAL', humanActionRequired: true,
+      reasonCodes: ['PROPOSAL_PENDING_REVIEW'], optimizationProposalId: 'proposal-1',
+      optimizationProposalStatus: 'READY_FOR_REVIEW', proposalOrigin: 'AUTO_PROPOSE',
+    }));
+    fixture = TestBed.createComponent(Robots);
+    component = fixture.componentInstance;
+    await fixture.whenStable();
+    component['toggleExpanded'](row);
+    fixture.detectChanges();
+
+    const text = fixture.nativeElement.textContent;
+    expect(text).toContain('Adaptive lifecycle');
+    expect(text).toContain('Proposal awaiting review');
+    expect(text).toContain('Human review is required before the lifecycle can continue.');
+    expect(text).toContain('Evidence');
+    expect(text).toContain('Memory');
+  });
+
+  it('uses explicit existing-automation wording for a preauthorized ready state', async () => {
+    const row = robot('ACTIVE', 'DRAFT_ONLY');
+    vi.mocked(robotsService.list).mockReturnValue(of([row]));
+    vi.mocked(robotsService.adaptiveLifecycle).mockReturnValue(of({
+      ...adaptiveLifecycle('READY_FOR_APPLY'), nextAction: 'APPLY_CHANGE', automaticActionPossible: true,
+      authorizationId: 'authorization-1', authorizationStatus: 'ACTIVE', reasonCodes: ['AUTHORIZATION_ACTIVE'],
+    }));
+    fixture = TestBed.createComponent(Robots);
+    component = fixture.componentInstance;
+    await fixture.whenStable();
+    component['toggleExpanded'](row);
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.textContent).toContain('Existing automation is permitted to continue under current authorization and guardrails.');
   });
 
   it('renders independent outputs for a multi-output run', async () => {
@@ -838,6 +878,20 @@ describe('Robots', () => {
       executionOrigin: changeType === 'ROLLBACK' ? 'HUMAN_ROLLBACK' : 'HUMAN_APPLY',
       executionAuthorizationId: null,
       executionEngineVersion: null,
+    };
+  }
+
+  function adaptiveLifecycle(state: AdaptiveLifecycleState): RobotAdaptiveLifecycle {
+    return {
+      workspaceId: 'workspace-1', robotId: 'robot-1', state, engineVersion: 'ADAPTIVE_LIFECYCLE_V1',
+      computedAt: '2026-10-04T12:00:00Z', configurationRevisionId: null, configurationRevisionNumber: null,
+      currentPersonaId: 'persona-a', policyMode: 'MANUAL_ONLY', policyRevision: 0,
+      optimizationProposalId: null, optimizationProposalStatus: null, proposalOrigin: null,
+      robotChangeProposalId: null, robotChangeProposalStatus: null, authorizationId: null, authorizationStatus: null,
+      guardrailEligible: null, guardrailReasons: [], monitorId: null, safetyStatus: null,
+      recommendationId: null, recommendationStatus: null, memory: [], nextAction: 'NONE',
+      humanActionRequired: false, automaticActionPossible: false, reasonCodes: ['POLICY_MANUAL_ONLY'],
+      evidenceSummary: { sourceReviewId: null, metric: null, window: null, sample: null, coverage: null, status: 'MANUAL_ONLY' },
     };
   }
 

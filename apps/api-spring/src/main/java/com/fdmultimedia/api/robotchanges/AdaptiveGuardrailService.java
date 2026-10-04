@@ -37,6 +37,13 @@ public class AdaptiveGuardrailService {
         Robot robot=robots.findByWorkspaceAndId(w,p.getTargetRobotId()).orElseThrow(()->new ResponseStatusException(HttpStatus.NOT_FOUND,"Robot not found"));
         return summary(evaluateAndPersist(w,robot,p,Trigger.CHECK));}
 
+    /** Canonical guardrail preview for side-effect-free composed read models. */
+    @Transactional(readOnly=true)
+    public EvaluationSummary preview(AuthenticatedUser user,UUID proposalId){Workspace w=auth.currentMembershipFor(user).getWorkspace();
+        RobotChangeProposal p=proposals.findByWorkspaceAndId(w,proposalId).orElseThrow(()->new ResponseStatusException(HttpStatus.NOT_FOUND,"Robot change proposal not found"));
+        Robot robot=robots.findByWorkspaceAndId(w,p.getTargetRobotId()).orElseThrow(()->new ResponseStatusException(HttpStatus.NOT_FOUND,"Robot not found"));
+        return summary(evaluate(w,robot,p,Trigger.CHECK));}
+
     AdaptiveGuardrailEvaluation evaluateAndPersist(Workspace w,Robot robot,RobotChangeProposal p,Trigger trigger){
         return evaluations.saveAndFlush(evaluate(w,robot,p,trigger));
     }

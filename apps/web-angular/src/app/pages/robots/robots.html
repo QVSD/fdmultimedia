@@ -480,6 +480,85 @@
 
                 @if (isExpanded(robot)) {
                   <div class="robot-card__runs">
+                    <section class="adaptive-lifecycle" aria-label="Adaptive lifecycle">
+                      <div class="adaptive-lifecycle__heading">
+                        <div>
+                          <p class="adaptive-lifecycle__eyebrow">Adaptive lifecycle</p>
+                          @if (adaptiveLifecycleFor(robot); as lifecycle) {
+                            <h3 [class.adaptive-lifecycle__alert]="lifecycle.state === 'ROLLBACK_REVIEW_RECOMMENDED'">
+                              {{ lifecycleStateLabel(lifecycle.state) }}
+                            </h3>
+                          } @else {
+                            <h3>Loading lifecycle...</h3>
+                          }
+                        </div>
+                        @if (adaptiveLifecycleFor(robot); as lifecycle) {
+                          <span class="robots__badge">{{ lifecycle.engineVersion }}</span>
+                        }
+                      </div>
+                      @if (adaptiveLifecycleFor(robot); as lifecycle) {
+                        <ol class="adaptive-lifecycle__timeline" aria-label="Adaptive lifecycle stages">
+                          @for (stage of lifecycleStages; track stage; let index = $index) {
+                            <li [attr.data-stage-state]="lifecycleStageState(lifecycle, index)">
+                              <span aria-hidden="true"></span>{{ stage }}
+                            </li>
+                          }
+                        </ol>
+                        <div class="adaptive-lifecycle__grid">
+                          <div>
+                            <span class="robots__muted">Why</span>
+                            @for (reason of lifecycle.reasonCodes; track reason) {
+                              <p>{{ lifecycleReasonLabel(reason) }}</p>
+                            }
+                          </div>
+                          <div>
+                            <span class="robots__muted">Next action</span>
+                            <p><strong>{{ lifecycleNextActionLabel(lifecycle.nextAction) }}</strong></p>
+                            @if (lifecycle.humanActionRequired) {
+                              <p>Human review is required before the lifecycle can continue.</p>
+                            } @else if (lifecycle.automaticActionPossible) {
+                              <p>Existing automation is permitted to continue under current authorization and guardrails.</p>
+                            } @else {
+                              <p class="robots__muted">No mutation is triggered by this lifecycle view.</p>
+                            }
+                          </div>
+                          <div>
+                            <span class="robots__muted">Evidence</span>
+                            <p>{{ lifecycle.evidenceSummary.metric || 'No mature metric' }}
+                              @if (lifecycle.evidenceSummary.window) { · {{ lifecycle.evidenceSummary.window }} }
+                            </p>
+                            <p class="robots__muted">Sample {{ lifecycle.evidenceSummary.sample ?? 'n/a' }} · coverage
+                              {{ lifecycle.evidenceSummary.coverage === null ? 'n/a' : (lifecycle.evidenceSummary.coverage * 100).toFixed(0) + '%' }}
+                              · {{ lifecycle.evidenceSummary.status }}</p>
+                          </div>
+                          @if (lifecycle.memory.length) {
+                            <div>
+                              <span class="robots__muted">Adaptive memory</span>
+                              @for (memory of lifecycle.memory; track memory.candidatePersonaId) {
+                                <p>Candidate {{ memory.candidatePersonaId.slice(0, 8) }} · {{ memory.latestOutcome || 'historical transition' }}</p>
+                                <p class="robots__muted">{{ memory.reasons.join(', ') }}
+                                  @if (memory.suppressionUntil) { · until {{ memory.suppressionUntil | date:'medium' }} }
+                                </p>
+                              }
+                            </div>
+                          }
+                        </div>
+                        <div class="adaptive-lifecycle__links">
+                          @if (lifecycle.optimizationProposalId || lifecycle.robotChangeProposalId) {
+                            <a routerLink="/analytics">Review proposal evidence &rarr;</a>
+                          }
+                          @if (lifecycle.configurationRevisionId) {
+                            <button class="button-secondary" type="button" (click)="toggleConfigurationHistory(robot)">Configuration revision {{ lifecycle.configurationRevisionNumber }}</button>
+                          }
+                          @if (lifecycle.recommendationId) {
+                            <button class="button-secondary" type="button" (click)="toggleConfigurationHistory(robot)">Review safety recommendation</button>
+                          }
+                          <button class="button-secondary" type="button" (click)="loadAdaptiveLifecycle(robot.id)">Refresh lifecycle</button>
+                        </div>
+                      } @else if (adaptiveLifecycleErrors()[robot.id]) {
+                        <p class="robots__error" role="alert">{{ adaptiveLifecycleErrors()[robot.id] }}</p>
+                      }
+                    </section>
                     <h3>Recent runs</h3>
                     @if (runsForRobot(robot).length === 0) {
                       <p class="robots__muted">No runs yet.</p>

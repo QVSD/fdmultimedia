@@ -384,7 +384,7 @@ public class RobotChangeProposalService {
      * proposal; only a Persona change itself â€” through this service or
      * through the ordinary Robot update endpoint â€” changes this value.
      */
-    static String robotConfigFingerprint(UUID robotId, UUID personaId) {
+    public static String robotConfigFingerprint(UUID robotId, UUID personaId) {
         return sha256(robotId + "|" + (personaId == null ? "NONE" : personaId));
     }
 
