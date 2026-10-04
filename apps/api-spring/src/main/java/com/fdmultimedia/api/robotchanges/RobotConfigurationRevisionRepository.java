@@ -19,6 +19,9 @@ public interface RobotConfigurationRevisionRepository extends JpaRepository<Robo
 
     Optional<RobotConfigurationRevision> findTopByRobotIdOrderByRevisionDesc(UUID robotId);
 
+    /** The revision that ends the epoch opened by {@code revision} (Phase 17M epoch boundary), if any. */
+    Optional<RobotConfigurationRevision> findFirstByRobotIdAndRevisionGreaterThanOrderByRevisionAsc(UUID robotId, int revision);
+
     Optional<RobotConfigurationRevision> findByRobotIdAndRollbackOfRevisionId(UUID robotId, UUID rollbackOfRevisionId);
 
     long countByRobotIdAndChangeTypeAndCreatedAtGreaterThanEqual(UUID robotId,

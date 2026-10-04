@@ -322,6 +322,80 @@
                           }
                           @if (rollbackErrors()[revision.id]) { <span class="robots__error">{{ rollbackErrors()[revision.id] }}</span> }
                         </div>
+                        @if (revision.changeType === 'PERSONA_CHANGE' && revision.executionOrigin !== 'HUMAN_ROLLBACK') {
+                          <section class="robot-safety" aria-label="Post-change safety monitoring">
+                            <h4>Safety monitoring</h4>
+                            @if (revision.executionOrigin === 'PREAUTHORIZED_AUTO_APPLY') {
+                              <p class="robots__muted">Applied automatically under pre-authorization
+                                @if (revision.executionAuthorizationId) { (authorization {{ revision.executionAuthorizationId }}) }
+                                . The authorization is never changed by safety monitoring.</p>
+                            }
+                            @if (safetyFor(robot, revision); as safety) {
+                              @if (!safety.monitorId) {
+                                <p class="robots__muted">Safety monitoring has not started for this revision yet.</p>
+                              } @else {
+                                <p class="robots__muted">
+                                  Frozen baseline: previous Persona's controlled-experiment outcomes ({{ safety.metric }}{{ safety.provider ? ', ' + safety.provider : '' }}).
+                                  Monitoring {{ safety.monitorStatus === 'MONITORING' ? 'in progress' : safety.monitorStatus === 'SUPERSEDED' ? 'ended: a later configuration change superseded it' : 'completed' }}.
+                                </p>
+                                @for (window of ['H24', 'H72', 'D7']; track window) {
+                                  @if (safetyEvaluation(safety, $any(window)); as evaluation) {
+                                    <div class="run-row" [attr.aria-label]="'Safety evaluation ' + window">
+                                      <span class="robots__badge">{{ window }}{{ evaluation.informational ? ' (informational)' : '' }}</span>
+                                      <span>{{ safetyStatusLabel(evaluation.status) }}</span>
+                                      @if (evaluation.postValue !== null && evaluation.baselineValue !== null) {
+                                        <span class="robots__muted">Baseline {{ fixed(evaluation.baselineValue) }} (n={{ evaluation.baselineSample }}) &rarr; post-change {{ fixed(evaluation.postValue) }} (n={{ evaluation.postSample }})
+                                          · difference {{ fixed(evaluation.absoluteDifference) }} ({{ percent(evaluation.relativeDifferencePercent) }})
+                                          · coverage {{ evaluation.postCoverage === null ? 'n/a' : (evaluation.postCoverage * 100).toFixed(0) + '%' }}</span>
+                                      } @else {
+                                        <span class="robots__muted">n={{ evaluation.postSample }} of {{ evaluation.postEligible }} mature · {{ evaluation.reasons.join(', ') }}</span>
+                                      }
+                                    </div>
+                                  }
+                                }
+                              }
+                              @if (safety.recommendation; as recommendation) {
+                                <div class="robot-safety__recommendation" role="group" [attr.aria-label]="'Rollback recommendation ' + recommendation.status">
+                                  @if (recommendation.status === 'OPEN' || recommendation.status === 'ACKNOWLEDGED') {
+                                    <strong>Rollback review recommended</strong>
+                                    <span class="robots__badge">{{ recommendation.status }}</span>
+                                    <p>Material adverse post-change difference observed over {{ recommendation.window }}: {{ recommendation.metric }} {{ fixed(recommendation.baselineValue) }} &rarr; {{ fixed(recommendation.postValue) }} ({{ percent(recommendation.relativeDifferencePercent) }}, n={{ recommendation.postSample }}).</p>
+                                    @if (!recommendationReviewing()[recommendation.id]) {
+                                      <div>
+                                        @if (recommendation.status === 'OPEN') {
+                                          <button class="button-secondary" type="button" (click)="acknowledgeRecommendation(robot, recommendation)" [disabled]="recommendationBusy()[recommendation.id]">Acknowledge</button>
+                                        }
+                                        <button class="button-secondary" type="button" (click)="dismissRecommendation(robot, recommendation)" [disabled]="recommendationBusy()[recommendation.id]">Dismiss</button>
+                                        <button type="button" (click)="reviewRecommendation(recommendation, true)">Review rollback</button>
+                                      </div>
+                                    } @else {
+                                      <div role="alertdialog" aria-label="Confirm rollback from recommendation">
+                                        <p>Current Persona: <strong>{{ recommendation.currentPersonaName }}</strong> &middot; previous Persona: <strong>{{ recommendation.previousPersonaName ?? 'No Persona' }}</strong> &middot; revision {{ recommendation.robotRevision }}.</p>
+                                        <p>Rolling back restores {{ recommendation.previousPersonaName ?? 'No Persona' }} for this Robot's future runs through the standard rollback and creates a new revision.</p>
+                                        <p class="robots__muted">Observed differences are not proof that the Persona change caused the outcome.</p>
+                                        <button type="button" (click)="rollbackRecommendation(robot, recommendation)" [disabled]="recommendationBusy()[recommendation.id]">{{ recommendationBusy()[recommendation.id] ? 'Rolling back...' : 'Confirm rollback' }}</button>
+                                        <button class="button-secondary" type="button" (click)="reviewRecommendation(recommendation, false)" [disabled]="recommendationBusy()[recommendation.id]">Cancel</button>
+                                      </div>
+                                    }
+                                  } @else if (recommendation.status === 'SUPERSEDED') {
+                                    <strong>Rollback recommendation superseded</strong>
+                                    <p class="robots__muted">This recommendation is no longer actionable because the Robot configuration changed.</p>
+                                  } @else if (recommendation.status === 'ROLLED_BACK') {
+                                    <strong>Rolled back</strong>
+                                    <p class="robots__muted">A person rolled this change back after reviewing the recommendation.</p>
+                                  } @else {
+                                    <strong>Recommendation dismissed</strong>
+                                    <p class="robots__muted">A person chose not to roll back based on this evidence.</p>
+                                  }
+                                  @if (recommendationErrors()[recommendation.id]) { <p class="robots__error">{{ recommendationErrors()[recommendation.id] }}</p> }
+                                </div>
+                              }
+                              <p class="robots__muted">Observed differences are not proof that the Persona change caused the outcome.</p>
+                            } @else {
+                              <p class="robots__muted">Safety monitoring has not started for this revision yet.</p>
+                            }
+                          </section>
+                        }
                       }
                     }
                   </div>
@@ -330,6 +404,9 @@
                   <div class="robot-card__runs" aria-label="Adaptive Policy">
                     <h3>Adaptive Policy</h3>
                     <p class="robots__muted">These controls limit human-approved adaptive changes. They do not enable automatic Robot modification.</p>
+                    @if (openRecommendationFor(robot)) {
+                      <p role="note">An open rollback recommendation exists for this Robot. Policy is never changed automatically; review it in the configuration history.</p>
+                    }
                     @if (adaptivePolicyFor(robot); as policy) {
                       <div class="adaptive-policy__grid">
                         <label><input type="checkbox" [checked]="policy.enabled" (change)="updateAdaptivePolicyField(robot, 'enabled', $any($event.target).checked)"> Enabled</label>

@@ -4,6 +4,7 @@ import { Observable } from 'rxjs';
 
 import { environment } from '../../../environments/environment';
 import { CreateRobotRequest, RobotRunSummary, RobotSummary, UpdateRobotRequest } from './robot.models';
+import { PostChangeSafetyEvaluation, RevisionSafety, RollbackRecommendation, SafetyWindow } from '../publishing/post-change-safety.models';
 import { AutonomousProposalEligibility, RobotAdaptivePolicy, RobotAdaptivePolicyRevision, RobotConfigurationRevision } from '../publishing/robot-change-proposal.models';
 
 @Injectable({ providedIn: 'root' })
@@ -54,6 +55,29 @@ export class RobotsService {
   rollbackConfigurationRevision(robotId: string, revisionId: string, reason: string | null): Observable<RobotConfigurationRevision> {
     return this.http.post<RobotConfigurationRevision>(
       `${environment.apiBaseUrl}/robots/${robotId}/configuration-revisions/${revisionId}/rollback`,
+      reason ? { reason } : {}, { withCredentials: true });
+  }
+
+  postChangeSafety(robotId: string): Observable<RevisionSafety[]> {
+    return this.http.get<RevisionSafety[]>(`${environment.apiBaseUrl}/robots/${robotId}/post-change-safety`, { withCredentials: true });
+  }
+
+  evaluatePostChangeSafety(robotId: string, revisionId: string, observationWindow: SafetyWindow): Observable<PostChangeSafetyEvaluation> {
+    return this.http.post<PostChangeSafetyEvaluation>(
+      `${environment.apiBaseUrl}/robots/${robotId}/configuration-revisions/${revisionId}/safety-evaluations`,
+      { observationWindow }, { withCredentials: true });
+  }
+
+  acknowledgeRollbackRecommendation(id: string): Observable<RollbackRecommendation> {
+    return this.http.post<RollbackRecommendation>(`${environment.apiBaseUrl}/rollback-recommendations/${id}/acknowledge`, {}, { withCredentials: true });
+  }
+
+  dismissRollbackRecommendation(id: string): Observable<RollbackRecommendation> {
+    return this.http.post<RollbackRecommendation>(`${environment.apiBaseUrl}/rollback-recommendations/${id}/dismiss`, {}, { withCredentials: true });
+  }
+
+  rollbackFromRecommendation(id: string, reason: string | null): Observable<RollbackRecommendation> {
+    return this.http.post<RollbackRecommendation>(`${environment.apiBaseUrl}/rollback-recommendations/${id}/rollback`,
       reason ? { reason } : {}, { withCredentials: true });
   }
 

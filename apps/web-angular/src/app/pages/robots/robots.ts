@@ -25,6 +25,7 @@ import {
 } from '../../core/robots/robot.models';
 import { ContentSourcesService } from '../../core/content-sources/content-sources.service';
 import { ContentSourceSummary } from '../../core/content-sources/content-source.models';
+import { PostChangeSafetyEvaluation, RevisionSafety, RollbackRecommendation, SafetyWindow } from '../../core/publishing/post-change-safety.models';
 import { PersonasService } from '../../core/personas/personas.service';
 import { PersonaSummary } from '../../core/personas/persona.models';
 import { SuggestionLanguage, SuggestionTone } from '../../core/content-suggestions/content-suggestion.models';
@@ -119,6 +120,10 @@ export class Robots implements OnInit, OnDestroy {
   protected readonly configurationHistoryByRobot = signal<Record<string, RobotConfigurationRevision[]>>({});
   protected readonly configurationHistoryExpanded = signal<Record<string, boolean>>({});
   protected readonly rollbackConfirming = signal<Record<string, boolean>>({});
+  protected readonly safetyByRobot = signal<Record<string, RevisionSafety[]>>({});
+  protected readonly recommendationReviewing = signal<Record<string, boolean>>({});
+  protected readonly recommendationBusy = signal<Record<string, boolean>>({});
+  protected readonly recommendationErrors = signal<Record<string, string | null>>({});
   protected readonly rollbackBusy = signal<Record<string, boolean>>({});
   protected readonly rollbackErrors = signal<Record<string, string | null>>({});
   protected readonly adaptivePolicyExpanded = signal<Record<string, boolean>>({});
@@ -804,6 +809,7 @@ export class Robots implements OnInit, OnDestroy {
       next: (revisions) => this.configurationHistoryByRobot.update((byRobot) => ({ ...byRobot, [robotId]: revisions })),
       error: () => this.configurationHistoryByRobot.update((byRobot) => ({ ...byRobot, [robotId]: [] })),
     });
+    this.loadSafety(robotId);
   }
 
   protected confirmRollback(revision: RobotConfigurationRevision): void {
@@ -830,6 +836,82 @@ export class Robots implements OnInit, OnDestroy {
           ...errors, [revision.id]: 'Rollback could not be completed. The Robot may have changed since this revision.',
         })),
       });
+  }
+
+  // ---- Phase 17M: post-change safety monitoring & human-governed rollback recommendations ----
+
+  protected loadSafety(robotId: string): void {
+    this.robotsService.postChangeSafety(robotId).subscribe({
+      next: (rows) => this.safetyByRobot.update((byRobot) => ({ ...byRobot, [robotId]: rows })),
+      error: () => this.safetyByRobot.update((byRobot) => ({ ...byRobot, [robotId]: [] })),
+    });
+  }
+
+  protected safetyFor(robot: RobotSummary, revision: RobotConfigurationRevision): RevisionSafety | null {
+    return (this.safetyByRobot()[robot.id] ?? []).find((s) => s.revisionId === revision.id) ?? null;
+  }
+
+  protected safetyEvaluation(safety: RevisionSafety, window: SafetyWindow): PostChangeSafetyEvaluation | null {
+    return safety.latestEvaluations.find((e) => e.window === window) ?? null;
+  }
+
+  protected safetyStatusLabel(status: PostChangeSafetyEvaluation['status']): string {
+    switch (status) {
+      case 'READY_STABLE': return 'No material adverse difference observed';
+      case 'READY_REGRESSION_OBSERVED': return 'Material adverse difference observed';
+      case 'TOO_YOUNG': return 'Too early: no mature post-change publications yet';
+      case 'METRIC_UNAVAILABLE': return 'Metric unavailable';
+      case 'INSUFFICIENT_SAMPLE': return 'Insufficient sample';
+      case 'LOW_COVERAGE': return 'Coverage too low';
+      case 'NOT_COMPARABLE': return 'Not comparable (provider mismatch)';
+      case 'BASELINE_UNAVAILABLE': return 'Baseline unavailable';
+      case 'SUPERSEDED': return 'Superseded by a later configuration change';
+    }
+  }
+
+  protected percent(value: number | null): string { return value === null || value === undefined ? 'n/a' : value.toFixed(1) + '%'; }
+  protected fixed(value: number | null): string { return value === null || value === undefined ? 'n/a' : String(Math.round(value * 100) / 100); }
+
+  protected openRecommendationFor(robot: RobotSummary): boolean {
+    return (this.safetyByRobot()[robot.id] ?? []).some((s) => s.recommendation?.status === 'OPEN' || s.recommendation?.status === 'ACKNOWLEDGED');
+  }
+
+  protected reviewRecommendation(recommendation: RollbackRecommendation, reviewing: boolean): void {
+    this.recommendationReviewing.update((items) => ({ ...items, [recommendation.id]: reviewing }));
+  }
+
+  protected acknowledgeRecommendation(robot: RobotSummary, recommendation: RollbackRecommendation): void {
+    this.recommendationAction(robot, recommendation, this.robotsService.acknowledgeRollbackRecommendation(recommendation.id));
+  }
+
+  protected dismissRecommendation(robot: RobotSummary, recommendation: RollbackRecommendation): void {
+    this.recommendationAction(robot, recommendation, this.robotsService.dismissRollbackRecommendation(recommendation.id));
+  }
+
+  protected rollbackRecommendation(robot: RobotSummary, recommendation: RollbackRecommendation): void {
+    this.recommendationAction(robot, recommendation, this.robotsService.rollbackFromRecommendation(recommendation.id, null), true);
+  }
+
+  private recommendationAction(robot: RobotSummary, recommendation: RollbackRecommendation,
+      call: ReturnType<RobotsService['acknowledgeRollbackRecommendation']>, refreshRobot = false): void {
+    this.recommendationErrors.update((errors) => ({ ...errors, [recommendation.id]: null }));
+    this.recommendationBusy.update((busy) => ({ ...busy, [recommendation.id]: true }));
+    call.pipe(finalize(() => this.recommendationBusy.update((busy) => ({ ...busy, [recommendation.id]: false })))).subscribe({
+      next: () => {
+        this.recommendationReviewing.update((items) => ({ ...items, [recommendation.id]: false }));
+        this.loadSafety(robot.id);
+        if (refreshRobot) {
+          this.loadConfigurationHistory(robot.id);
+          this.robotsService.list().subscribe((rows) => this.robots.set(rows));
+        }
+      },
+      error: () => {
+        this.recommendationErrors.update((errors) => ({
+          ...errors, [recommendation.id]: 'This action could not be completed. The Robot configuration may have changed.',
+        }));
+        this.loadSafety(robot.id);
+      },
+    });
   }
 
   protected changeTypeLabel(type: RobotConfigurationRevision['changeType']): string {

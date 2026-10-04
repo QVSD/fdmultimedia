@@ -446,3 +446,10 @@ V3 adds deterministic transcript-semantic reranking over V2 windows, immutable t
 - Execution reuses the canonical 17I/17J Apply core with the latest adaptive policy and a fresh `ADAPTIVE_GUARDRAILS_V1` evaluation; blocked guardrails leave the authorization ACTIVE and the Robot unchanged, while configuration drift, an inactive Persona, a stale proposal or a human Apply invalidate it.
 - Provenance is durable: each revision records `execution_origin`, authorization id, engine version `PREAUTHORIZED_EXECUTION_V1` and the 17J guardrail evaluation. Lock order authorization, proposal, Robot, a unique ACTIVE-per-proposal index, an after-commit event and a bounded 15-minute reconciler make races and restarts safe.
 - Approval, proposal creation, Experiment actions, Rollback, renewals, multi-use or wildcard authorization, FULL_AUTO, multi-factor changes and LLM decisions remain out of scope. Phase 17M is not started.
+
+### Phase 17M — Post-change safety monitoring and rollback recommendations (implemented)
+
+- `POST_CHANGE_SAFETY_V1` observes real post-change outcomes of successful forward PERSONA changes (human Apply and 17L automatic Apply) against a baseline frozen from the justifying controlled Experiment, per epoch, with H72 as the decision window, D7 as confirmation, H24 informational and a 15-day monitoring horizon.
+- Reuses the existing sample, coverage and materiality thresholds, with explicit adverse-direction metadata, immutable revisioned evaluations and fingerprint deduplication.
+- A material adverse H72/D7 difference opens one neutral, non-causal `RollbackRecommendation` that a person can acknowledge, dismiss or roll back through the canonical Phase 17I rollback; configuration changes supersede it.
+- An hourly bounded reconciler and a per-revision advisory lock make evaluation concurrency and restart safe. There is no automatic rollback, no policy or authorization mutation, no LLM and no replacement Persona generation. Phase 17N is not started.

@@ -962,3 +962,13 @@ Run the full backend, Worker, frontend, Docker, upgrade/fresh Flyway, and storag
 5. Shorten the sweep for local runs with `APP_ADAPTIVE_EXECUTION_RECONCILE_INTERVAL_MS`. Because the H72 observation window is real time, local end-to-end runs need a clearly labeled SQL fixture (an isolated acceptance workspace); never weaken guardrails to make it pass.
 
 Backend coverage is in `AdaptiveExecutionTest` plus the updated `RobotChangeProposalServiceTest`; frontend coverage is in `analytics.spec.ts` and `robots.spec.ts`.
+
+## Testing post-change safety monitoring locally
+
+1. A monitorable revision is a successful forward PERSONA change (human Apply or 17L automatic Apply). `GET /api/robots/{robotId}/post-change-safety` lists the latest monitors with evaluations, baselines and recommendations. A new revision is `TOO_YOUNG` (no mature post-change publication yet), which is the natural local result.
+2. `POST /api/robots/{robotId}/configuration-revisions/{revisionId}/safety-evaluations` with `{"observationWindow":"H72"}` (H24, H72 or D7) evaluates on demand and is idempotent; `GET .../safety-evaluations` shows immutable history. The hourly reconciler (`APP_POST_CHANGE_SAFETY_RECONCILE_INTERVAL_MS`, `..._INITIAL_DELAY_MS` for local runs) evaluates up to 100 revisions per pass.
+3. Real H72/D7 maturity cannot be waited for locally and the justifying Experiment must be COMPLETED with mature variant-A data, so runtime proofs use a clearly labeled isolated SQL fixture that back-dates the revision and seeds the post-change runs, publications and snapshots (`RUNTIME_POST_CHANGE_SAFETY: ISOLATED_ACCEPTANCE_FIXTURE`). Never change thresholds to force a result.
+4. A material adverse H72 or D7 difference opens one `RollbackRecommendation`: `GET /api/rollback-recommendations`, then `POST .../{id}/acknowledge`, `.../dismiss` or `.../rollback`. Acknowledge and dismiss never touch the Robot; rollback goes through the canonical 17I rollback and creates one `HUMAN_ROLLBACK` revision. A later configuration change makes it `SUPERSEDED` (rollback returns 409).
+5. Multiple API replicas behind nginx return 401 because HTTP sessions are per instance (pre-existing); use a single instance for authenticated runtime checks. The scheduler and the advisory lock are safe with several instances.
+
+Backend coverage: `PostChangeSafetyEvaluatorTest`, `PostChangeSafetyServiceTest`, `RollbackRecommendationServiceTest`, `PostChangeSafetyArchitectureTest` (in-memory `FakeSafetyStore` mirrors the V42 uniqueness rules); PostgreSQL concurrency is proven at runtime. Frontend: `robots.spec.ts`.

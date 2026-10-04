@@ -20,12 +20,13 @@ import { CampaignContentPlanSummary } from '../../core/campaign-plans/campaign-p
 import { CampaignCopyService } from '../../core/campaign-copy/campaign-copy.service';
 import { CampaignCopySetSummary } from '../../core/campaign-copy/campaign-copy.models';
 import { RobotConfigurationRevision } from '../../core/publishing/robot-change-proposal.models';
+import { RevisionSafety, RollbackRecommendation } from '../../core/publishing/post-change-safety.models';
 import { Robots } from './robots';
 
 describe('Robots', () => {
   let component: Robots;
   let fixture: ComponentFixture<Robots>;
-  let robotsService: Pick<RobotsService, 'list' | 'create' | 'runNow' | 'pause' | 'resume' | 'runsForRobot' | 'allRuns' | 'cancelRun' | 'configurationRevisions' | 'rollbackConfigurationRevision' | 'adaptivePolicy' | 'updateAdaptivePolicy' | 'adaptivePolicyHistory' | 'adaptiveProposalEligibility'>;
+  let robotsService: Pick<RobotsService, 'list' | 'create' | 'runNow' | 'pause' | 'resume' | 'runsForRobot' | 'allRuns' | 'cancelRun' | 'configurationRevisions' | 'rollbackConfigurationRevision' | 'adaptivePolicy' | 'updateAdaptivePolicy' | 'adaptivePolicyHistory' | 'adaptiveProposalEligibility' | 'postChangeSafety' | 'acknowledgeRollbackRecommendation' | 'dismissRollbackRecommendation' | 'rollbackFromRecommendation'>;
   let approvalsService: Pick<RobotApprovalsService, 'list' | 'approve' | 'reject'>;
   let assetsService: Pick<AssetsService, 'list'>;
   let socialAccountsService: Pick<SocialAccountsService, 'list'>;
@@ -46,6 +47,10 @@ describe('Robots', () => {
       allRuns: vi.fn().mockReturnValue(of([])),
       cancelRun: vi.fn().mockReturnValue(of(run('CANCELLED'))),
       configurationRevisions: vi.fn().mockReturnValue(of([])),
+      postChangeSafety: vi.fn().mockReturnValue(of([])),
+      acknowledgeRollbackRecommendation: vi.fn().mockReturnValue(of(recommendation('ACKNOWLEDGED'))),
+      dismissRollbackRecommendation: vi.fn().mockReturnValue(of(recommendation('DISMISSED'))),
+      rollbackFromRecommendation: vi.fn().mockReturnValue(of(recommendation('ROLLED_BACK'))),
       rollbackConfigurationRevision: vi.fn().mockReturnValue(of(configurationRevision(2, 'ROLLBACK'))),
       adaptivePolicy: vi.fn().mockReturnValue(of({ robotId: 'robot-1', revision: 0, persisted: false, enabled: true,
         maxAppliedChangesPerWindow: 2, changeBudgetWindowDays: 30, cooldownHours: 72,
@@ -588,6 +593,128 @@ describe('Robots', () => {
     expect(component['executionOriginLabel']('PREAUTHORIZED_AUTO_APPLY')).toBe('Applied automatically (pre-authorized)');
     expect(component['executionOriginLabel']('HUMAN_ROLLBACK')).toBe('Human rollback');
     expect(component['executionOriginLabel']('HUMAN_APPLY')).toBe('Applied by a person');
+  });
+
+  function recommendation(status: RollbackRecommendation['status']): RollbackRecommendation {
+    return {
+      id: 'rec-1', robotId: 'robot-1', revisionId: 'revision-1', robotRevision: 1, evaluationId: 'eval-1', window: 'H72', status,
+      metric: 'TOTAL_INTERACTIONS', provider: 'TEST', previousPersonaName: 'Persona A', currentPersonaName: 'Persona B',
+      executionOrigin: 'HUMAN_APPLY', authorizationId: null, baselineSample: 10, baselineValue: 100, postSample: 10, postCoverage: 1,
+      postValue: 80, absoluteDifference: -20, relativeDifferencePercent: -20,
+      reason: 'Material adverse post-change difference observed.', limitations: 'Observed post-change difference is not proof.',
+      createdAt: '2026-10-04T00:00:00Z', acknowledgedAt: null, dismissedAt: null, resolvedAt: null, rollbackRevisionId: null,
+    };
+  }
+
+  function safety(status: RevisionSafety['monitorStatus'], rec: RollbackRecommendation | null,
+      evaluationStatus: 'READY_STABLE' | 'READY_REGRESSION_OBSERVED' | 'TOO_YOUNG' = 'READY_REGRESSION_OBSERVED',
+      origin: RevisionSafety['executionOrigin'] = 'HUMAN_APPLY'): RevisionSafety {
+    const ready = evaluationStatus !== 'TOO_YOUNG';
+    return {
+      revisionId: 'revision-1', robotRevision: 1, executionOrigin: origin, authorizationId: origin === 'PREAUTHORIZED_AUTO_APPLY' ? 'auth-9' : null,
+      monitorId: 'monitor-1', monitorStatus: status, metric: 'TOTAL_INTERACTIONS', provider: 'TEST', epochStart: '2026-10-01T00:00:00Z', epochEnd: null,
+      latestEvaluations: [{
+        id: 'eval-1', monitorId: 'monitor-1', robotId: 'robot-1', revisionId: 'revision-1', evaluationRevision: 1, engineVersion: 'POST_CHANGE_SAFETY_V1',
+        window: 'H72', informational: false, status: evaluationStatus, reasons: ['NO_MATURE_POST_CHANGE_PUBLICATIONS'], metric: 'TOTAL_INTERACTIONS',
+        provider: 'TEST', executionOrigin: origin, authorizationId: null, baselineSample: ready ? 10 : null, baselineCoverage: ready ? 1 : null,
+        baselineValue: ready ? 100 : null, epochStart: '2026-10-01T00:00:00Z', epochEnd: null, postRuns: 10, postPublished: 10,
+        postEligible: ready ? 10 : 0, postSample: ready ? 10 : 0, postCoverage: ready ? 1 : null,
+        postValue: ready ? (evaluationStatus === 'READY_STABLE' ? 98 : 80) : null, absoluteDifference: ready ? -20 : null,
+        relativeDifferencePercent: ready ? -20 : null, materialThresholdPercent: 10, minSample: 5, minCoverage: 0.6, evaluatedAt: '2026-10-10T00:00:00Z',
+      }],
+      baselines: [], recommendation: rec, disclaimer: 'Observed post-change difference is not proof that the configuration change caused the outcome.',
+    };
+  }
+
+  function expandHistory(rows: RevisionSafety[], origin: RobotConfigurationRevision['executionOrigin'] = 'HUMAN_APPLY'): { target: RobotSummary; revision: RobotConfigurationRevision } {
+    vi.mocked(robotsService.list).mockReturnValue(of([robot('ACTIVE', 'DRAFT_ONLY')]));
+    vi.mocked(robotsService.configurationRevisions).mockReturnValue(of([{ ...configurationRevision(1, 'PERSONA_CHANGE'), id: 'revision-1', executionOrigin: origin, executionAuthorizationId: origin === 'PREAUTHORIZED_AUTO_APPLY' ? 'auth-9' : null }]));
+    vi.mocked(robotsService.postChangeSafety).mockReturnValue(of(rows));
+    fixture = TestBed.createComponent(Robots);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+    const target = component['robots']()[0];
+    component['toggleConfigurationHistory'](target);
+    fixture.detectChanges();
+    return { target, revision: component['configurationHistoryFor'](target)[0] };
+  }
+
+  it('shows a stable post-change state without any recommendation and the non-causal disclaimer', () => {
+    expandHistory([safety('MONITORING', null, 'READY_STABLE')]);
+    const text = fixture.nativeElement.textContent as string;
+    expect(robotsService.postChangeSafety).toHaveBeenCalledWith('robot-1');
+    expect(text).toContain('Safety monitoring');
+    expect(text).toContain('No material adverse difference observed');
+    expect(text).toContain('n=10');
+    expect(text).not.toContain('Rollback review recommended');
+    expect(text).toContain('Observed differences are not proof that the Persona change caused the outcome.');
+  });
+
+  it('shows an early state before enough mature evidence and a pending state without a monitor', () => {
+    expandHistory([safety('MONITORING', null, 'TOO_YOUNG')]);
+    expect(fixture.nativeElement.textContent).toContain('Too early');
+    expandHistory([]);
+    expect(fixture.nativeElement.textContent).toContain('Safety monitoring has not started');
+  });
+
+  it('shows a neutral open rollback recommendation with evidence and requires explicit confirmation to roll back', () => {
+    const { target } = expandHistory([safety('MONITORING', recommendation('OPEN'))]);
+    const text = fixture.nativeElement.textContent as string;
+    expect(text).toContain('Rollback review recommended');
+    expect(text).toContain('Material adverse post-change difference observed over H72');
+    expect(text.toLowerCase()).not.toContain('bad persona');
+    expect(text.toLowerCase()).not.toContain('caused a');
+    expect(component['openRecommendationFor'](target)).toBe(true);
+
+    component['reviewRecommendation'](recommendation('OPEN'), true);
+    fixture.detectChanges();
+    const confirm = fixture.nativeElement.textContent as string;
+    expect(confirm).toContain('Current Persona: Persona B');
+    expect(confirm).toContain('previous Persona: Persona A');
+    expect(confirm).toContain('not proof that the Persona change caused the outcome');
+    expect(robotsService.rollbackFromRecommendation).not.toHaveBeenCalled();
+
+    component['rollbackRecommendation'](target, recommendation('OPEN'));
+    expect(robotsService.rollbackFromRecommendation).toHaveBeenCalledWith('rec-1', null);
+    expect(robotsService.list).toHaveBeenCalled();
+  });
+
+  it('acknowledges and dismisses a recommendation without touching the Robot or rolling back', () => {
+    const { target } = expandHistory([safety('MONITORING', recommendation('OPEN'))]);
+    const listCalls = vi.mocked(robotsService.list).mock.calls.length;
+    component['acknowledgeRecommendation'](target, recommendation('OPEN'));
+    component['dismissRecommendation'](target, recommendation('OPEN'));
+    expect(robotsService.acknowledgeRollbackRecommendation).toHaveBeenCalledWith('rec-1');
+    expect(robotsService.dismissRollbackRecommendation).toHaveBeenCalledWith('rec-1');
+    expect(robotsService.rollbackFromRecommendation).not.toHaveBeenCalled();
+    expect(robotsService.rollbackConfigurationRevision).not.toHaveBeenCalled();
+    expect(vi.mocked(robotsService.list).mock.calls.length).toBe(listCalls);
+  });
+
+  it('renders superseded, rolled-back and dismissed recommendations as non-actionable', () => {
+    expandHistory([safety('SUPERSEDED', recommendation('SUPERSEDED'))]);
+    let text = fixture.nativeElement.textContent as string;
+    expect(text).toContain('This recommendation is no longer actionable because the Robot configuration changed.');
+    expect(Array.from(fixture.nativeElement.querySelectorAll('button')).some((b) => (b as HTMLElement).textContent?.includes('Review rollback'))).toBe(false);
+    expandHistory([safety('COMPLETED', recommendation('ROLLED_BACK'))]);
+    text = fixture.nativeElement.textContent as string;
+    expect(text).toContain('Rolled back');
+    expandHistory([safety('COMPLETED', recommendation('DISMISSED'))]);
+    expect(fixture.nativeElement.textContent).toContain('Recommendation dismissed');
+  });
+
+  it('labels an automatically applied revision with its pre-authorization alongside the safety evidence', () => {
+    expandHistory([safety('MONITORING', null, 'READY_STABLE', 'PREAUTHORIZED_AUTO_APPLY')], 'PREAUTHORIZED_AUTO_APPLY');
+    expect(fixture.nativeElement.textContent).toContain('Applied automatically under pre-authorization');
+    expect(fixture.nativeElement.textContent).toContain('auth-9');
+  });
+
+  it('surfaces a failed recommendation action and reloads the committed safety state', () => {
+    const { target } = expandHistory([safety('MONITORING', recommendation('OPEN'))]);
+    vi.mocked(robotsService.rollbackFromRecommendation).mockReturnValue(throwError(() => new Error('conflict')));
+    component['rollbackRecommendation'](target, recommendation('OPEN'));
+    expect(component['recommendationErrors']()['rec-1']).toBeTruthy();
+    expect(vi.mocked(robotsService.postChangeSafety).mock.calls.length).toBeGreaterThan(1);
   });
 
   it('loads conservative adaptive-policy defaults and explains human control', () => {

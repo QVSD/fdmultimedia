@@ -288,3 +288,20 @@ button.button-secondary {
     justify-content: flex-start;
   }
 }
+
+.robot-safety {
+  margin: 0.25rem 0 0.75rem 1rem;
+  padding-left: 0.75rem;
+  border-left: 3px solid var(--border, #d0d5dd);
+}
+
+.robot-safety h4 {
+  margin: 0 0 0.25rem;
+}
+
+.robot-safety__recommendation {
+  margin: 0.5rem 0;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border, #d0d5dd);
+  border-radius: 6px;
+}
