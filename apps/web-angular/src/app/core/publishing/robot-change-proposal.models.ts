@@ -72,6 +72,9 @@ export interface RobotConfigurationRevision {
   guardrailEvaluationId: string | null;
   adaptivePolicyRevision: number | null;
   guardrailEngineVersion: string | null;
+  executionOrigin: 'HUMAN_APPLY' | 'PREAUTHORIZED_AUTO_APPLY' | 'HUMAN_ROLLBACK';
+  executionAuthorizationId: string | null;
+  executionEngineVersion: string | null;
 }
 
 export type AdaptiveGuardrailReason = 'POLICY_DISABLED' | 'CHANGE_BUDGET_EXHAUSTED' | 'COOLDOWN_ACTIVE' |
@@ -106,4 +109,21 @@ export interface AutonomousProposalEligibility {
 export interface RobotAdaptivePolicyRevision {
   id: string; robotId: string; revision: number; previousValues: string | null; newValues: string;
   actorUserId: string; createdAt: string;
+}
+
+export type ExecutionAuthorizationStatus = 'ACTIVE' | 'CONSUMED' | 'REVOKED' | 'EXPIRED' | 'INVALIDATED';
+
+export interface ExecutionAuthorization {
+  id: string; proposalId: string; robotId: string; robotName: string; factor: 'PERSONA';
+  fromPersonaId: string | null; fromPersonaName: string | null; toPersonaId: string; toPersonaName: string;
+  sourceExperimentId: string; maxExecutions: number; status: ExecutionAuthorizationStatus; terminalReason: string | null;
+  validFrom: string; expiresAt: string; policyRevision: number; executionEngineVersion: string;
+  createdByUserId: string | null; createdAt: string; terminatedAt: string | null;
+  consumedRevisionId: string | null; consumedGuardrailEvaluationId: string | null;
+}
+
+export interface ExecutionAuthorizationEligibility {
+  authorizationId: string; status: ExecutionAuthorizationStatus; proposalStatus: RobotChangeProposalStatus;
+  expiresAt: string; eligibleNow: boolean; reasons: string[]; guardrailReasons: string[];
+  robotFingerprintMatch: boolean; targetPersonaActive: boolean; evaluatedAt: string;
 }

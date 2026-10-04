@@ -8,7 +8,9 @@ import { DashboardBreakdown, DashboardDimension, DashboardFilters, DashboardMetr
 import { CompareRequest, ComparisonResult, InsightsResponse } from './publication-insights.models';
 import { CampaignCohortComparison, CampaignDimension, CampaignOption, CampaignReview, CampaignReviewListItem, CampaignWindow } from './campaign-performance.models';
 import { OptimizationEligibility, OptimizationProposal, OptimizationProposalOrigin } from './optimization-proposal.models';
-import { AdaptiveGuardrailEvaluation, RobotChangeEligibility, RobotChangeProposal } from './robot-change-proposal.models';
+import {
+  AdaptiveGuardrailEvaluation, ExecutionAuthorization, ExecutionAuthorizationEligibility, RobotChangeEligibility, RobotChangeProposal,
+} from './robot-change-proposal.models';
 
 @Injectable({ providedIn: 'root' })
 export class PublicationAnalyticsService {
@@ -158,5 +160,22 @@ export class PublicationAnalyticsService {
 
   robotChangeGuardrails(id: string): Observable<AdaptiveGuardrailEvaluation> {
     return this.http.get<AdaptiveGuardrailEvaluation>(`${environment.apiBaseUrl}/robot-change-proposals/${id}/guardrails`, { withCredentials: true });
+  }
+
+  executionAuthorizations(proposalId: string): Observable<ExecutionAuthorization[]> {
+    return this.http.get<ExecutionAuthorization[]>(`${environment.apiBaseUrl}/robot-change-proposals/${proposalId}/execution-authorizations`, { withCredentials: true });
+  }
+
+  createExecutionAuthorization(proposalId: string, durationHours: number): Observable<ExecutionAuthorization> {
+    return this.http.post<ExecutionAuthorization>(`${environment.apiBaseUrl}/robot-change-proposals/${proposalId}/execution-authorizations`,
+      { durationHours }, { withCredentials: true });
+  }
+
+  executionAuthorizationEligibility(id: string): Observable<ExecutionAuthorizationEligibility> {
+    return this.http.get<ExecutionAuthorizationEligibility>(`${environment.apiBaseUrl}/adaptive-execution-authorizations/${id}/eligibility`, { withCredentials: true });
+  }
+
+  revokeExecutionAuthorization(id: string): Observable<ExecutionAuthorization> {
+    return this.http.post<ExecutionAuthorization>(`${environment.apiBaseUrl}/adaptive-execution-authorizations/${id}/revoke`, {}, { withCredentials: true });
   }
 }

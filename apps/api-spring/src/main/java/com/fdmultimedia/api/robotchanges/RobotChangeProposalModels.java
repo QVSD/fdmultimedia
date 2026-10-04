@@ -11,6 +11,7 @@ public final class RobotChangeProposalModels {
 
     public enum Status { READY_FOR_REVIEW, APPROVED, APPLIED, REJECTED, STALE, ROLLED_BACK, FAILED }
     public enum ChangeType { PERSONA_CHANGE, ROLLBACK }
+    public enum ExecutionOrigin { HUMAN_APPLY, PREAUTHORIZED_AUTO_APPLY, HUMAN_ROLLBACK }
 
     public record CreateRequest(UUID sourceOptimizationProposalId, UUID targetRobotId) {}
     public record RollbackRequest(String reason) {}
@@ -32,5 +33,6 @@ public final class RobotChangeProposalModels {
             UUID previousPersonaId, String previousPersonaNameSnapshot, UUID newPersonaId, String newPersonaNameSnapshot,
             String previousConfigFingerprint, String newConfigFingerprint, UUID sourceProposalId, UUID sourceExperimentId,
             UUID rollbackOfRevisionId, String reason, Instant createdAt, UUID guardrailEvaluationId,
-            Integer adaptivePolicyRevision, String guardrailEngineVersion) {}
+            Integer adaptivePolicyRevision, String guardrailEngineVersion, ExecutionOrigin executionOrigin,
+            UUID executionAuthorizationId, String executionEngineVersion) {}
 }

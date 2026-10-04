@@ -95,6 +95,16 @@ function robotChangeProposal(status: string) {
   };
 }
 
+function executionAuthorization(status: string): any {
+  return { id: 'auth-1', proposalId: 'change-proposal-1', robotId: 'robot-1', robotName: 'Robot One', factor: 'PERSONA',
+    fromPersonaId: 'persona-a', fromPersonaName: 'Persona A', toPersonaId: 'persona-b', toPersonaName: 'Persona B',
+    sourceExperimentId: 'experiment-1', maxExecutions: 1, status, terminalReason: null,
+    validFrom: '2026-10-04T00:00:00Z', expiresAt: '2026-10-05T00:00:00Z', policyRevision: 1,
+    executionEngineVersion: 'PREAUTHORIZED_EXECUTION_V1', createdByUserId: 'user-1', createdAt: '2026-10-04T00:00:00Z',
+    terminatedAt: status === 'ACTIVE' ? null : '2026-10-04T01:00:00Z',
+    consumedRevisionId: status === 'CONSUMED' ? 'revision-9' : null, consumedGuardrailEvaluationId: null };
+}
+
 describe('Analytics', () => {
   let fixture: ComponentFixture<Analytics>;
   let analytics: Pick<PublicationAnalyticsService, 'history' | 'attribution' | 'state' | 'refresh' |
@@ -103,7 +113,8 @@ describe('Analytics', () => {
     'optimizationEligibility' | 'optimizationProposals' | 'createOptimizationProposal' |
     'approveOptimizationProposal' | 'rejectOptimizationProposal' | 'materializeOptimizationProposal' |
     'robotChangeEligibility' | 'robotChangeProposals' | 'createRobotChangeProposal' |
-    'approveRobotChangeProposal' | 'rejectRobotChangeProposal' | 'applyRobotChangeProposal' | 'robotChangeGuardrails'>;
+    'approveRobotChangeProposal' | 'rejectRobotChangeProposal' | 'applyRobotChangeProposal' | 'robotChangeGuardrails' |
+    'executionAuthorizations' | 'createExecutionAuthorization' | 'executionAuthorizationEligibility' | 'revokeExecutionAuthorization'>;
   let robotsService: Pick<RobotsService, 'list'>;
   let publications: Subject<PublicationSummary[]>;
 
@@ -152,6 +163,13 @@ describe('Analytics', () => {
         activeExperimentId: null, pendingProposalCount: 0, runsSinceRevision: 0, publicationsSinceRevision: 0,
         eligibleByAgeCount: 0, analyticsPublicationCount: 0, metricSampleCount: 0, coverage: null,
         requiredSampleCount: 5, requiredCoverage: 0.6, observationWindow: 'H72', evaluatedAt: '2026-10-03T00:00:00Z' })),
+      executionAuthorizations: vi.fn().mockReturnValue(of([])),
+      createExecutionAuthorization: vi.fn().mockReturnValue(of(executionAuthorization('ACTIVE'))),
+      executionAuthorizationEligibility: vi.fn().mockReturnValue(of({ authorizationId: 'auth-1', status: 'ACTIVE',
+        proposalStatus: 'APPROVED', expiresAt: '2026-10-05T00:00:00Z', eligibleNow: false, reasons: [],
+        guardrailReasons: ['COOLDOWN_ACTIVE'], robotFingerprintMatch: true, targetPersonaActive: true,
+        evaluatedAt: '2026-10-04T00:00:00Z' })),
+      revokeExecutionAuthorization: vi.fn().mockReturnValue(of(executionAuthorization('REVOKED'))),
     };
     robotsService = {
       list: vi.fn().mockReturnValue(of([
@@ -327,6 +345,61 @@ describe('Analytics', () => {
     expect(fixture.nativeElement.textContent).toContain('COOLDOWN_ACTIVE');
     const buttons = Array.from(fixture.nativeElement.querySelectorAll('button')) as HTMLButtonElement[];
     expect(buttons.find((button) => button.textContent?.includes('Apply approved change'))?.disabled).toBe(true);
+  });
+
+  it('requires explicit confirmation with exact scope before creating a pre-authorization', () => {
+    const component = fixture.componentInstance as any;
+    component.tab.set('campaigns');
+    component.robotChangeProposals.set([robotChangeProposal('APPROVED')]);
+    fixture.detectChanges();
+    const open = Array.from(fixture.nativeElement.querySelectorAll('button')) as HTMLButtonElement[];
+    open.find((b) => b.textContent?.includes('Pre-authorize automatic execution'))!.click();
+    fixture.detectChanges();
+    const text = fixture.nativeElement.textContent as string;
+    expect(text).toContain('This authorizes automatic application of this exact approved change when all guardrails are satisfied.');
+    expect(text).toContain('Approved target Persona');
+    expect(text).toContain('Max executions');
+    expect(analytics.createExecutionAuthorization).not.toHaveBeenCalled();
+
+    component.chooseExecutionDuration('change-proposal-1', 72);
+    component.createExecutionAuthorization(robotChangeProposal('APPROVED'));
+    expect(analytics.createExecutionAuthorization).toHaveBeenCalledWith('change-proposal-1', 72);
+  });
+
+  it('never offers pre-authorization for a proposal that is not approved', () => {
+    const component = fixture.componentInstance as any;
+    component.robotChangeProposals.set([robotChangeProposal('READY_FOR_REVIEW')]);
+    component.createExecutionAuthorization(robotChangeProposal('READY_FOR_REVIEW'));
+    expect(analytics.createExecutionAuthorization).not.toHaveBeenCalled();
+  });
+
+  it('shows an active authorization with its blocker and revokes it only after confirmation', () => {
+    const component = fixture.componentInstance as any;
+    component.tab.set('campaigns');
+    component.robotChangeProposals.set([robotChangeProposal('APPROVED')]);
+    (analytics.executionAuthorizations as any).mockReturnValue(of([executionAuthorization('ACTIVE')]));
+    component.loadExecutionAuthorizations('change-proposal-1');
+    fixture.detectChanges();
+    const text = fixture.nativeElement.textContent as string;
+    expect(text).toContain('Active — waiting for guardrails');
+    expect(text).toContain('COOLDOWN_ACTIVE');
+
+    component.revokeExecutionAuthorization(executionAuthorization('ACTIVE'));
+    expect(analytics.revokeExecutionAuthorization).toHaveBeenCalledWith('auth-1');
+    expect(component.executionMessage()).toContain('revoked');
+  });
+
+  it('renders a consumed authorization as used and not re-creatable while terminal', () => {
+    const component = fixture.componentInstance as any;
+    component.tab.set('campaigns');
+    component.robotChangeProposals.set([robotChangeProposal('APPLIED')]);
+    component.executionAuthorizations.set({ 'change-proposal-1': [executionAuthorization('CONSUMED')] });
+    fixture.detectChanges();
+    const text = fixture.nativeElement.textContent as string;
+    expect(text).toContain('Automatically applied');
+    expect(text).toContain('cannot be reused');
+    const buttons = Array.from(fixture.nativeElement.querySelectorAll('button')) as HTMLButtonElement[];
+    expect(buttons.find((b) => b.textContent?.includes('Pre-authorize automatic execution'))).toBeUndefined();
   });
 
   it('renders the historical cohort comparison table with neutral segment labels, no leaderboard styling', () => {

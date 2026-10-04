@@ -303,6 +303,7 @@
                         <div class="run-row">
                           <span class="robots__badge">Revision {{ revision.revision }}</span>
                           <span class="robots__muted">{{ changeTypeLabel(revision.changeType) }}</span>
+                          <span class="robots__muted">{{ executionOriginLabel(revision.executionOrigin) }}</span>
                           <span>{{ revision.previousPersonaNameSnapshot ?? 'No Persona' }} &rarr; {{ revision.newPersonaNameSnapshot ?? 'No Persona' }}</span>
                           <span class="robots__muted">{{ revision.createdAt | date:'medium' }}</span>
                           @if (revision.reason) { <span class="robots__muted">Reason: {{ revision.reason }}</span> }

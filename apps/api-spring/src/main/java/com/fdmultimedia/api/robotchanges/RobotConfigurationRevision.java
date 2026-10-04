@@ -1,6 +1,7 @@
 package com.fdmultimedia.api.robotchanges;
 
 import com.fdmultimedia.api.robotchanges.RobotChangeProposalModels.ChangeType;
+import com.fdmultimedia.api.robotchanges.RobotChangeProposalModels.ExecutionOrigin;
 import com.fdmultimedia.api.users.AppUser;
 import com.fdmultimedia.api.workspaces.Workspace;
 import jakarta.persistence.*;
@@ -36,6 +37,9 @@ public class RobotConfigurationRevision {
     @Column(name = "guardrail_evaluation_id") private UUID guardrailEvaluationId;
     @Column(name = "adaptive_policy_revision") private Integer adaptivePolicyRevision;
     @Column(name = "guardrail_engine_version") private String guardrailEngineVersion;
+    @Enumerated(EnumType.STRING) @Column(name = "execution_origin", nullable = false) private ExecutionOrigin executionOrigin;
+    @Column(name = "execution_authorization_id") private UUID executionAuthorizationId;
+    @Column(name = "execution_engine_version") private String executionEngineVersion;
     @ManyToOne(fetch = FetchType.LAZY, optional = false) @JoinColumn(name = "actor_user_id") private AppUser actor;
     @Column private String reason;
     @Column(name = "created_at", nullable = false) private Instant createdAt;
@@ -56,6 +60,20 @@ public class RobotConfigurationRevision {
             String previousConfigFingerprint, String newConfigFingerprint, UUID sourceProposalId, UUID sourceExperimentId,
             UUID rollbackOfRevisionId, AppUser actor, String reason, Instant now, UUID guardrailEvaluationId,
             Integer adaptivePolicyRevision, String guardrailEngineVersion) {
+        this(workspace,robotId,revision,changeType,previousPersonaId,previousPersonaNameSnapshot,newPersonaId,
+                newPersonaNameSnapshot,previousConfigFingerprint,newConfigFingerprint,sourceProposalId,sourceExperimentId,
+                rollbackOfRevisionId,actor,reason,now,guardrailEvaluationId,adaptivePolicyRevision,guardrailEngineVersion,
+                changeType==ChangeType.ROLLBACK?ExecutionOrigin.HUMAN_ROLLBACK:ExecutionOrigin.HUMAN_APPLY,null,null);
+    }
+
+    public RobotConfigurationRevision(Workspace workspace, UUID robotId, int revision, ChangeType changeType,
+            UUID previousPersonaId, String previousPersonaNameSnapshot, UUID newPersonaId, String newPersonaNameSnapshot,
+            String previousConfigFingerprint, String newConfigFingerprint, UUID sourceProposalId, UUID sourceExperimentId,
+            UUID rollbackOfRevisionId, AppUser actor, String reason, Instant now, UUID guardrailEvaluationId,
+            Integer adaptivePolicyRevision, String guardrailEngineVersion, ExecutionOrigin executionOrigin,
+            UUID executionAuthorizationId, String executionEngineVersion) {
+        this.executionOrigin=executionOrigin;this.executionAuthorizationId=executionAuthorizationId;
+        this.executionEngineVersion=executionEngineVersion;
         this.id = UUID.randomUUID(); this.workspace = workspace; this.robotId = robotId; this.revision = revision;
         this.changeType = changeType; this.previousPersonaId = previousPersonaId;
         this.previousPersonaNameSnapshot = previousPersonaNameSnapshot; this.newPersonaId = newPersonaId;
@@ -75,5 +93,7 @@ public class RobotConfigurationRevision {
     public UUID getRollbackOfRevisionId() { return rollbackOfRevisionId; } public AppUser getActor() { return actor; }
     public UUID getGuardrailEvaluationId(){return guardrailEvaluationId;} public Integer getAdaptivePolicyRevision(){return adaptivePolicyRevision;}
     public String getGuardrailEngineVersion(){return guardrailEngineVersion;}
+    public ExecutionOrigin getExecutionOrigin(){return executionOrigin;} public UUID getExecutionAuthorizationId(){return executionAuthorizationId;}
+    public String getExecutionEngineVersion(){return executionEngineVersion;}
     public String getReason() { return reason; } public Instant getCreatedAt() { return createdAt; }
 }

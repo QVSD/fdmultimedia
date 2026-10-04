@@ -836,6 +836,14 @@ export class Robots implements OnInit, OnDestroy {
     return type === 'ROLLBACK' ? 'Rolled back' : 'Persona change';
   }
 
+  protected executionOriginLabel(origin: RobotConfigurationRevision['executionOrigin'] | undefined): string {
+    switch (origin) {
+      case 'PREAUTHORIZED_AUTO_APPLY': return 'Applied automatically (pre-authorized)';
+      case 'HUMAN_ROLLBACK': return 'Human rollback';
+      default: return 'Applied by a person';
+    }
+  }
+
   protected isAdaptivePolicyExpanded(robot: RobotSummary): boolean { return this.adaptivePolicyExpanded()[robot.id] ?? false; }
   protected toggleAdaptivePolicy(robot: RobotSummary): void {
     const expanded = !this.isAdaptivePolicyExpanded(robot);

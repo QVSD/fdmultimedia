@@ -495,7 +495,7 @@
             @if (proposal.status === 'STALE') {
               <p role="note">This proposal is stale: the Robot configuration or the proposed Persona changed since it was created. It cannot be applied.</p>
             }
-            @if (robotChangeGuardrails()[proposal.id]; as guardrail) {
+            @if (proposal.status === 'APPROVED' && robotChangeGuardrails()[proposal.id]; as guardrail) {
               <section aria-label="Adaptive guardrails">
                 <h3>Guardrails</h3>
                 <p><strong>{{ guardrail.eligible ? 'Eligible' : 'Approved, temporarily blocked' }}</strong> · Policy revision {{ guardrail.policyRevision }} · {{ guardrail.engineVersion }}</p>
@@ -507,6 +507,78 @@
                   <div><dt>Pending changes</dt><dd>{{ guardrail.pendingProposalCount }}</dd></div>
                 </dl>
                 <p class="analytics__muted">Guardrails determine current eligibility only. They never approve or apply a change automatically.</p>
+              </section>
+            }
+            @if (proposal.status === 'APPROVED' || authorizationsFor(proposal.id).length > 0) {
+              <section aria-label="Pre-authorized execution">
+                <h3>Pre-authorized execution</h3>
+                <p class="analytics__muted">
+                  A pre-authorization permits exactly one automatic application of this exact, already approved Persona change.
+                  It is single-use, expires, can be revoked, and never bypasses guardrails or the Robot's adaptive policy.
+                  It does not approve anything, roll anything back, or authorize other changes.
+                </p>
+                @for (authorization of authorizationsFor(proposal.id); track authorization.id) {
+                  <div class="analytics__insight-card" role="group" [attr.aria-label]="'Authorization ' + authorization.status">
+                    <header><strong>{{ authorizationStatusText(authorization) }}</strong><span class="analytics__badge">{{ authorization.status }}</span></header>
+                    <dl>
+                      <div><dt>Robot</dt><dd>{{ authorization.robotName }}</dd></div>
+                      <div><dt>Change</dt><dd>{{ authorization.fromPersonaName ?? 'None' }} → {{ authorization.toPersonaName }}</dd></div>
+                      <div><dt>Max executions</dt><dd>{{ authorization.maxExecutions }}</dd></div>
+                      <div><dt>Expires</dt><dd>{{ authorization.expiresAt | date:'medium' }}</dd></div>
+                      <div><dt>Policy revision at creation</dt><dd>{{ authorization.policyRevision }}</dd></div>
+                      @if (authorization.terminatedAt) { <div><dt>Ended</dt><dd>{{ authorization.terminatedAt | date:'medium' }}</dd></div> }
+                    </dl>
+                    @if (authorization.status === 'ACTIVE') {
+                      @if (executionEligibility()[authorization.id]; as eligibility) {
+                        <p class="analytics__muted">
+                          {{ eligibility.eligibleNow ? 'Guardrails are currently satisfied; automatic application is imminent.' : blockedText(eligibility) }}
+                        </p>
+                      }
+                      @if (executionRevokeConfirming()[authorization.id]) {
+                        <p role="alert">Revoking prevents this approved change from being applied automatically. The proposal stays approved.</p>
+                        <div class="analytics__actions">
+                          <button type="button" (click)="revokeExecutionAuthorization(authorization)" [disabled]="executionBusy()">Confirm revoke</button>
+                          <button type="button" class="button-secondary" (click)="cancelRevoke(authorization.id)">Keep authorization</button>
+                        </div>
+                      } @else {
+                        <div class="analytics__actions">
+                          <button type="button" class="button-secondary" (click)="startRevoke(authorization.id)">Revoke authorization</button>
+                        </div>
+                      }
+                    }
+                    @if (authorization.status === 'CONSUMED') {
+                      <p class="analytics__muted">This authorization has been used. Applied automatically as a new Robot configuration revision (see Robot configuration history); it cannot be reused.</p>
+                    }
+                  </div>
+                }
+                @if (proposal.status === 'APPROVED' && !activeAuthorizationFor(proposal.id)) {
+                  @if (executionConfirming()[proposal.id]) {
+                    <div role="group" aria-label="Confirm pre-authorization">
+                      <p role="alert"><strong>This authorizes automatic application of this exact approved change when all guardrails are satisfied.</strong></p>
+                      <dl>
+                        <div><dt>Robot</dt><dd>{{ proposal.targetRobotNameSnapshot }}</dd></div>
+                        <div><dt>Current Persona</dt><dd>{{ proposal.currentPersonaNameSnapshot ?? 'None' }}</dd></div>
+                        <div><dt>Approved target Persona</dt><dd>{{ proposal.proposedPersonaNameSnapshot }}</dd></div>
+                        <div><dt>Experiment</dt><dd>{{ proposal.sourceExperimentId }}</dd></div>
+                        <div><dt>Max executions</dt><dd>1</dd></div>
+                      </dl>
+                      <label>Expires after
+                        <select [value]="durationFor(proposal.id)" (change)="chooseExecutionDuration(proposal.id, +$any($event.target).value)">
+                          @for (hours of executionDurationOptions; track hours) { <option [value]="hours" [selected]="hours === durationFor(proposal.id)">{{ hours }} h</option> }
+                        </select>
+                      </label>
+                      <div class="analytics__actions">
+                        <button type="button" (click)="createExecutionAuthorization(proposal)" [disabled]="executionBusy()">Confirm pre-authorization</button>
+                        <button type="button" class="button-secondary" (click)="cancelExecutionConfirmation(proposal.id)">Cancel</button>
+                      </div>
+                    </div>
+                  } @else {
+                    <div class="analytics__actions">
+                      <button type="button" class="button-secondary" (click)="startExecutionConfirmation(proposal.id)" [disabled]="executionBusy()">Pre-authorize automatic execution</button>
+                    </div>
+                  }
+                }
+                @if (executionMessage()) { <p role="status">{{ executionMessage() }}</p> }
               </section>
             }
             <div class="analytics__actions">

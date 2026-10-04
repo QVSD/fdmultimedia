@@ -10,6 +10,7 @@ import com.fdmultimedia.api.optimization.OptimizationProposalRepository;
 import com.fdmultimedia.api.personas.Persona;
 import com.fdmultimedia.api.personas.PersonaRepository;
 import com.fdmultimedia.api.personas.PersonaStatus;
+import com.fdmultimedia.api.robotchanges.AdaptiveExecutionModels.ApplyResult;
 import com.fdmultimedia.api.robotchanges.RobotChangeProposalModels.*;
 import com.fdmultimedia.api.robots.Robot;
 import com.fdmultimedia.api.robots.RobotAiPolicy;
@@ -30,12 +31,12 @@ import org.springframework.web.server.ResponseStatusException;
 /**
  * Phase 17I: the sole service in this codebase permitted to turn a completed,
  * Phase 17H-originated controlled Experiment into an actual Robot PERSONA
- * change — and only after an explicit human approval and a separate,
+ * change â€” and only after an explicit human approval and a separate,
  * explicit Apply call (item: fundamental boundary). Analytics/recommendation/
  * Experiment-analysis/OptimizationProposal services never write to Robot
  * configuration directly; this class, and {@code Robot.applyPersona} itself,
  * are the only operational mutation path. Not autonomous optimization: no
- * method here ever calls apply/approve/reject/rollback on its own — every
+ * method here ever calls apply/approve/reject/rollback on its own â€” every
  * state transition is caused by an explicit controller call made by a human
  * principal.
  */
@@ -46,7 +47,7 @@ public class RobotChangeProposalService {
     private static final String STANDING_DISCLAIMER =
             "This proposal reflects observed controlled-experiment evidence for this Experiment, this metric, and this "
             + "observation window only. It does not establish universal superiority of the proposed Persona, and approving "
-            + "it does not itself change the Robot's configuration — a separate, explicit Apply action is required.";
+            + "it does not itself change the Robot's configuration â€” a separate, explicit Apply action is required.";
 
     private final AuthService auth;
     private final RobotChangeProposalRepository proposals;
@@ -58,15 +59,18 @@ public class RobotChangeProposalService {
     private final RobotRepository robots;
     private final PersonaRepository personas;
     private final AdaptiveGuardrailService guardrails;
+    private final RobotAdaptiveExecutionAuthorizationRepository authorizations;
+    private final AdaptiveExecutionAttemptRepository attempts;
     private final Clock clock;
 
     public RobotChangeProposalService(AuthService auth, RobotChangeProposalRepository proposals,
             RobotConfigurationRevisionRepository revisions, OptimizationProposalRepository optimizationProposals,
             ExperimentRepository experiments, ExperimentVariantRepository variants, ExperimentAnalysisService analysisService,
-            RobotRepository robots, PersonaRepository personas, AdaptiveGuardrailService guardrails, Clock clock) {
+            RobotRepository robots, PersonaRepository personas, AdaptiveGuardrailService guardrails,
+            RobotAdaptiveExecutionAuthorizationRepository authorizations, AdaptiveExecutionAttemptRepository attempts, Clock clock) {
         this.auth = auth; this.proposals = proposals; this.revisions = revisions;
         this.optimizationProposals = optimizationProposals; this.experiments = experiments; this.variants = variants;
-        this.analysisService = analysisService; this.robots = robots; this.personas = personas; this.guardrails=guardrails; this.clock = clock;
+        this.analysisService = analysisService; this.robots = robots; this.personas = personas; this.guardrails=guardrails; this.authorizations = authorizations; this.attempts = attempts; this.clock = clock;
     }
 
     @Transactional(readOnly = true)
@@ -164,8 +168,33 @@ public class RobotChangeProposalService {
     public Summary apply(AuthenticatedUser principal, UUID id) {
         var membership = auth.currentMembershipFor(principal);
         Workspace workspace = membership.getWorkspace();
+        // Lock order contract (17L): authorization(s) -> proposal -> Robot, identical to the automatic executor.
+        List<RobotAdaptiveExecutionAuthorization> active = authorizations.findActiveForProposalForUpdate(workspace, id);
+        ApplyResult result = applyCore(workspace, membership.getUser(), id, ExecutionOrigin.HUMAN_APPLY, null);
+        if (result.summary().status() == Status.APPLIED) {
+            Instant now = Instant.now(clock);
+            for (RobotAdaptiveExecutionAuthorization a : active) {
+                a.invalidate(AdaptiveExecutionModels.TerminalReason.APPLIED_MANUALLY, now);
+                authorizations.saveAndFlush(a);
+                attempts.saveAndFlush(new AdaptiveExecutionAttempt(workspace, a.getId(), id, a.getRobotId(),
+                        AdaptiveExecutionModels.AttemptTrigger.MANUAL_APPLY, AdaptiveExecutionModels.AttemptResult.ALREADY_APPLIED,
+                        AdaptiveExecutionModels.Reason.PROPOSAL_APPLIED.name(), null, null,
+                        sha256("MANUAL_APPLY|" + a.getId()), now));
+            }
+        }
+        return result.summary();
+    }
+
+    /**
+     * The single canonical Apply transaction body (Phase 17I/17J), shared verbatim by the human Apply and the
+     * Phase 17L pre-authorized executor. Callers must already hold the authorization lock (if any); this method
+     * locks proposal then Robot and re-validates fingerprint, candidate Persona and fresh 17J guardrails.
+     */
+    @Transactional
+    ApplyResult applyCore(Workspace workspace, com.fdmultimedia.api.users.AppUser actor, UUID id, ExecutionOrigin origin,
+            UUID authorizationId) {
         RobotChangeProposal p = proposals.findByWorkspaceAndIdForUpdate(workspace, id).orElseThrow(() -> notFound("Robot change proposal not found"));
-        if (p.getStatus() == Status.APPLIED) return summary(p);
+        if (p.getStatus() == Status.APPLIED) return new ApplyResult(summary(p), false, null, null);
         if (p.getStatus() != Status.APPROVED) throw conflict("PROPOSAL_NOT_APPROVED");
 
         Robot robot = robots.findByWorkspaceAndIdForUpdate(workspace, p.getTargetRobotId()).orElseThrow(() -> notFound("Robot not found"));
@@ -173,22 +202,22 @@ public class RobotChangeProposalService {
         String currentFingerprint = robotConfigFingerprint(robot.getId(), current == null ? null : current.getId());
         if (!currentFingerprint.equals(p.getExpectedRobotConfigFingerprint())) {
             // Item: a divergence is a valid, persisted outcome (STALE), never a rolled-back
-            // exception — mirrors OptimizationProposalService.materialize()'s identical
+            // exception â€” mirrors OptimizationProposalService.materialize()'s identical
             // stale-detection pattern. Throwing here would roll back markStale() along with
             // it, since @Transactional reverts the whole method on an uncaught exception.
             p.markStale();
             proposals.saveAndFlush(p);
-            return summary(p);
+            return new ApplyResult(summary(p), false, null, null);
         }
         Persona candidate = personas.findByWorkspaceAndId(workspace, p.getProposedPersonaId()).orElse(null);
         if (candidate == null || candidate.getStatus() != PersonaStatus.ACTIVE) {
             p.markStale();
             proposals.saveAndFlush(p);
-            return summary(p);
+            return new ApplyResult(summary(p), false, null, null);
         }
 
         AdaptiveGuardrailEvaluation evaluation=guardrails.evaluateAndPersist(workspace,robot,p,RobotAdaptivePolicyModels.Trigger.APPLY);
-        if(!evaluation.isEligible())return summary(p);
+        if(!evaluation.isEligible())return new ApplyResult(summary(p), false, null, evaluation.getId());
 
         Instant now = Instant.now(clock);
         robot.applyPersona(candidate, now);
@@ -199,12 +228,13 @@ public class RobotChangeProposalService {
         RobotConfigurationRevision revision = new RobotConfigurationRevision(workspace, robot.getId(), nextRevision,
                 ChangeType.PERSONA_CHANGE, current == null ? null : current.getId(), current == null ? null : current.getName(),
                 candidate.getId(), candidate.getName(), currentFingerprint, newFingerprint, p.getId(), p.getSourceExperimentId(),
-                null, membership.getUser(), null, now,evaluation.getId(),evaluation.getPolicyRevision(),evaluation.getEngineVersion());
+                null, actor, null, now,evaluation.getId(),evaluation.getPolicyRevision(),evaluation.getEngineVersion(),
+                origin, authorizationId, origin == ExecutionOrigin.PREAUTHORIZED_AUTO_APPLY ? AdaptiveExecutionExecutor.ENGINE_VERSION : null);
         revisions.saveAndFlush(revision);
 
         p.markApplied(now);
         proposals.saveAndFlush(p);
-        return summary(p);
+        return new ApplyResult(summary(p), true, revision.getId(), evaluation.getId());
     }
 
     @Transactional(readOnly = true)
@@ -216,7 +246,7 @@ public class RobotChangeProposalService {
 
     /**
      * Explicit human rollback only (never automatic/metric-triggered): the
-     * target revision must still be the Robot's current (latest) revision —
+     * target revision must still be the Robot's current (latest) revision â€”
      * a rollback of a superseded revision is rejected outright rather than
      * reinterpreted ("no time travel"). Idempotent: a repeat call finds the
      * rollback revision already created by a prior call and returns it
@@ -341,17 +371,18 @@ public class RobotChangeProposalService {
                 r.getPreviousPersonaNameSnapshot(), r.getNewPersonaId(), r.getNewPersonaNameSnapshot(),
                 r.getPreviousConfigFingerprint(), r.getNewConfigFingerprint(), r.getSourceProposalId(), r.getSourceExperimentId(),
                 r.getRollbackOfRevisionId(), r.getReason(), r.getCreatedAt(),r.getGuardrailEvaluationId(),
-                r.getAdaptivePolicyRevision(),r.getGuardrailEngineVersion());
+                r.getAdaptivePolicyRevision(),r.getGuardrailEngineVersion(),r.getExecutionOrigin(),
+                r.getExecutionAuthorizationId(),r.getExecutionEngineVersion());
     }
 
     /**
      * Minimum sufficient fingerprint for the one factor this phase can
-     * change (item: configuration fingerprint) — Robot id plus the current
+     * change (item: configuration fingerprint) â€” Robot id plus the current
      * Persona identity only, deliberately excluding {@code Robot.updatedAt}
      * or any other field. A manual edit to an unrelated axis (schedule,
      * cadence, AI policy, etc.) must not stale a pending Persona-change
-     * proposal; only a Persona change itself — through this service or
-     * through the ordinary Robot update endpoint — changes this value.
+     * proposal; only a Persona change itself â€” through this service or
+     * through the ordinary Robot update endpoint â€” changes this value.
      */
     static String robotConfigFingerprint(UUID robotId, UUID personaId) {
         return sha256(robotId + "|" + (personaId == null ? "NONE" : personaId));

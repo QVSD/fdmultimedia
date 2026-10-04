@@ -584,6 +584,12 @@ describe('Robots', () => {
     expect(component['rollbackErrors']()[revision.id]).toBeTruthy();
   });
 
+  it('labels each configuration revision with how it was applied', () => {
+    expect(component['executionOriginLabel']('PREAUTHORIZED_AUTO_APPLY')).toBe('Applied automatically (pre-authorized)');
+    expect(component['executionOriginLabel']('HUMAN_ROLLBACK')).toBe('Human rollback');
+    expect(component['executionOriginLabel']('HUMAN_APPLY')).toBe('Applied by a person');
+  });
+
   it('loads conservative adaptive-policy defaults and explains human control', () => {
     const target = robot('ACTIVE', 'DRAFT_ONLY');
     component['robots'].set([target]);
@@ -635,6 +641,9 @@ describe('Robots', () => {
       guardrailEvaluationId: null,
       adaptivePolicyRevision: null,
       guardrailEngineVersion: null,
+      executionOrigin: changeType === 'ROLLBACK' ? 'HUMAN_ROLLBACK' : 'HUMAN_APPLY',
+      executionAuthorizationId: null,
+      executionEngineVersion: null,
     };
   }
 

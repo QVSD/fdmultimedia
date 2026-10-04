@@ -46,8 +46,11 @@ class RobotChangeProposalServiceTest {
     private final RobotRepository robots = mock(RobotRepository.class);
     private final PersonaRepository personas = mock(PersonaRepository.class);
     private final AdaptiveGuardrailService guardrails = mock(AdaptiveGuardrailService.class);
+    private final RobotAdaptiveExecutionAuthorizationRepository authorizations = mock(RobotAdaptiveExecutionAuthorizationRepository.class);
+    private final AdaptiveExecutionAttemptRepository attempts = mock(AdaptiveExecutionAttemptRepository.class);
     private final RobotChangeProposalService service = new RobotChangeProposalService(auth, proposals, revisions,
-            optimizationProposals, experiments, variants, analysisService, robots, personas, guardrails, Clock.fixed(NOW, ZoneOffset.UTC));
+            optimizationProposals, experiments, variants, analysisService, robots, personas, guardrails, authorizations,
+            attempts, Clock.fixed(NOW, ZoneOffset.UTC));
 
     private final Workspace workspace = new Workspace("Test", "test");
     private final AppUser owner = new AppUser("owner@example.test", "hash", "Owner");

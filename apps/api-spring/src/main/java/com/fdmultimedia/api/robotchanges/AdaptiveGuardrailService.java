@@ -38,6 +38,11 @@ public class AdaptiveGuardrailService {
         return summary(evaluateAndPersist(w,robot,p,Trigger.CHECK));}
 
     AdaptiveGuardrailEvaluation evaluateAndPersist(Workspace w,Robot robot,RobotChangeProposal p,Trigger trigger){
+        return evaluations.saveAndFlush(evaluate(w,robot,p,trigger));
+    }
+
+    /** Canonical 17J evaluation without persistence — used by read-only/dry-run and repeated blocked 17L checks. */
+    AdaptiveGuardrailEvaluation evaluate(Workspace w,Robot robot,RobotChangeProposal p,Trigger trigger){
         PolicySummary policy=policies.effective(w,robot.getId());Instant now=Instant.now(clock);
         List<Reason> reasons=new ArrayList<>();if(!policy.enabled())reasons.add(Reason.POLICY_DISABLED);
         Instant budgetStart=now.minus(Duration.ofDays(policy.changeBudgetWindowDays()));
@@ -64,7 +69,7 @@ public class AdaptiveGuardrailService {
         AdaptiveGuardrailEvaluation result=new AdaptiveGuardrailEvaluation(w,p.getId(),robot.getId(),trigger,policy.revision(),List.copyOf(reasons),
                 policy.maxAppliedChangesPerWindow(),used,policy.changeBudgetWindowDays(),latest==null?null:latest.getId(),
                 latest==null?null:latest.getCreatedAt(),policy.cooldownHours(),cooldownEnd,activeExperiment,pending,observation,now);
-        return evaluations.saveAndFlush(result);
+        return result;
     }
 
     EvaluationSummary summary(AdaptiveGuardrailEvaluation e){List<Reason> reasons=e.getReasonCodes().isBlank()?List.of():Arrays.stream(e.getReasonCodes().split(",")).map(Reason::valueOf).toList();

@@ -439,3 +439,10 @@ V3 adds deterministic transcript-semantic reranking over V2 windows, immutable t
 - Discovery reuses Phase 17H's exact evidence gates, fixes its policy to the newest current-epoch `READY` H72/TOTAL_INTERACTIONS review, and checks at most 20 ACTIVE Personas in stable UUID order. There is no direction preference or metric/window cherry-picking.
 - Review-created events plus an hourly, 100-Robot bounded reconciliation recover missed work. PostgreSQL advisory locking and a unique semantic opportunity fingerprint provide restart/multi-instance idempotency and rejection suppression.
 - Human approval/materialization, Experiment activation/enrollment, RobotChangeProposal creation, Apply, and Rollback remain manual. Automatic Experiment/Robot mutation, LLM candidate choice, broader factors, policy relaxation, bandits/RL, and Phase 17L remain unstarted.
+
+### Phase 17L — Pre-authorized bounded adaptive execution (implemented)
+
+- A human-created `RobotAdaptiveExecutionAuthorization` permits one automatic Apply of one exact, already human-approved PERSONA `RobotChangeProposal`. It is single-use, expiring (1 hour to 30 days), revocable and consumed on success.
+- Execution reuses the canonical 17I/17J Apply core with the latest adaptive policy and a fresh `ADAPTIVE_GUARDRAILS_V1` evaluation; blocked guardrails leave the authorization ACTIVE and the Robot unchanged, while configuration drift, an inactive Persona, a stale proposal or a human Apply invalidate it.
+- Provenance is durable: each revision records `execution_origin`, authorization id, engine version `PREAUTHORIZED_EXECUTION_V1` and the 17J guardrail evaluation. Lock order authorization, proposal, Robot, a unique ACTIVE-per-proposal index, an after-commit event and a bounded 15-minute reconciler make races and restarts safe.
+- Approval, proposal creation, Experiment actions, Rollback, renewals, multi-use or wildcard authorization, FULL_AUTO, multi-factor changes and LLM decisions remain out of scope. Phase 17M is not started.

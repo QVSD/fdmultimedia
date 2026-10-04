@@ -2,7 +2,7 @@ import { DatePipe, JsonPipe } from '@angular/common';
 import { HttpErrorResponse } from '@angular/common/http';
 import { Component, OnDestroy, OnInit, signal } from '@angular/core';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
-import { Subscription, forkJoin } from 'rxjs';
+import { Subscription, forkJoin, timer } from 'rxjs';
 import { PersonasService } from '../../core/personas/personas.service';
 import { PersonaSummary } from '../../core/personas/persona.models';
 
@@ -23,7 +23,9 @@ import {
   CampaignCohortComparison, CampaignDimension, CampaignOption, CampaignReview, CampaignWindow,
 } from '../../core/publishing/campaign-performance.models';
 import { OptimizationEligibility, OptimizationProposal, OptimizationProposalOrigin } from '../../core/publishing/optimization-proposal.models';
-import { AdaptiveGuardrailEvaluation, RobotChangeEligibility, RobotChangeProposal } from '../../core/publishing/robot-change-proposal.models';
+import {
+  AdaptiveGuardrailEvaluation, ExecutionAuthorization, ExecutionAuthorizationEligibility, RobotChangeEligibility, RobotChangeProposal,
+} from '../../core/publishing/robot-change-proposal.models';
 import { RobotsService } from '../../core/robots/robots.service';
 import { RobotSummary } from '../../core/robots/robot.models';
 
@@ -95,6 +97,14 @@ export class Analytics implements OnInit, OnDestroy {
   protected readonly robotChangeBusy = signal(false);
   protected readonly robotChangeMessage = signal<string | null>(null);
   protected readonly robotChangeGuardrails = signal<Record<string, AdaptiveGuardrailEvaluation>>({});
+  protected readonly executionAuthorizations = signal<Record<string, ExecutionAuthorization[]>>({});
+  protected readonly executionEligibility = signal<Record<string, ExecutionAuthorizationEligibility>>({});
+  protected readonly executionConfirming = signal<Record<string, boolean>>({});
+  protected readonly executionRevokeConfirming = signal<Record<string, boolean>>({});
+  protected readonly executionDurationHours = signal<Record<string, number>>({});
+  protected readonly executionDurationOptions = [1, 24, 72, 168, 720];
+  protected readonly executionBusy = signal(false);
+  protected readonly executionMessage = signal<string | null>(null);
   private readonly subscriptions = new Subscription();
   private dashboardSubscription?: Subscription;
   private insightsSubscription?: Subscription;
@@ -376,6 +386,7 @@ export class Analytics implements OnInit, OnDestroy {
     this.subscriptions.add(request.subscribe({
       next: (updated) => { this.upsertRobotChangeProposal(updated); this.robotChangeBusy.set(false);
         if(updated.status==='APPROVED')this.loadRobotChangeGuardrails(updated.id);
+        if(['APPROVED','APPLIED','ROLLED_BACK'].includes(updated.status))this.loadExecutionAuthorizations(updated.id);
         const blocked=action==='apply'&&updated.status==='APPROVED';
         this.robotChangeMessage.set(updated.status === 'STALE' ? 'This proposal is stale: the Robot or the proposed Persona changed since the proposal was created. Applying has been blocked.'
           : blocked ? 'The proposal remains approved, but current adaptive guardrails block Apply. Review the evidence below.'
@@ -385,14 +396,119 @@ export class Analytics implements OnInit, OnDestroy {
     }));
   }
 
+  // The automatic Apply runs server-side right after the authorization commits, so refresh now and once more shortly after.
+  private refreshAfterExecutionChange(proposalId: string): void {
+    this.loadExecutionAuthorizations(proposalId);
+    this.loadRobotChangeProposals();
+    this.subscriptions.add(timer(2000).subscribe(() => { this.loadExecutionAuthorizations(proposalId); this.loadRobotChangeProposals(); }));
+  }
+
   private loadRobotChangeProposals(): void {
     this.subscriptions.add(this.analytics.robotChangeProposals().subscribe({
-      next: (rows) => { this.robotChangeProposals.set(rows); rows.filter(r=>r.status==='APPROVED').forEach(r=>this.loadRobotChangeGuardrails(r.id)); }, error: () => this.robotChangeProposals.set([]),
+      next: (rows) => { this.robotChangeProposals.set(rows); rows.filter(r=>r.status==='APPROVED').forEach(r=>this.loadRobotChangeGuardrails(r.id)); rows.filter(r=>['APPROVED','APPLIED','ROLLED_BACK'].includes(r.status)).forEach(r=>this.loadExecutionAuthorizations(r.id)); }, error: () => this.robotChangeProposals.set([]),
     }));
   }
 
   private upsertRobotChangeProposal(proposal: RobotChangeProposal): void {
     this.robotChangeProposals.update((rows) => [proposal, ...rows.filter((row) => row.id !== proposal.id)]);
+  }
+
+  // ---- Phase 17L: pre-authorized execution of one exact, already approved change ----
+
+  protected authorizationsFor(proposalId: string): ExecutionAuthorization[] { return this.executionAuthorizations()[proposalId] ?? []; }
+
+  protected activeAuthorizationFor(proposalId: string): ExecutionAuthorization | null {
+    return this.authorizationsFor(proposalId).find((a) => a.status === 'ACTIVE') ?? null;
+  }
+
+  protected durationFor(proposalId: string): number { return this.executionDurationHours()[proposalId] ?? 24; }
+
+  protected chooseExecutionDuration(proposalId: string, hours: number): void {
+    this.executionDurationHours.update((all) => ({ ...all, [proposalId]: Number(hours) }));
+  }
+
+  protected startExecutionConfirmation(proposalId: string): void {
+    this.executionConfirming.update((all) => ({ ...all, [proposalId]: true }));
+  }
+
+  protected cancelExecutionConfirmation(proposalId: string): void {
+    this.executionConfirming.update((all) => ({ ...all, [proposalId]: false }));
+  }
+
+  protected createExecutionAuthorization(proposal: RobotChangeProposal): void {
+    if (this.executionBusy() || proposal.status !== 'APPROVED') return;
+    this.executionBusy.set(true); this.executionMessage.set(null);
+    this.subscriptions.add(this.analytics.createExecutionAuthorization(proposal.id, this.durationFor(proposal.id)).subscribe({
+      next: (created) => {
+        this.executionBusy.set(false); this.cancelExecutionConfirmation(proposal.id);
+        this.executionMessage.set('Pre-authorized execution created for this exact approved change. It is single-use, expires, and never bypasses guardrails.');
+        this.refreshAfterExecutionChange(created.proposalId);
+      },
+      error: (error: HttpErrorResponse) => { this.executionBusy.set(false); this.executionMessage.set(this.executionError(error)); },
+    }));
+  }
+
+  protected startRevoke(authorizationId: string): void {
+    this.executionRevokeConfirming.update((all) => ({ ...all, [authorizationId]: true }));
+  }
+
+  protected cancelRevoke(authorizationId: string): void {
+    this.executionRevokeConfirming.update((all) => ({ ...all, [authorizationId]: false }));
+  }
+
+  protected revokeExecutionAuthorization(authorization: ExecutionAuthorization): void {
+    if (this.executionBusy()) return;
+    this.executionBusy.set(true); this.executionMessage.set(null);
+    this.subscriptions.add(this.analytics.revokeExecutionAuthorization(authorization.id).subscribe({
+      next: (revoked) => {
+        this.executionBusy.set(false); this.cancelRevoke(authorization.id);
+        this.executionMessage.set('Authorization revoked. The approved change will not be applied automatically.');
+        this.refreshAfterExecutionChange(revoked.proposalId);
+      },
+      error: (error: HttpErrorResponse) => { this.executionBusy.set(false); this.executionMessage.set(this.executionError(error)); },
+    }));
+  }
+
+  protected blockedText(eligibility: ExecutionAuthorizationEligibility): string {
+    const reasons = [...new Set([...eligibility.guardrailReasons, ...eligibility.reasons])];
+    return reasons.length > 0 ? 'Waiting — currently blocked: ' + reasons.join(', ') : 'Waiting — currently blocked';
+  }
+
+  protected authorizationStatusText(authorization: ExecutionAuthorization): string {
+    switch (authorization.status) {
+      case 'ACTIVE': return 'Active — waiting for guardrails';
+      case 'CONSUMED': return 'Automatically applied';
+      case 'REVOKED': return 'Revoked';
+      case 'EXPIRED': return 'Expired';
+      case 'INVALIDATED': return 'Invalidated' + (authorization.terminalReason ? ' (' + authorization.terminalReason + ')' : '');
+    }
+  }
+
+  protected loadExecutionAuthorizations(proposalId: string): void {
+    this.subscriptions.add(this.analytics.executionAuthorizations(proposalId).subscribe({
+      next: (rows) => {
+        this.executionAuthorizations.update((all) => ({ ...all, [proposalId]: rows }));
+        rows.filter((row) => row.status === 'ACTIVE').forEach((row) => this.loadExecutionEligibility(row.id));
+      },
+      error: () => undefined,
+    }));
+  }
+
+  private loadExecutionEligibility(authorizationId: string): void {
+    this.subscriptions.add(this.analytics.executionAuthorizationEligibility(authorizationId).subscribe({
+      next: (e) => this.executionEligibility.update((all) => ({ ...all, [authorizationId]: e })),
+      error: () => undefined,
+    }));
+  }
+
+  private executionError(error: HttpErrorResponse): string {
+    const detail = typeof error.error?.message === 'string' ? error.error.message : '';
+    if (detail.includes('PROPOSAL_NOT_APPROVED')) return 'Only a human-approved proposal can be pre-authorized.';
+    if (detail.includes('AUTHORIZATION_ALREADY_ACTIVE')) return 'This proposal already has an active authorization.';
+    if (detail.includes('ROBOT_CONFIGURATION_CHANGED')) return 'The Robot configuration changed since approval; a new proposal is required.';
+    if (detail.includes('DURATION_HOURS_OUT_OF_BOUNDS')) return 'Choose a duration between 1 hour and 30 days.';
+    if (detail.includes('AUTHORIZATION_NOT_ACTIVE')) return 'This authorization is no longer active.';
+    return 'The pre-authorization action could not be completed.';
   }
 
   private loadRobotChangeGuardrails(id:string):void {

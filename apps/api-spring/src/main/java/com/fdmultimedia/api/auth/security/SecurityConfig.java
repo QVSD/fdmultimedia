@@ -54,6 +54,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/campaign-performance-reviews/**").hasRole("USER")
                         .requestMatchers("/api/optimization-proposals/**").hasRole("USER")
                         .requestMatchers("/api/robot-change-proposals/**").hasRole("USER")
+                        .requestMatchers("/api/adaptive-execution-authorizations/**").hasRole("USER")
                         .requestMatchers("/api/content-drafts/**").hasRole("USER")
                         .requestMatchers("/api/publish-schedules/**").hasRole("USER")
                         .requestMatchers("/api/robots/**").hasRole("USER")
