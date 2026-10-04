@@ -439,9 +439,32 @@
                           {{ evaluation.eligible ? 'Eligible for an automatically generated review proposal.' : 'Not eligible: ' + evaluation.reasons.join(', ') }}
                           · {{ evaluation.candidateCountConsidered }} candidate(s) considered
                         </p>
+                        @for (skipped of evaluation.memorySkippedCandidates ?? []; track skipped.candidatePersonaId) {
+                          <p class="robots__muted">Candidate skipped due to adaptive history: {{ skippedCandidateName(robot, skipped.candidatePersonaId) }}
+                            ({{ skipped.reasons.join(', ') }}{{ skipped.suppressionUntil ? ' · until ' + (skipped.suppressionUntil | date:'medium') : '' }}).</p>
+                        }
                       }
                       <p class="robots__muted">Effective revision {{ policy.revision }}{{ policy.persisted ? '' : ' (defaults)' }}</p>
                       @if (adaptivePolicyErrors()[robot.id]) { <p class="robots__error" role="alert">{{ adaptivePolicyErrors()[robot.id] }}</p> }
+                      <section class="adaptive-memory" aria-label="Adaptive history">
+                        <h4>Adaptive history</h4>
+                        <p class="robots__muted">Previous observed outcomes of Persona transitions for this Robot. This is a factual history, not a score or ranking, and it never changes the Robot.</p>
+                        @if (adaptiveMemoryFor(robot).length === 0) { <p class="robots__muted">No Persona transitions have been proposed or applied for this Robot yet.</p> }
+                        @for (transition of adaptiveMemoryFor(robot); track transition.fromPersonaId + transition.toPersonaId) {
+                          <div class="adaptive-memory__row" role="group" [attr.aria-label]="'Transition ' + transition.fromPersonaName + ' to ' + transition.toPersonaName">
+                            <strong>{{ transition.fromPersonaName ?? transition.fromPersonaId }} &rarr; {{ transition.toPersonaName ?? transition.toPersonaId }}</strong>
+                            <span class="robots__badge">Previous observed outcome</span>
+                            <span>{{ memoryOutcomeLabel(transition.latestOutcome) }}</span>
+                            <p class="robots__muted">Last attempted {{ transition.lastSeenAt | date:'medium' }} · {{ transition.applyCount }} application(s) · {{ transition.rollbackCount }} rollback(s)
+                              @if (transition.latestSafetyStatus) { · latest safety status {{ transition.latestSafetyStatus === 'READY_STABLE' ? 'no material adverse difference' : 'material adverse difference' }} }</p>
+                            @if (transition.suppressed) {
+                              <p role="note">Automatic proposal temporarily suppressed{{ transition.suppressionUntil ? ' until ' + (transition.suppressionUntil | date:'medium') : '' }}.
+                                A person can still create a proposal manually.</p>
+                              @for (reason of transition.reasons; track reason) { <p class="robots__muted">{{ memoryReasonText(reason) }}</p> }
+                            }
+                          </div>
+                        }
+                      </section>
                       <details><summary>Policy history</summary>
                         @if (adaptivePolicyHistoryFor(robot).length === 0) { <p class="robots__muted">No explicit policy revisions yet.</p> }
                         @for (entry of adaptivePolicyHistoryFor(robot); track entry.id) {

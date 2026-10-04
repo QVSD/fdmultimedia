@@ -114,7 +114,8 @@ describe('Analytics', () => {
     'approveOptimizationProposal' | 'rejectOptimizationProposal' | 'materializeOptimizationProposal' |
     'robotChangeEligibility' | 'robotChangeProposals' | 'createRobotChangeProposal' |
     'approveRobotChangeProposal' | 'rejectRobotChangeProposal' | 'applyRobotChangeProposal' | 'robotChangeGuardrails' |
-    'executionAuthorizations' | 'createExecutionAuthorization' | 'executionAuthorizationEligibility' | 'revokeExecutionAuthorization'>;
+    'executionAuthorizations' | 'createExecutionAuthorization' | 'executionAuthorizationEligibility' | 'revokeExecutionAuthorization' |
+    'adaptiveMemoryDecision'>;
   let robotsService: Pick<RobotsService, 'list'>;
   let publications: Subject<PublicationSummary[]>;
 
@@ -163,6 +164,9 @@ describe('Analytics', () => {
         activeExperimentId: null, pendingProposalCount: 0, runsSinceRevision: 0, publicationsSinceRevision: 0,
         eligibleByAgeCount: 0, analyticsPublicationCount: 0, metricSampleCount: 0, coverage: null,
         requiredSampleCount: 5, requiredCoverage: 0.6, observationWindow: 'H72', evaluatedAt: '2026-10-03T00:00:00Z' })),
+      adaptiveMemoryDecision: vi.fn().mockReturnValue(of({ warning: false, fromPersonaName: 'Persona A', toPersonaName: 'Persona B',
+        decision: { robotId: 'robot-1', fromPersonaId: 'persona-a', toPersonaId: 'persona-b', eligible: true, reasons: [], suppressionUntil: null,
+          latestOutcome: null, latestEvidenceAt: null, engineVersion: 'ADAPTIVE_MEMORY_SCREENING_V1' } })),
       executionAuthorizations: vi.fn().mockReturnValue(of([])),
       createExecutionAuthorization: vi.fn().mockReturnValue(of(executionAuthorization('ACTIVE'))),
       executionAuthorizationEligibility: vi.fn().mockReturnValue(of({ authorizationId: 'auth-1', status: 'ACTIVE',
@@ -233,6 +237,46 @@ describe('Analytics', () => {
     expect(text).toContain('Observed associations do not establish causation');
     expect(text.toLowerCase()).not.toContain('winner');
     expect(text.toLowerCase()).not.toContain('best-performing');
+  });
+
+  it('renders the adaptive history warning for a suppressed transition without blocking proposal creation', () => {
+    const review = {
+      id: 'review-1', robotRunId: '11111111-1111-1111-1111-111111111111', revision: 1,
+      observationWindow: 'H72', primaryMetric: 'VIEWS', engineVersion: 'CAMPAIGN_PERFORMANCE_V1',
+      recommendationEngineVersion: 'CAMPAIGN_RECOMMENDATIONS_V1', evidenceStatus: 'INSUFFICIENT_SAMPLE',
+      robotRunStatus: 'SUCCEEDED', intendedOutputCount: 3, actualOutputCount: 3, publishedOutputCount: 3,
+      failedOutputCount: 0, eligibleByAgeCount: 3, analyticsPublicationCount: 2,
+      evidenceCutoffAt: '2026-09-20T12:00:00Z', createdAt: '2026-09-20T12:00:00Z',
+      metrics: { VIEWS: { total: 0, average: 0, median: 0, minimum: 0, maximum: 0, sampleCount: 1 } },
+      outputs: [{ id: 'evidence-1', robotRunOutputId: 'output-1', selectionOrder: 1, sourceRank: 1,
+        outputStatus: 'SUCCEEDED', campaignRole: 'INTRODUCTION', highlightCandidateId: 'candidate-1',
+        campaignPlanId: 'plan-1', campaignPlanRevision: 1, campaignPlanItemId: 'plan-item-1', campaignCopySetId: 'copy-1',
+        campaignCopySetRevision: 1, campaignCopyItemId: 'copy-item-1', contentSuggestionId: 'suggestion-1',
+        contentDraftId: 'draft-1', publishScheduleId: 'schedule-1', publicationId: 'publication-1', provider: 'TEST',
+        publishedAt: '2026-09-16T12:00:00Z', analyticsSnapshotId: 'snapshot-1', evidenceStatus: 'OBSERVED',
+        metrics: { VIEWS: 0 } }], comparisons: [],
+      recommendations: [{ id: 'rec-1', sequence: 1, type: 'COLLECT_MORE_DATA', metric: 'VIEWS',
+        comparedDimension: null, evidence: { sampleCount: 1 }, message: 'Collect more comparable observations.', limitations: [] }],
+      limitations: ['Observed associations do not establish causation.',
+        'TEST publishing and analytics are deterministic synthetic data, not representative of real social-platform engagement.'],
+    };
+    const component = fixture.componentInstance as any;
+    component.tab.set('campaigns');
+    component.campaignReview.set(review as any);
+    component.optimizationEligibility.set({ eligible: true, reasonCode: null, baselinePersonaId: 'persona-a', baselinePersonaName: 'Persona A',
+      metric: 'VIEWS', observationWindow: 'H72', provider: 'TEST', minimumSample: 5, minimumCoverage: 0.6, materialDifferencePercent: 10, limitations: [] });
+    (analytics.adaptiveMemoryDecision as any).mockReturnValue(of({ warning: true, fromPersonaName: 'Persona A', toPersonaName: 'Persona B',
+      decision: { robotId: 'robot-1', fromPersonaId: 'persona-a', toPersonaId: 'persona-b', eligible: false, reasons: ['HUMAN_REJECTED'],
+        suppressionUntil: '2026-12-01T00:00:00Z', latestOutcome: 'HUMAN_REJECTED', latestEvidenceAt: null, engineVersion: 'ADAPTIVE_MEMORY_SCREENING_V1' } }));
+    component.chooseOptimizationCandidate('persona-b');
+    fixture.detectChanges();
+    const text = fixture.nativeElement.textContent as string;
+    expect(text).toContain('Adaptive history for Persona A');
+    expect(text).toContain('Automatic proposals for this transition are temporarily suppressed until');
+    expect(text).toContain('You can still create this proposal.');
+    expect(text).toContain('A previous proposal for this transition was rejected.');
+    const create = Array.from(fixture.nativeElement.querySelectorAll('button')).find((b: any) => b.textContent?.includes('Create controlled test proposal')) as HTMLButtonElement;
+    expect(create.disabled).toBe(false);
   });
 
   it('creates a campaign performance review for the selected run/window/metric and reloads it', () => {
@@ -400,6 +444,36 @@ describe('Analytics', () => {
     expect(text).toContain('cannot be reused');
     const buttons = Array.from(fixture.nativeElement.querySelectorAll('button')) as HTMLButtonElement[];
     expect(buttons.find((b) => b.textContent?.includes('Pre-authorize automatic execution'))).toBeUndefined();
+  });
+
+  it('warns about a suppressed transition with neutral wording and still lets a person create the proposal', () => {
+    const component = fixture.componentInstance as any;
+    component.campaignReview.set({ id: 'review-1' });
+    component.optimizationEligibility.set({ eligible: true, reasonCode: null, baselinePersonaId: 'persona-a', baselinePersonaName: 'Persona A',
+      metric: 'VIEWS', observationWindow: 'H72', provider: 'TEST', minimumSample: 5, minimumCoverage: 0.6, materialDifferencePercent: 10, limitations: [] });
+    (analytics.adaptiveMemoryDecision as any).mockReturnValue(of({ warning: true, fromPersonaName: 'Persona A', toPersonaName: 'Persona B',
+      decision: { robotId: 'robot-1', fromPersonaId: 'persona-a', toPersonaId: 'persona-b', eligible: false, reasons: ['ROLLED_BACK', 'OBSERVED_REGRESSION'],
+        suppressionUntil: '2026-12-01T00:00:00Z', latestOutcome: 'ROLLED_BACK', latestEvidenceAt: null, engineVersion: 'ADAPTIVE_MEMORY_SCREENING_V1' } }));
+
+    component.chooseOptimizationCandidate('persona-b');
+
+    expect(analytics.adaptiveMemoryDecision).toHaveBeenCalledWith('review-1', 'persona-a', 'persona-b');
+    expect(component.adaptiveMemoryWarning().warning).toBe(true);
+    expect(component.adaptiveMemoryReasonText('ROLLED_BACK')).toBe('An earlier application of this transition was rolled back by a person.');
+    expect(component.adaptiveMemoryReasonText('OBSERVED_REGRESSION')).toContain('does not prove the Persona change caused the outcome');
+    component.createOptimizationProposal();
+    expect(analytics.createOptimizationProposal).toHaveBeenCalledWith('review-1', 'persona-b');
+    component.chooseOptimizationCandidate('');
+    expect(component.adaptiveMemoryWarning()).toBeNull();
+  });
+
+  it('shows no adaptive history warning when the transition has no suppression', () => {
+    const component = fixture.componentInstance as any;
+    component.campaignReview.set({ id: 'review-1' });
+    component.optimizationEligibility.set({ eligible: true, reasonCode: null, baselinePersonaId: 'persona-a', baselinePersonaName: 'Persona A',
+      metric: 'VIEWS', observationWindow: 'H72', provider: 'TEST', minimumSample: 5, minimumCoverage: 0.6, materialDifferencePercent: 10, limitations: [] });
+    component.chooseOptimizationCandidate('persona-b');
+    expect(component.adaptiveMemoryWarning()).toBeNull();
   });
 
   it('renders the historical cohort comparison table with neutral segment labels, no leaderboard styling', () => {

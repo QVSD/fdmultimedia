@@ -972,3 +972,12 @@ Backend coverage is in `AdaptiveExecutionTest` plus the updated `RobotChangeProp
 5. Multiple API replicas behind nginx return 401 because HTTP sessions are per instance (pre-existing); use a single instance for authenticated runtime checks. The scheduler and the advisory lock are safe with several instances.
 
 Backend coverage: `PostChangeSafetyEvaluatorTest`, `PostChangeSafetyServiceTest`, `RollbackRecommendationServiceTest`, `PostChangeSafetyArchitectureTest` (in-memory `FakeSafetyStore` mirrors the V42 uniqueness rules); PostgreSQL concurrency is proven at runtime. Frontend: `robots.spec.ts`.
+
+## Testing adaptive transition memory locally
+
+1. `GET /api/robots/{robotId}/adaptive-memory` returns the Robot's transitions (latest outcome, counts, last attempted, latest safety status, `suppressed`, `reasons`, `suppressionUntil`). The first read, startup repair and the hourly reconciler materialize the projection from existing history; deleting a Robot's rows and events and reading again reproduces them. Set `APP_ADAPTIVE_MEMORY_RECONCILE_INTERVAL_MS` to shorten the pass locally.
+2. `GET /api/robots/{robotId}/adaptive-memory/decision?targetPersonaId=...` is the read-only decision (warning, never a block). `GET /api/adaptive-memory/decision?sourceReviewId=&baselinePersonaId=&candidatePersonaId=` serves the manual proposal flow, which shows the warning and still lets a person create the proposal.
+3. With `AUTO_PROPOSE`, `GET /api/robots/{robotId}/adaptive-proposal-eligibility` lists `memorySkippedCandidates`; reject a proposal to see its transition suppressed for 30 days, and the result becomes `ALL_CANDIDATES_MEMORY_SUPPRESSED` when every valid candidate is suppressed. Suppression durations are fixed constants; use back-dated labeled SQL fixtures for time-based proofs and never weaken the rules.
+4. Several API replicas and restarts converge: events are unique per source fact and writers serialize on a per-Robot advisory lock. HTTP sessions are per instance, so use one instance for authenticated runtime checks.
+
+Backend coverage: `AdaptiveMemoryProjectorTest`, `AdaptiveMemoryServicesTest` (in-memory `FakeAdaptiveMemoryStore` mirroring V43), `AdaptiveMemoryArchitectureTest` and the added 17K screening tests in `AutonomousProposalServiceTest`; PostgreSQL concurrency is proven at runtime. Frontend: `robots.spec.ts` and `analytics.spec.ts`.

@@ -16,9 +16,21 @@ public final class AutonomousProposalModels {
         STALE_EVIDENCE,
         POST_CHANGE_OBSERVATION_REQUIRED,
         NO_ELIGIBLE_CANDIDATE,
-        DUPLICATE_OPPORTUNITY
+        DUPLICATE_OPPORTUNITY,
+        /** Phase 17N: every otherwise-valid candidate in the bounded canonical scan was suppressed by adaptive memory. */
+        ALL_CANDIDATES_MEMORY_SUPPRESSED
     }
+    /** A candidate that passed the canonical 17H gate but was skipped by Phase 17N memory screening (it never creates a proposal). */
+    public record MemorySkip(UUID candidatePersonaId,List<String> reasons,java.time.Instant suppressionUntil,String latestOutcome) {}
     public record Evaluation(UUID robotId,boolean eligible,List<Reason> reasons,int policyRevision,
             UUID sourceReviewId,int candidateCountConsidered,UUID selectedCandidatePersonaId,
-            String evidenceFingerprint,String opportunityFingerprint,UUID existingProposalId) {}
+            String evidenceFingerprint,String opportunityFingerprint,UUID existingProposalId,
+            List<MemorySkip> memorySkippedCandidates) {
+        public Evaluation(UUID robotId,boolean eligible,List<Reason> reasons,int policyRevision,
+                UUID sourceReviewId,int candidateCountConsidered,UUID selectedCandidatePersonaId,
+                String evidenceFingerprint,String opportunityFingerprint,UUID existingProposalId){
+            this(robotId,eligible,reasons,policyRevision,sourceReviewId,candidateCountConsidered,selectedCandidatePersonaId,
+                    evidenceFingerprint,opportunityFingerprint,existingProposalId,List.of());
+        }
+    }
 }

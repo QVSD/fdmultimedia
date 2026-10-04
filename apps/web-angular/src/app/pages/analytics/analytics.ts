@@ -23,6 +23,7 @@ import {
   CampaignCohortComparison, CampaignDimension, CampaignOption, CampaignReview, CampaignWindow,
 } from '../../core/publishing/campaign-performance.models';
 import { OptimizationEligibility, OptimizationProposal, OptimizationProposalOrigin } from '../../core/publishing/optimization-proposal.models';
+import { AdaptiveMemoryDecision, SuppressionReason } from '../../core/publishing/adaptive-memory.models';
 import {
   AdaptiveGuardrailEvaluation, ExecutionAuthorization, ExecutionAuthorizationEligibility, RobotChangeEligibility, RobotChangeProposal,
 } from '../../core/publishing/robot-change-proposal.models';
@@ -87,6 +88,7 @@ export class Analytics implements OnInit, OnDestroy {
   protected readonly optimizationProposals = signal<OptimizationProposal[]>([]);
   protected readonly optimizationPersonas = signal<PersonaSummary[]>([]);
   protected readonly optimizationCandidateId = signal('');
+  protected readonly adaptiveMemoryWarning = signal<AdaptiveMemoryDecision | null>(null);
   protected readonly optimizationBusy = signal(false);
   protected readonly optimizationMessage = signal<string | null>(null);
   protected readonly optimizationOrigin = signal<'ALL' | OptimizationProposalOrigin>('ALL');
@@ -286,7 +288,27 @@ export class Analytics implements OnInit, OnDestroy {
     return `${sample} / ${review.eligibleByAgeCount}`;
   }
 
-  protected chooseOptimizationCandidate(value: string): void { this.optimizationCandidateId.set(value); }
+  protected chooseOptimizationCandidate(value: string): void {
+    this.optimizationCandidateId.set(value); this.adaptiveMemoryWarning.set(null);
+    const review = this.campaignReview(); const eligibility = this.optimizationEligibility();
+    if (!value || !review || !eligibility?.baselinePersonaId) return;
+    // Phase 17N: a read-only warning about previously observed outcomes of this transition; humans keep full authority.
+    this.subscriptions.add(this.analytics.adaptiveMemoryDecision(review.id, eligibility.baselinePersonaId, value).subscribe({
+      next: (decision) => this.adaptiveMemoryWarning.set(decision.warning ? decision : null),
+      error: () => this.adaptiveMemoryWarning.set(null),
+    }));
+  }
+
+  protected adaptiveMemoryReasonText(reason: SuppressionReason): string {
+    switch (reason) {
+      case 'RECENTLY_PROPOSED': return 'This transition was proposed recently.';
+      case 'HUMAN_REJECTED': return 'A previous proposal for this transition was rejected.';
+      case 'RECENTLY_APPLIED': return 'This transition was applied recently.';
+      case 'OBSERVED_REGRESSION': return 'A material adverse difference was observed after this transition. This does not prove the Persona change caused the outcome.';
+      case 'ROLLED_BACK': return 'An earlier application of this transition was rolled back by a person.';
+      case 'CURRENTLY_ACTIVE': return 'This Persona is already the Robot\'s current Persona.';
+    }
+  }
   protected chooseOptimizationOrigin(value: 'ALL' | OptimizationProposalOrigin): void {
     this.optimizationOrigin.set(value); this.loadOptimizationProposals();
   }

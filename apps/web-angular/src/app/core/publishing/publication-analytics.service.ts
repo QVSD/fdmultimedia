@@ -7,6 +7,7 @@ import { PublicationAnalyticsSnapshot, PublicationAnalyticsState, PublicationAtt
 import { DashboardBreakdown, DashboardDimension, DashboardFilters, DashboardMetric, DashboardOptions, DashboardSummary, DashboardTrend } from './publication-dashboard.models';
 import { CompareRequest, ComparisonResult, InsightsResponse } from './publication-insights.models';
 import { CampaignCohortComparison, CampaignDimension, CampaignOption, CampaignReview, CampaignReviewListItem, CampaignWindow } from './campaign-performance.models';
+import { AdaptiveMemoryDecision } from './adaptive-memory.models';
 import { OptimizationEligibility, OptimizationProposal, OptimizationProposalOrigin } from './optimization-proposal.models';
 import {
   AdaptiveGuardrailEvaluation, ExecutionAuthorization, ExecutionAuthorizationEligibility, RobotChangeEligibility, RobotChangeProposal,
@@ -107,6 +108,11 @@ export class PublicationAnalyticsService {
   optimizationEligibility(reviewId: string): Observable<OptimizationEligibility> {
     return this.http.get<OptimizationEligibility>(`${environment.apiBaseUrl}/optimization-proposals/eligibility/${reviewId}`,
       { withCredentials: true });
+  }
+
+  adaptiveMemoryDecision(sourceReviewId: string, baselinePersonaId: string, candidatePersonaId: string): Observable<AdaptiveMemoryDecision> {
+    return this.http.get<AdaptiveMemoryDecision>(`${environment.apiBaseUrl}/adaptive-memory/decision`,
+      { params: { sourceReviewId, baselinePersonaId, candidatePersonaId }, withCredentials: true });
   }
 
   optimizationProposals(limit = 50, origin?: OptimizationProposalOrigin): Observable<OptimizationProposal[]> {

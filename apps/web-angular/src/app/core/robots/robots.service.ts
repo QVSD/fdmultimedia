@@ -4,6 +4,7 @@ import { Observable } from 'rxjs';
 
 import { environment } from '../../../environments/environment';
 import { CreateRobotRequest, RobotRunSummary, RobotSummary, UpdateRobotRequest } from './robot.models';
+import { RobotAdaptiveMemory } from '../publishing/adaptive-memory.models';
 import { PostChangeSafetyEvaluation, RevisionSafety, RollbackRecommendation, SafetyWindow } from '../publishing/post-change-safety.models';
 import { AutonomousProposalEligibility, RobotAdaptivePolicy, RobotAdaptivePolicyRevision, RobotConfigurationRevision } from '../publishing/robot-change-proposal.models';
 
@@ -56,6 +57,10 @@ export class RobotsService {
     return this.http.post<RobotConfigurationRevision>(
       `${environment.apiBaseUrl}/robots/${robotId}/configuration-revisions/${revisionId}/rollback`,
       reason ? { reason } : {}, { withCredentials: true });
+  }
+
+  adaptiveMemory(robotId: string): Observable<RobotAdaptiveMemory> {
+    return this.http.get<RobotAdaptiveMemory>(`${environment.apiBaseUrl}/robots/${robotId}/adaptive-memory`, { withCredentials: true });
   }
 
   postChangeSafety(robotId: string): Observable<RevisionSafety[]> {

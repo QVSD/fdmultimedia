@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
+import com.fdmultimedia.api.adaptivememory.AdaptiveMemoryService;
 import com.fdmultimedia.api.analytics.CampaignPerformanceReview;
 import com.fdmultimedia.api.analytics.CampaignPerformanceReviewRepository;
 import com.fdmultimedia.api.auth.AuthService;
@@ -37,8 +38,9 @@ class AutonomousProposalServiceTest {
     private final RobotChangeProposalRepository robotChanges=mock(RobotChangeProposalRepository.class);
     private final ExperimentRepository experiments=mock(ExperimentRepository.class);
     private final RobotConfigurationRevisionRepository revisions=mock(RobotConfigurationRevisionRepository.class);
+    private final AdaptiveMemoryService memory=mock(AdaptiveMemoryService.class);
     private final AutonomousProposalService service=new AutonomousProposalService(auth,robots,policies,reviews,personas,
-            proposals,proposalService,robotChanges,experiments,revisions);
+            proposals,proposalService,robotChanges,experiments,revisions,memory);
     private final Workspace workspace=new Workspace("Workspace","workspace");
     private final AppUser owner=new AppUser("owner@example.test","hash","Owner");
     private final AuthenticatedUser principal=new AuthenticatedUser(owner);
@@ -48,6 +50,7 @@ class AutonomousProposalServiceTest {
     private final RobotRun run=mock(RobotRun.class);
 
     @BeforeEach void setUp(){
+        when(memory.screen(any(),any())).thenAnswer(i->new AdaptiveMemoryService.Screen(i.getArgument(0),i.getArgument(1),Map.of(),NOW));
         when(auth.currentMembershipFor(principal)).thenReturn(new WorkspaceMembership(workspace,owner,WorkspaceRole.OWNER));
         when(robot.getId()).thenReturn(robotId);when(robot.getWorkspace()).thenReturn(workspace);when(robot.getPersona()).thenReturn(baseline);
         when(robots.findByWorkspaceAndId(workspace,robotId)).thenReturn(Optional.of(robot));
@@ -154,6 +157,98 @@ class AutonomousProposalServiceTest {
                 .startsWith("/api/robots/");
         assertThat(new RobotAdaptivePolicy(workspace,robotId,owner,NOW).getProposalAutomationMode())
                 .isEqualTo(ProposalAutomationMode.MANUAL_ONLY);
+    }
+
+    // ---- Phase 17N: adaptive memory screening (filter only, canonical order and bound unchanged) ----
+
+    private com.fdmultimedia.api.adaptivememory.AdaptiveMemoryModels.Memory suppressedMemory(UUID to){
+        return new com.fdmultimedia.api.adaptivememory.AdaptiveMemoryModels.Memory(workspace.getId(),robotId,baseline.getId(),to,
+                com.fdmultimedia.api.adaptivememory.AdaptiveMemoryModels.Outcome.ROLLED_BACK,1,1,1,0,NOW,NOW,null,null,null,null,
+                NOW.minusSeconds(86400),NOW,null,null,null,null,null,3);}
+    private void screenWith(Persona... suppressed){
+        Map<com.fdmultimedia.api.adaptivememory.AdaptiveMemoryProjector.Key,com.fdmultimedia.api.adaptivememory.AdaptiveMemoryModels.Memory> map=new HashMap<>();
+        for(Persona p:suppressed)map.put(new com.fdmultimedia.api.adaptivememory.AdaptiveMemoryProjector.Key(robotId,baseline.getId(),p.getId()),suppressedMemory(p.getId()));
+        when(memory.screen(any(),any())).thenAnswer(i->new AdaptiveMemoryService.Screen(i.getArgument(0),i.getArgument(1),map,NOW));}
+    private void autoPropose(){when(policies.findByWorkspaceAndRobotId(workspace,robotId)).thenReturn(Optional.of(policy(true,ProposalAutomationMode.AUTO_PROPOSE)));}
+    private void validCandidates(Persona... list){when(personas.findByWorkspaceAndStatusOrderByIdAsc(eq(workspace),eq(PersonaStatus.ACTIVE),any(Pageable.class))).thenReturn(List.of(list));
+        for(Persona c:list)when(proposalService.evaluateAutonomous(workspace,reviewId,c.getId())).thenReturn(evidence(c,Direction.LOWER_OBSERVED,"semantic-"+c.getName()));}
+
+    @Test void suppressedFirstCandidateIsSkippedAndTheNextCanonicalCandidateIsSelectedInOrder(){
+        autoPropose();Persona second=persona("Second");validCandidates(candidate,second);screenWith(candidate);
+        Evaluation result=service.dryRun(principal,robotId);
+        assertThat(result.eligible()).isTrue();assertThat(result.selectedCandidatePersonaId()).isEqualTo(second.getId());
+        assertThat(result.candidateCountConsidered()).isEqualTo(2);
+        assertThat(result.memorySkippedCandidates()).hasSize(1);
+        assertThat(result.memorySkippedCandidates().get(0).candidatePersonaId()).isEqualTo(candidate.getId());
+        assertThat(result.memorySkippedCandidates().get(0).reasons()).contains("ROLLED_BACK");
+        var order=inOrder(proposalService);order.verify(proposalService).evaluateAutonomous(workspace,reviewId,candidate.getId());
+        order.verify(proposalService).evaluateAutonomous(workspace,reviewId,second.getId());
+    }
+
+    @Test void whenEveryValidCandidateIsSuppressedTheResultIsExplicitAndNothingIsCreated(){
+        autoPropose();Persona second=persona("Second");validCandidates(candidate,second);screenWith(candidate,second);
+        Evaluation result=service.dryRun(principal,robotId);
+        assertThat(result.eligible()).isFalse();
+        assertThat(result.reasons()).containsExactly(Reason.ALL_CANDIDATES_MEMORY_SUPPRESSED);
+        assertThat(result.memorySkippedCandidates()).hasSize(2);
+        RobotAdaptivePolicy policy=policy(true,ProposalAutomationMode.AUTO_PROPOSE);when(policies.findForUpdate(workspace,robotId)).thenReturn(Optional.of(policy));
+        assertThat(service.evaluateAndCreate(robotId,"RECONCILIATION").eligible()).isFalse();
+        verify(proposalService,never()).createAutonomous(any(),any(),any(),any(),any(),anyInt(),any(),any());
+    }
+
+    @Test void memoryOnlyScreensCandidatesThatPassedTheCanonicalGateAndKeepsTheHardBound(){
+        autoPropose();Persona rejectedBy17H=persona("Rejected");validCandidates(candidate);
+        when(personas.findByWorkspaceAndStatusOrderByIdAsc(eq(workspace),eq(PersonaStatus.ACTIVE),any(Pageable.class))).thenReturn(List.of(rejectedBy17H,candidate));
+        when(proposalService.evaluateAutonomous(workspace,reviewId,rejectedBy17H.getId())).thenThrow(new ResponseStatusException(HttpStatus.CONFLICT,"NO_MATERIAL_OBSERVED_DIFFERENCE"));
+        screenWith(rejectedBy17H);
+        Evaluation result=service.dryRun(principal,robotId);
+        assertThat(result.selectedCandidatePersonaId()).as("a candidate rejected by 17H is never reported as memory-suppressed").isEqualTo(candidate.getId());
+        assertThat(result.memorySkippedCandidates()).isEmpty();
+
+        List<Persona> many=new ArrayList<>();for(int i=0;i<AutonomousProposalService.CANDIDATE_LIMIT+1;i++)many.add(persona("Many "+i));
+        when(personas.findByWorkspaceAndStatusOrderByIdAsc(eq(workspace),eq(PersonaStatus.ACTIVE),any(Pageable.class))).thenReturn(many);
+        for(Persona c:many)when(proposalService.evaluateAutonomous(workspace,reviewId,c.getId())).thenReturn(evidence(c,Direction.LOWER_OBSERVED,"s"+c.getName()));
+        screenWith(many.toArray(new Persona[0]));
+        Evaluation bounded=service.dryRun(principal,robotId);
+        assertThat(bounded.candidateCountConsidered()).isEqualTo(AutonomousProposalService.CANDIDATE_LIMIT);
+        assertThat(bounded.memorySkippedCandidates()).hasSize(AutonomousProposalService.CANDIDATE_LIMIT);
+        assertThat(bounded.reasons()).containsExactly(Reason.ALL_CANDIDATES_MEMORY_SUPPRESSED);
+    }
+
+    @Test void memoryNeverRanksTheFirstEligibleCanonicalCandidateWinsEvenIfALaterOneHasAFavorableHistory(){
+        autoPropose();Persona second=persona("Second");validCandidates(candidate,second);
+        com.fdmultimedia.api.adaptivememory.AdaptiveMemoryModels.Memory stableOld=new com.fdmultimedia.api.adaptivememory.AdaptiveMemoryModels.Memory(
+                workspace.getId(),robotId,baseline.getId(),second.getId(),com.fdmultimedia.api.adaptivememory.AdaptiveMemoryModels.Outcome.OBSERVED_STABLE,
+                1,1,0,0,NOW.minusSeconds(86400L*400),NOW.minusSeconds(86400L*400),null,null,NOW.minusSeconds(86400L*400),null,null,NOW,null,null,null,null,"READY_STABLE",3);
+        Map<com.fdmultimedia.api.adaptivememory.AdaptiveMemoryProjector.Key,com.fdmultimedia.api.adaptivememory.AdaptiveMemoryModels.Memory> map=new HashMap<>();
+        map.put(new com.fdmultimedia.api.adaptivememory.AdaptiveMemoryProjector.Key(robotId,baseline.getId(),second.getId()),stableOld);
+        when(memory.screen(any(),any())).thenAnswer(i->new AdaptiveMemoryService.Screen(i.getArgument(0),i.getArgument(1),map,NOW));
+        assertThat(service.dryRun(principal,robotId).selectedCandidatePersonaId()).isEqualTo(candidate.getId());
+    }
+
+    @Test void opportunityDedupeStillAppliesAfterMemoryAndTheSkipListIsPreserved(){
+        autoPropose();Persona second=persona("Second");validCandidates(candidate,second);screenWith(candidate);
+        OptimizationProposal existing=mock(OptimizationProposal.class);when(existing.getId()).thenReturn(UUID.randomUUID());
+        when(proposals.findByAutomationOpportunityFingerprint(anyString())).thenReturn(Optional.of(existing));
+        Evaluation result=service.dryRun(principal,robotId);
+        assertThat(result.reasons()).containsExactly(Reason.DUPLICATE_OPPORTUNITY);
+        assertThat(result.memorySkippedCandidates()).hasSize(1);
+    }
+
+    @Test void currentlyActiveTargetIsNeverEvaluatedAsACandidate(){
+        autoPropose();validCandidates(baseline,candidate);
+        Evaluation result=service.dryRun(principal,robotId);
+        verify(proposalService,never()).evaluateAutonomous(workspace,reviewId,baseline.getId());
+        assertThat(result.selectedCandidatePersonaId()).isEqualTo(candidate.getId());
+        assertThat(result.candidateCountConsidered()).isEqualTo(1);
+    }
+
+    @Test void manualOnlyRobotsNeverTouchMemoryScreening(){
+        when(policies.findByWorkspaceAndRobotId(workspace,robotId)).thenReturn(Optional.empty());
+        clearInvocations(memory);
+        Evaluation result=service.dryRun(principal,robotId);
+        assertThat(result.reasons()).startsWith(Reason.MANUAL_ONLY);
+        verifyNoInteractions(memory);
     }
 
     private RobotAdaptivePolicy policy(boolean enabled,ProposalAutomationMode mode){return new RobotAdaptivePolicy(workspace,robotId,

@@ -369,6 +369,13 @@
               Create controlled test proposal
             </button>
           </div>
+          @if (adaptiveMemoryWarning(); as memoryWarning) {
+            <div role="note" class="analytics__memory-warning" aria-label="Adaptive history warning">
+              <strong>Adaptive history for {{ memoryWarning.fromPersonaName }} &rarr; {{ memoryWarning.toPersonaName }}</strong>
+              <p>Automatic proposals for this transition are temporarily suppressed{{ memoryWarning.decision.suppressionUntil ? ' until ' + (memoryWarning.decision.suppressionUntil | date:'medium') : '' }}. You can still create this proposal.</p>
+              @for (reason of memoryWarning.decision.reasons; track reason) { <p class="analytics__muted">{{ adaptiveMemoryReasonText(reason) }}</p> }
+            </div>
+          }
           <p class="analytics__muted">Baseline: {{ eligibility.baselinePersonaName }} · {{ eligibility.metric }} · {{ eligibility.observationWindow }} · minimum n={{ eligibility.minimumSample }} per Persona · {{ eligibility.minimumCoverage * 100 }}% coverage · {{ eligibility.materialDifferencePercent }}% material difference.</p>
         } @else {
           <p class="analytics__muted">This review is not eligible for a controlled test proposal: {{ eligibility.reasonCode }}.</p>

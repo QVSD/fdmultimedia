@@ -104,6 +104,7 @@ export interface AutonomousProposalEligibility {
   sourceReviewId: string | null; candidateCountConsidered: number;
   selectedCandidatePersonaId: string | null; evidenceFingerprint: string | null;
   opportunityFingerprint: string | null; existingProposalId: string | null;
+  memorySkippedCandidates?: { candidatePersonaId: string; reasons: string[]; suppressionUntil: string | null; latestOutcome: string | null }[];
 }
 
 export interface RobotAdaptivePolicyRevision {

@@ -453,3 +453,10 @@ V3 adds deterministic transcript-semantic reranking over V2 windows, immutable t
 - Reuses the existing sample, coverage and materiality thresholds, with explicit adverse-direction metadata, immutable revisioned evaluations and fingerprint deduplication.
 - A material adverse H72/D7 difference opens one neutral, non-causal `RollbackRecommendation` that a person can acknowledge, dismiss or roll back through the canonical Phase 17I rollback; configuration changes supersede it.
 - An hourly bounded reconciler and a per-revision advisory lock make evaluation concurrency and restart safe. There is no automatic rollback, no policy or authorization mutation, no LLM and no replacement Persona generation. Phase 17N is not started.
+
+### Phase 17N — Adaptive learning memory and repeated-change suppression (implemented)
+
+- `ADAPTIVE_MEMORY_V1` projects existing immutable history into directional, Robot-scoped transition memory (immutable events plus a summary row), rebuildable and idempotent, with factual outcomes only (no score, rank or global blacklist).
+- `ADAPTIVE_MEMORY_SCREENING_V1` suppresses a transition for 30 days after a proposal, rejection or apply and 90 days after an observed regression or rollback, with exact boundary semantics, all reasons reported and the latest expiry as `suppressionUntil`.
+- Phase 17K applies memory as a filter after the canonical 17H gate, keeping canonical UUID order and the 20-candidate bound, with `ALL_CANDIDATES_MEMORY_SUPPRESSED` when nothing remains. Manual proposal creation only shows a warning.
+- A read-only Robot "Adaptive history" section and API expose the memory. No machine learning, reward function, Persona ranking, automatic rollback or Phase 17O is implemented.

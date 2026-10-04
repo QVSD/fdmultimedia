@@ -25,6 +25,7 @@ import {
 } from '../../core/robots/robot.models';
 import { ContentSourcesService } from '../../core/content-sources/content-sources.service';
 import { ContentSourceSummary } from '../../core/content-sources/content-source.models';
+import { AdaptiveMemoryTransition, MemoryOutcome, RobotAdaptiveMemory, SuppressionReason } from '../../core/publishing/adaptive-memory.models';
 import { PostChangeSafetyEvaluation, RevisionSafety, RollbackRecommendation, SafetyWindow } from '../../core/publishing/post-change-safety.models';
 import { PersonasService } from '../../core/personas/personas.service';
 import { PersonaSummary } from '../../core/personas/persona.models';
@@ -124,6 +125,7 @@ export class Robots implements OnInit, OnDestroy {
   protected readonly recommendationReviewing = signal<Record<string, boolean>>({});
   protected readonly recommendationBusy = signal<Record<string, boolean>>({});
   protected readonly recommendationErrors = signal<Record<string, string | null>>({});
+  protected readonly adaptiveMemoryByRobot = signal<Record<string, RobotAdaptiveMemory>>({});
   protected readonly rollbackBusy = signal<Record<string, boolean>>({});
   protected readonly rollbackErrors = signal<Record<string, string | null>>({});
   protected readonly adaptivePolicyExpanded = signal<Record<string, boolean>>({});
@@ -931,6 +933,7 @@ export class Robots implements OnInit, OnDestroy {
     const expanded = !this.isAdaptivePolicyExpanded(robot);
     this.adaptivePolicyExpanded.update((v) => ({ ...v, [robot.id]: expanded }));
     if (expanded && !this.adaptivePolicies()[robot.id]) this.loadAdaptivePolicy(robot.id);
+    if (expanded) this.loadAdaptiveMemory(robot.id);
   }
   protected adaptivePolicyFor(robot: RobotSummary): RobotAdaptivePolicy | null { return this.adaptivePolicies()[robot.id] ?? null; }
   protected adaptivePolicyHistoryFor(robot: RobotSummary): RobotAdaptivePolicyRevision[] { return this.adaptivePolicyHistory()[robot.id] ?? []; }
@@ -943,7 +946,7 @@ export class Robots implements OnInit, OnDestroy {
     this.robotsService.adaptiveProposalEligibility(robot.id)
       .pipe(finalize(() => this.adaptiveProposalEligibilityBusy.update((v) => ({ ...v, [robot.id]: false }))))
       .subscribe({
-        next: (result) => this.adaptiveProposalEligibility.update((v) => ({ ...v, [robot.id]: result })),
+        next: (result) => { this.adaptiveProposalEligibility.update((v) => ({ ...v, [robot.id]: result })); this.loadAdaptiveMemory(robot.id); },
         error: () => this.adaptivePolicyErrors.update((v) => ({ ...v, [robot.id]: 'Eligibility could not be checked.' })),
       });
   }
@@ -957,6 +960,46 @@ export class Robots implements OnInit, OnDestroy {
         error: () => this.adaptivePolicyErrors.update((v) => ({ ...v, [robot.id]: 'Policy update failed. Reload before retrying.' })),
       });
   }
+  // ---- Phase 17N: read-only adaptive history (deterministic transition memory; never a score or ranking) ----
+
+  protected loadAdaptiveMemory(robotId: string): void {
+    this.robotsService.adaptiveMemory(robotId).subscribe({
+      next: (memory) => this.adaptiveMemoryByRobot.update((all) => ({ ...all, [robotId]: memory })),
+      error: () => this.adaptiveMemoryByRobot.update((all) => ({ ...all, [robotId]: { robotId, currentPersonaId: null, engineVersion: '', transitions: [], totalTransitions: 0 } })),
+    });
+  }
+
+  protected adaptiveMemoryFor(robot: RobotSummary): AdaptiveMemoryTransition[] { return this.adaptiveMemoryByRobot()[robot.id]?.transitions ?? []; }
+
+  protected memoryOutcomeLabel(outcome: MemoryOutcome): string {
+    switch (outcome) {
+      case 'PROPOSED': return 'Proposed';
+      case 'HUMAN_REJECTED': return 'A previous proposal for this transition was rejected.';
+      case 'APPROVED_NOT_APPLIED': return 'Approved, not applied';
+      case 'APPLIED': return 'Applied';
+      case 'OBSERVED_STABLE': return 'Applied; no material adverse difference observed';
+      case 'OBSERVED_REGRESSION': return 'Applied; a material adverse difference was observed';
+      case 'ROLLED_BACK': return 'An earlier application of this transition was rolled back by a person.';
+      case 'SUPERSEDED': return 'Applied, then superseded by a later change';
+    }
+  }
+
+  protected memoryReasonText(reason: SuppressionReason): string {
+    switch (reason) {
+      case 'RECENTLY_PROPOSED': return 'This transition was proposed recently.';
+      case 'HUMAN_REJECTED': return 'A previous proposal for this transition was rejected.';
+      case 'RECENTLY_APPLIED': return 'This transition was applied recently.';
+      case 'OBSERVED_REGRESSION': return 'A material adverse difference was observed after this transition. This does not prove the Persona change caused the outcome.';
+      case 'ROLLED_BACK': return 'An earlier application of this transition was rolled back by a person.';
+      case 'CURRENTLY_ACTIVE': return 'This Persona is already the Robot\'s current Persona.';
+    }
+  }
+
+  protected skippedCandidateName(robot: RobotSummary, personaId: string): string {
+    const known = this.adaptiveMemoryFor(robot).find((t) => t.toPersonaId === personaId);
+    return known?.toPersonaName ?? personaId;
+  }
+
   private loadAdaptivePolicy(robotId:string):void {
     this.robotsService.adaptivePolicy(robotId).subscribe({
       next: (p) => this.adaptivePolicies.update((v) => ({ ...v, [robotId]: p })),

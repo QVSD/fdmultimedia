@@ -20,13 +20,14 @@ import { CampaignContentPlanSummary } from '../../core/campaign-plans/campaign-p
 import { CampaignCopyService } from '../../core/campaign-copy/campaign-copy.service';
 import { CampaignCopySetSummary } from '../../core/campaign-copy/campaign-copy.models';
 import { RobotConfigurationRevision } from '../../core/publishing/robot-change-proposal.models';
+import { AdaptiveMemoryTransition } from '../../core/publishing/adaptive-memory.models';
 import { RevisionSafety, RollbackRecommendation } from '../../core/publishing/post-change-safety.models';
 import { Robots } from './robots';
 
 describe('Robots', () => {
   let component: Robots;
   let fixture: ComponentFixture<Robots>;
-  let robotsService: Pick<RobotsService, 'list' | 'create' | 'runNow' | 'pause' | 'resume' | 'runsForRobot' | 'allRuns' | 'cancelRun' | 'configurationRevisions' | 'rollbackConfigurationRevision' | 'adaptivePolicy' | 'updateAdaptivePolicy' | 'adaptivePolicyHistory' | 'adaptiveProposalEligibility' | 'postChangeSafety' | 'acknowledgeRollbackRecommendation' | 'dismissRollbackRecommendation' | 'rollbackFromRecommendation'>;
+  let robotsService: Pick<RobotsService, 'list' | 'create' | 'runNow' | 'pause' | 'resume' | 'runsForRobot' | 'allRuns' | 'cancelRun' | 'configurationRevisions' | 'rollbackConfigurationRevision' | 'adaptivePolicy' | 'updateAdaptivePolicy' | 'adaptivePolicyHistory' | 'adaptiveProposalEligibility' | 'postChangeSafety' | 'adaptiveMemory' | 'acknowledgeRollbackRecommendation' | 'dismissRollbackRecommendation' | 'rollbackFromRecommendation'>;
   let approvalsService: Pick<RobotApprovalsService, 'list' | 'approve' | 'reject'>;
   let assetsService: Pick<AssetsService, 'list'>;
   let socialAccountsService: Pick<SocialAccountsService, 'list'>;
@@ -48,6 +49,7 @@ describe('Robots', () => {
       cancelRun: vi.fn().mockReturnValue(of(run('CANCELLED'))),
       configurationRevisions: vi.fn().mockReturnValue(of([])),
       postChangeSafety: vi.fn().mockReturnValue(of([])),
+      adaptiveMemory: vi.fn().mockReturnValue(of({ robotId: 'robot-1', currentPersonaId: 'persona-a', engineVersion: 'ADAPTIVE_MEMORY_V1', transitions: [], totalTransitions: 0 })),
       acknowledgeRollbackRecommendation: vi.fn().mockReturnValue(of(recommendation('ACKNOWLEDGED'))),
       dismissRollbackRecommendation: vi.fn().mockReturnValue(of(recommendation('DISMISSED'))),
       rollbackFromRecommendation: vi.fn().mockReturnValue(of(recommendation('ROLLED_BACK'))),
@@ -715,6 +717,71 @@ describe('Robots', () => {
     component['rollbackRecommendation'](target, recommendation('OPEN'));
     expect(component['recommendationErrors']()['rec-1']).toBeTruthy();
     expect(vi.mocked(robotsService.postChangeSafety).mock.calls.length).toBeGreaterThan(1);
+  });
+
+  function memoryTransition(outcome: string, reasons: string[], suppressed: boolean) {
+    return {
+      fromPersonaId: 'persona-a', fromPersonaName: 'Persona A', toPersonaId: 'persona-b', toPersonaName: 'Persona B', latestOutcome: outcome,
+      proposalCount: 1, applyCount: 1, rollbackCount: outcome === 'ROLLED_BACK' ? 1 : 0, regressionCount: 1,
+      firstSeenAt: '2026-10-01T00:00:00Z', lastSeenAt: '2026-10-05T00:00:00Z', latestEvidenceAt: '2026-10-05T00:00:00Z',
+      latestSafetyStatus: 'READY_REGRESSION_OBSERVED', suppressed, reasons, suppressionUntil: suppressed ? '2027-01-03T00:00:00Z' : null,
+      latestRevisionId: null, latestEvaluationId: null, latestRecommendationId: null,
+    };
+  }
+
+  function openAdaptiveHistory(transitions: unknown[]): RobotSummary {
+    vi.mocked(robotsService.adaptiveMemory).mockReturnValue(of({ robotId: 'robot-1', currentPersonaId: 'persona-a',
+      engineVersion: 'ADAPTIVE_MEMORY_V1', transitions: transitions as AdaptiveMemoryTransition[], totalTransitions: transitions.length }));
+    const target = robot('ACTIVE', 'DRAFT_ONLY');
+    component['robots'].set([target]);
+    component['toggleAdaptivePolicy'](target);
+    fixture.detectChanges();
+    return target;
+  }
+
+  it('loads and shows a Robot adaptive history with neutral wording, counts and suppression', () => {
+    const target = openAdaptiveHistory([memoryTransition('ROLLED_BACK', ['OBSERVED_REGRESSION', 'ROLLED_BACK'], true)]);
+    expect(robotsService.adaptiveMemory).toHaveBeenCalledWith(target.id);
+    const text = fixture.nativeElement.textContent as string;
+    expect(text).toContain('Adaptive history');
+    expect(text).toContain('Persona A');
+    expect(text).toContain('Persona B');
+    expect(text).toContain('Previous observed outcome');
+    expect(text).toContain('1 application(s)');
+    expect(text).toContain('1 rollback(s)');
+    expect(text).toContain('Automatic proposal temporarily suppressed until');
+    expect(text).toContain('A person can still create a proposal manually.');
+    expect(text).toContain('An earlier application of this transition was rolled back by a person.');
+    expect(text).toContain('A material adverse difference was observed after this transition. This does not prove the Persona change caused the outcome.');
+    const lower = text.toLowerCase();
+    for (const word of ['blacklist', 'bad persona', 'failed persona', 'ai learned', 'leaderboard', 'winner']) expect(lower).not.toContain(word);
+  });
+
+  it('shows a rejected transition factually and an empty history without suppression', () => {
+    const target = openAdaptiveHistory([memoryTransition('HUMAN_REJECTED', ['HUMAN_REJECTED'], true)]);
+    expect(fixture.nativeElement.textContent).toContain('A previous proposal for this transition was rejected.');
+    vi.mocked(robotsService.adaptiveMemory).mockReturnValue(of({ robotId: target.id, currentPersonaId: 'persona-a', engineVersion: 'ADAPTIVE_MEMORY_V1', transitions: [], totalTransitions: 0 }));
+    component['loadAdaptiveMemory'](target.id);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('No Persona transitions have been proposed or applied for this Robot yet.');
+  });
+
+  it('shows candidates skipped by adaptive history in the automatic proposal eligibility result', () => {
+    const target = openAdaptiveHistory([memoryTransition('ROLLED_BACK', ['ROLLED_BACK'], true)]);
+    component['adaptiveProposalEligibility'].set({ [target.id]: { robotId: target.id, eligible: false, reasons: ['ALL_CANDIDATES_MEMORY_SUPPRESSED'],
+      policyRevision: 1, sourceReviewId: null, candidateCountConsidered: 1, selectedCandidatePersonaId: null, evidenceFingerprint: null,
+      opportunityFingerprint: null, existingProposalId: null,
+      memorySkippedCandidates: [{ candidatePersonaId: 'persona-b', reasons: ['ROLLED_BACK'], suppressionUntil: '2027-01-03T00:00:00Z', latestOutcome: 'ROLLED_BACK' }] } });
+    fixture.detectChanges();
+    const text = fixture.nativeElement.textContent as string;
+    expect(text).toContain('Not eligible: ALL_CANDIDATES_MEMORY_SUPPRESSED');
+    expect(text).toContain('Candidate skipped due to adaptive history: Persona B');
+  });
+
+  it('exposes adaptive history as read-only: the page offers no way to edit an outcome', () => {
+    openAdaptiveHistory([memoryTransition('OBSERVED_STABLE', [], false)]);
+    const section = fixture.nativeElement.querySelector('section[aria-label="Adaptive history"]') as HTMLElement;
+    expect(section.querySelectorAll('button, input, select, textarea').length).toBe(0);
   });
 
   it('loads conservative adaptive-policy defaults and explains human control', () => {
