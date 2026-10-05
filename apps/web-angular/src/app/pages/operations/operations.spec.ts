@@ -270,6 +270,50 @@ describe('Operations', () => {
     expect(fixture.nativeElement.querySelector('[data-testid="overall-status"]')).toBeNull();
   });
 
+  it('does not request the detail panels while the overview is failing and resumes when it recovers', async () => {
+    service.overview.mockReturnValue(throwError(() => new Error('down')));
+    await create();
+    expect(service.workers).not.toHaveBeenCalled();
+    expect(service.jobs).not.toHaveBeenCalled();
+    expect(service.incidents).not.toHaveBeenCalled();
+    field('refreshAll')();
+    expect(service.overview).toHaveBeenCalledTimes(2);
+    expect(service.workers).not.toHaveBeenCalled();
+    service.overview.mockReturnValue(of(overview()));
+    field('refreshAll')();
+    expect(service.workers).toHaveBeenCalledTimes(1);
+    expect(service.incidents).toHaveBeenCalledTimes(1);
+    expect(fixture.componentInstance).toBeTruthy();
+  });
+
+  it('backs off exponentially while the overview keeps failing and resets after a success', async () => {
+    service.overview.mockReturnValue(throwError(() => new Error('down')));
+    await create();
+    const base = Number(field('refreshSeconds')()) * 1000;
+    expect(field('intervalMs')()).toBe(base * 2);
+    field('refreshAll')();
+    expect(field('intervalMs')()).toBe(base * 4);
+    for (let i = 0; i < 6; i++) field('refreshAll')();
+    expect(field('intervalMs')()).toBe(120_000);
+    service.overview.mockReturnValue(of(overview()));
+    field('refreshAll')();
+    // the recovered overview carries its own 15 s hint
+    expect(field('intervalMs')()).toBe(15_000);
+  });
+
+  it('does not auto-refresh before the backed-off interval has elapsed', async () => {
+    service.overview.mockReturnValue(throwError(() => new Error('down')));
+    await create();
+    const base = Date.now();
+    const clock = vi.spyOn(Date, 'now');
+    clock.mockReturnValue(base + 20_000);
+    field('tick')();
+    expect(service.overview).toHaveBeenCalledTimes(1);
+    clock.mockReturnValue(base + 41_000);
+    field('tick')();
+    expect(service.overview).toHaveBeenCalledTimes(2);
+  });
+
   it('refreshes on demand and blocks overlapping refreshes', async () => {
     const pending = new Subject<OpsOverview>();
     await create();

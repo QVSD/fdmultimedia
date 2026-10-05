@@ -26,13 +26,17 @@ class FakeOpsStore implements OpsStore {
     final Map<UUID, Map<UUID, Incident>> incidents = new LinkedHashMap<>();
     final Map<UUID, UUID> acknowledgedBy = new LinkedHashMap<>();
     boolean lockAvailable = true;
+    boolean failOnWorkspaceListing;
     int inserts, updates, resolves;
 
     private Map<UUID, Incident> of(UUID ws) { return incidents.computeIfAbsent(ws, k -> new LinkedHashMap<>()); }
 
     @Override public List<SchedulerInstance> schedulerInstances() { return schedulerInstances; }
     @Override public int purgeSchedulerStatus(Instant before) { return 0; }
-    @Override public List<UUID> workspaceIds(int limit) { return workspaces.stream().limit(limit).toList(); }
+    @Override public List<UUID> workspaceIds(int limit) {
+        if (failOnWorkspaceListing) throw new IllegalStateException("database unavailable");
+        return workspaces.stream().limit(limit).toList();
+    }
     @Override public boolean tryAdvisoryLock(String key) { return lockAvailable; }
     @Override public List<WorkerFact> workers(UUID workspaceId, Instant recentSince) { return workers; }
     @Override public JobFacts jobFacts(UUID workspaceId, Instant now, Instant since, Instant burstSince) { return jobFacts; }

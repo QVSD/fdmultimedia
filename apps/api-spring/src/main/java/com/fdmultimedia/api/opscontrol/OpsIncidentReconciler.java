@@ -38,7 +38,13 @@ public class OpsIncidentReconciler {
     @Scheduled(fixedDelayString = "${app.operations.incident-interval-ms:30000}",
             initialDelayString = "${app.operations.incident-initial-delay-ms:20000}")
     public void reconcile() {
-        operations.run(SchedulerOperationTracker.OPERATIONS_INCIDENTS, this::tick);
+        try {
+            operations.run(SchedulerOperationTracker.OPERATIONS_INCIDENTS, this::tick);
+        } catch (RuntimeException ex) {
+            // The tracker has already recorded the failure. During a PostgreSQL outage this fires every tick, so it is one bounded
+            // line, never a stack trace per tick.
+            log.warn("Operations incident reconciliation skipped type={}", ex.getClass().getSimpleName());
+        }
     }
 
     private SchedulerOperationTracker.Outcome tick() {

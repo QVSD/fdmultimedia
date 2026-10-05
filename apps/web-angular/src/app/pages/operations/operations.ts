@@ -30,6 +30,7 @@ const emptyPanel = <T>(): Panel<T> => ({ data: null, error: false, loadedAt: nul
 export const DEFAULT_REFRESH_SECONDS = 20;
 const MIN_REFRESH_SECONDS = 15;
 const MAX_REFRESH_SECONDS = 30;
+const MAX_BACKOFF_SECONDS = 120;
 
 const STATUS_LABELS: Record<ComponentStatus | OverallStatus, string> = {
   HEALTHY: 'Healthy',
@@ -87,6 +88,7 @@ export class Operations implements OnInit, OnDestroy {
   private refreshTimer?: ReturnType<typeof setInterval>;
   private clockTimer?: ReturnType<typeof setInterval>;
   private lastAttemptMs = 0;
+  private failures = 0;
   private readonly requests = new Subscription();
   private readonly onVisibility = (): void => this.handleVisibility();
 
@@ -106,10 +108,19 @@ export class Operations implements OnInit, OnDestroy {
     this.requests.unsubscribe();
   }
 
-  /** Auto-refresh never runs while the tab is hidden and never overlaps a request still in flight. */
+  /**
+   * Auto-refresh never runs while the tab is hidden, never overlaps a request still in flight, and backs off exponentially
+   * (up to {@link MAX_BACKOFF_SECONDS}) while the overview itself keeps failing, so an outage cannot turn into a request storm.
+   */
   protected tick(): void {
     if (!this.autoRefresh() || !this.visible() || this.loading()) return;
-    if (Date.now() - this.lastAttemptMs >= this.refreshSeconds() * 1000) this.refreshAll();
+    if (Date.now() - this.lastAttemptMs >= this.intervalMs()) this.refreshAll();
+  }
+
+  protected intervalMs(): number {
+    const base = this.refreshSeconds();
+    const factor = Math.min(MAX_BACKOFF_SECONDS / base, 2 ** this.failures);
+    return base * 1000 * Math.max(1, factor);
   }
 
   private handleVisibility(): void {
@@ -128,16 +139,35 @@ export class Operations implements OnInit, OnDestroy {
     if (enabled) this.tick();
   }
 
+  /**
+   * While the overview is failing only the overview is retried; the five detail panels are requested again as soon as it recovers.
+   */
   protected refreshAll(): void {
     if (this.loading()) return;
     this.loading.set(true);
     this.lastAttemptMs = Date.now();
-    let pending = 6;
+    this.requests.add(
+      this.operations.overview().subscribe({
+        next: (data) => {
+          this.overview.set({ data, error: false, loadedAt: Date.now() });
+          this.failures = 0;
+          this.loadDetails(() => this.loading.set(false));
+        },
+        error: () => {
+          this.overview.update((previous) => ({ ...previous, error: true }));
+          this.failures += 1;
+          this.loading.set(false);
+        },
+      }),
+    );
+  }
+
+  private loadDetails(finished: () => void): void {
+    let pending = 5;
     const done = (): void => {
       pending -= 1;
-      if (pending === 0) this.loading.set(false);
+      if (pending === 0) finished();
     };
-    this.load(this.operations.overview(), this.overview, done);
     this.load(this.operations.workers(0, 10), this.workers, done);
     this.load(this.operations.jobs(0, 8, 'FAILED'), this.failedJobs, done);
     this.load(this.operations.schedulers(), this.schedulers, done);

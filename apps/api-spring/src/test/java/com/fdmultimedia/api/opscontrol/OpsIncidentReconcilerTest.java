@@ -84,6 +84,21 @@ class OpsIncidentReconcilerTest {
     }
 
     @Test
+    void aFailingTickIsRecordedByTheTrackerAndNeverEscapesAsAnException() {
+        store.workspaces = List.of(UUID.randomUUID());
+        OpsIncidentReconciler r = reconciler();
+        store.failOnWorkspaceListing = true;
+        r.reconcile();
+        var row = tracker.snapshots().stream().filter(s -> s.name().equals(SchedulerOperationTracker.OPERATIONS_INCIDENTS)).findFirst().orElseThrow();
+        assertThat(row.state()).isEqualTo("FAILED");
+        assertThat(row.lastFailureCode()).isEqualTo("IllegalStateException");
+        store.failOnWorkspaceListing = false;
+        r.reconcile();
+        assertThat(tracker.snapshots().stream().filter(s -> s.name().equals(SchedulerOperationTracker.OPERATIONS_INCIDENTS)).findFirst().orElseThrow().state())
+                .isEqualTo("SUCCEEDED");
+    }
+
+    @Test
     void workspaceBatchIsBounded() {
         assertThat(OpsIncidentReconciler.WORKSPACE_LIMIT).isEqualTo(500);
     }
