@@ -1,10 +1,12 @@
 package com.fdmultimedia.api.shared.operations;
 
-import com.fdmultimedia.api.assets.ObjectStorageService;
 import com.fdmultimedia.api.auth.AuthService;
 import com.fdmultimedia.api.auth.security.AuthenticatedUser;
 import com.fdmultimedia.api.jobs.JobRepository;
 import com.fdmultimedia.api.jobs.OperationalJobCountsView;
+import com.fdmultimedia.api.opscontrol.DependencyHealthService;
+import com.fdmultimedia.api.opscontrol.OperatorAccess;
+import com.fdmultimedia.api.opscontrol.OpsModels.ComponentStatus;
 import com.fdmultimedia.api.workers.WorkerRepository;
 import com.fdmultimedia.api.workers.WorkerStatus;
 import com.fdmultimedia.api.workers.WorkerStatusService;
@@ -22,25 +24,32 @@ public class OperationsService {
     private final WorkerStatusService workerStatus;
     private final JobRepository jobs;
     private final SchedulerOperationTracker schedulers;
-    private final ObjectStorageService storage;
+    private final DependencyHealthService dependencies;
     private final ApiInstanceIdentity instance;
     private final Clock clock;
 
     public OperationsService(AuthService auth, WorkerRepository workers, WorkerStatusService workerStatus,
-            JobRepository jobs, SchedulerOperationTracker schedulers, ObjectStorageService storage,
+            JobRepository jobs, SchedulerOperationTracker schedulers, DependencyHealthService dependencies,
             ApiInstanceIdentity instance, Clock clock) {
         this.auth = auth; this.workers = workers; this.workerStatus = workerStatus; this.jobs = jobs;
-        this.schedulers = schedulers; this.storage = storage; this.instance = instance; this.clock = clock;
+        this.schedulers = schedulers; this.dependencies = dependencies; this.instance = instance; this.clock = clock;
     }
 
     @Transactional(readOnly = true)
     public Status status(AuthenticatedUser principal) {
-        var workspace = auth.currentMembershipFor(principal).getWorkspace();
+        var membership = auth.currentMembershipFor(principal);
+        if (!OperatorAccess.isOperator(membership.getRole())) {
+            throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.FORBIDDEN, "Operator access required");
+        }
+        var workspace = membership.getWorkspace();
+        // Storage health comes from the bounded, cached probe: it must never wait out the S3 client's own retry budget.
+        boolean storageUp = dependencies.snapshot().stream()
+                .anyMatch(d -> d.name().equals("MINIO") && d.status() == ComponentStatus.HEALTHY);
         var workerRows = workers.findByWorkspaceOrderByNameAsc(workspace);
         long online = workerRows.stream().filter(row -> workerStatus.statusFor(row.getLastSeenAt()) == WorkerStatus.ONLINE).count();
         OperationalJobCountsView counts = jobs.operationalCounts(workspace.getId());
         return new Status(Instant.now(clock), instance.value(), workspace.getId(), "UP",
-                storage.isAvailable() ? "UP" : "DOWN", "OPTIONAL_NOT_READINESS",
+                storageUp ? "UP" : "DOWN", "OPTIONAL_NOT_READINESS",
                 "SPRING_SESSION_JDBC", schedulers.isAccepting() ? "RUNNING" : "STOPPING",
                 new WorkerCounts(workerRows.size(), online, workerRows.size() - online),
                 new JobCounts(counts.getQueued(), counts.getAssigned(), counts.getRunning(), counts.getSucceeded(),

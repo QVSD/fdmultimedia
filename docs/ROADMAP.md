@@ -473,6 +473,14 @@ V3 adds deterministic transcript-semantic reranking over V2 windows, immutable t
 
 - V44 adds PostgreSQL-backed Spring Session with secure session-id rotation, shared replica authentication, framework expiry cleanup and deliberate session invalidation during restore. Existing business-domain history remains unchanged.
 - Separate liveness/readiness probes, bounded database/storage timeouts, graceful API/Worker shutdown, retry-safe nginx failover and database-time Job leases make dependency outages, replica loss and Worker crashes observable and recoverable.
-- A workspace-scoped operations endpoint inventories ten scheduled/on-demand operations, their class-A multi-replica safety mechanism, batch bounds and per-instance execution status, plus dependency, Worker and Job summaries.
+- A workspace-scoped operations endpoint inventories its scheduled/on-demand operations (eleven after Phase 17Q), their class-A multi-replica safety mechanism, batch bounds and per-instance execution status, plus dependency, Worker and Job summaries.
 - Versioned PostgreSQL backup/restore scripts and `docs/OPERATIONS.md` define recovery verification. MinIO remains private and requires an independent object-backup policy; sessions are never restored.
-- No scheduler redesign, Kubernetes manifests, full observability platform, automatic disaster-recovery promotion, multi-region deployment or Phase 17Q work is included.
+- No scheduler redesign, Kubernetes manifests, full observability platform, automatic disaster-recovery promotion, multi-region deployment or Phase 17Q work is included in Phase 17P itself.
+
+### Phase 17Q — Operations control plane and incident visibility (implemented)
+
+- An operator-only (OWNER/ADMIN) Operations page and read-mostly API summarize dependencies, API, Workers, Jobs, schedulers, publishing, adaptive automation and incidents from authoritative state, with deterministic overall status and no language model.
+- V45 adds `operations_scheduler_status` (per-replica scheduler outcomes aggregated into one logical row each) and `operations_incidents` (one active row per workspace and stable key, first-observed time, automatic resolution, durable acknowledgement meaning "seen", bounded history).
+- Dependency probes are parallel, bounded (750 ms) and cached (10 s, single-flight), which also fixes the 17P `/api/operations/status` latency with MinIO down.
+- Each incident carries a deterministic suggested action. There is no job retry, no blind publication retry, no restart button, no shell/SQL/secret viewer and no external notification or metrics system.
+- Phase 17R is not started.

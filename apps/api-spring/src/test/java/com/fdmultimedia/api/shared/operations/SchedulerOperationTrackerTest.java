@@ -25,7 +25,7 @@ class SchedulerOperationTrackerTest {
         assertThat(status.processedCount()).isEqualTo(3);
         assertThat(status.resultCount()).isEqualTo(2);
         assertThat(status.lastDurationMs()).isZero();
-        assertThat(tracker.snapshots()).hasSize(10);
+        assertThat(tracker.snapshots()).hasSize(11);
     }
 
     @Test
@@ -55,5 +55,51 @@ class SchedulerOperationTrackerTest {
 
         assertThat(called).isFalse();
         assertThat(tracker.isAccepting()).isFalse();
+    }
+
+    private static SchedulerOperationTracker withSink(Clock clock, SchedulerStatusSink sink) {
+        org.springframework.beans.factory.ObjectProvider<SchedulerStatusSink> provider = org.mockito.Mockito.mock(org.springframework.beans.factory.ObjectProvider.class);
+        org.mockito.Mockito.when(provider.getIfAvailable()).thenReturn(sink);
+        return new SchedulerOperationTracker(clock, provider, new ApiInstanceIdentity());
+    }
+
+    @Test
+    void completionIsPublishedToTheSharedSinkWithTheInstanceIdentity() {
+        java.util.List<String> seen = new java.util.ArrayList<>();
+        SchedulerOperationTracker tracker = withSink(clock, (name, instance, snapshot) -> seen.add(name + ":" + snapshot.state()));
+        tracker.run(SchedulerOperationTracker.ADAPTIVE_MEMORY, () -> new SchedulerOperationTracker.Outcome(1, 1));
+        assertThat(seen).containsExactly("adaptive-memory:RUNNING", "adaptive-memory:SUCCEEDED");
+    }
+
+    @Test
+    void fastSchedulersPublishOnlyOnCompletion() {
+        java.util.List<String> seen = new java.util.ArrayList<>();
+        SchedulerOperationTracker tracker = withSink(clock, (name, instance, snapshot) -> seen.add(snapshot.state()));
+        tracker.run(SchedulerOperationTracker.PUBLISH_SCHEDULE, () -> SchedulerOperationTracker.Outcome.NONE);
+        assertThat(seen).containsExactly("SUCCEEDED");
+    }
+
+    @Test
+    void failuresArePublishedAndStillPropagate() {
+        java.util.List<String> seen = new java.util.ArrayList<>();
+        SchedulerOperationTracker tracker = withSink(clock, (name, instance, snapshot) -> seen.add(snapshot.state() + ":" + snapshot.lastFailureCode()));
+        assertThatThrownBy(() -> tracker.run(SchedulerOperationTracker.POST_CHANGE_SAFETY, () -> { throw new IllegalStateException("x"); }))
+                .isInstanceOf(IllegalStateException.class);
+        assertThat(seen).last().isEqualTo("FAILED:IllegalStateException");
+    }
+
+    @Test
+    void aBrokenSinkNeverBreaksTheScheduler() {
+        SchedulerOperationTracker tracker = withSink(clock, (name, instance, snapshot) -> { throw new IllegalStateException("db down"); });
+        AtomicBoolean ran = new AtomicBoolean();
+        tracker.run(SchedulerOperationTracker.ADAPTIVE_MEMORY, () -> { ran.set(true); return SchedulerOperationTracker.Outcome.NONE; });
+        assertThat(ran).isTrue();
+        assertThat(tracker.snapshots().stream().filter(r -> r.name().equals(SchedulerOperationTracker.ADAPTIVE_MEMORY)).findFirst().orElseThrow().state())
+                .isEqualTo("SUCCEEDED");
+    }
+
+    @Test
+    void inventoryNamesAreUnique() {
+        assertThat(new SchedulerOperationTracker(clock).snapshots().stream().map(SchedulerOperationTracker.Snapshot::name).distinct().count()).isEqualTo(11);
     }
 }

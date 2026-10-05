@@ -1,6 +1,6 @@
 # FDM Multimedia Operations Runbook
 
-This runbook covers the Phase 17P Docker Compose deployment. It describes bounded recovery procedures; it is not an automatic failover system. Commands assume the repository root and an operator-authored `.env`. Never paste secrets, cookies, presigned URLs, dumps or media into tickets or source control.
+This runbook covers the Phase 17P Docker Compose deployment and the Phase 17Q operations control plane. It describes bounded recovery procedures; it is not an automatic failover system. Commands assume the repository root and an operator-authored `.env`. Never paste secrets, cookies, presigned URLs, dumps or media into tickets or source control.
 
 ## Service Model
 
@@ -14,7 +14,8 @@ API replicas are stateless apart from bounded per-instance scheduler telemetry. 
 - `GET /api/actuator/health/liveness`: public process liveness only.
 - `GET /api/actuator/health/readiness`: public readiness including PostgreSQL.
 - `GET /api/actuator/health`: authenticated aggregate health.
-- `GET /api/operations/status`: authenticated, workspace-scoped operational summary.
+- `GET /api/operations/status`: workspace-scoped operational summary for OWNER and ADMIN users.
+- `GET /api/operations/overview|workers|jobs|schedulers|publishing|incidents` and `POST /api/operations/incidents/{id}/acknowledge`: the Phase 17Q operations control plane (see below).
 
 MinIO is intentionally not a readiness member. Its state appears in aggregate health and operations status; storage operations have bounded call timeouts and fail without taking the database-backed control plane out of service. RabbitMQ is reported as optional because Jobs are durable in PostgreSQL.
 
@@ -137,4 +138,67 @@ Promotion to replace a production database is deliberately not automated by thes
 
 Cookies remain HttpOnly for the session, readable only for the CSRF token, Secure in production and SameSite Lax. Session fixation protection rotates the id at login. Operations APIs require a normal authenticated user and remain workspace-scoped; Worker credentials cannot use browser administration endpoints.
 
-Phase 17P does not provide Kubernetes manifests, a metrics/alerting vendor, automatic database promotion, multi-region replication, point-in-time recovery configuration, object-store replication, or zero-downtime schema compatibility guarantees for arbitrary future migrations. Backup frequency, retention, RPO/RTO, encryption keys, off-site copies and provider credentials remain deployment-owner responsibilities. Phase 17Q is not started.
+Phase 17P does not provide Kubernetes manifests, a metrics/alerting vendor, automatic database promotion, multi-region replication, point-in-time recovery configuration, object-store replication, or zero-downtime schema compatibility guarantees for arbitrary future migrations. Backup frequency, retention, RPO/RTO, encryption keys, off-site copies and provider credentials remain deployment-owner responsibilities. The Phase 17Q control plane builds on these probes.
+
+## Operations Control Plane
+
+The **Operations** page (`/operations`) and `GET /api/operations/overview|workers|jobs|schedulers|publishing|incidents` are for workspace OWNER and ADMIN users. A MEMBER receives 403. Data is workspace-scoped; dependency and scheduler facts are platform-level and carry no tenant data. Nothing here changes platform state except `POST /api/operations/incidents/{id}/acknowledge`, which records that a person has seen an incident.
+
+### Reading the overview
+
+| Overall status | Meaning |
+| --- | --- |
+| `HEALTHY` | no WARNING or CRITICAL incident is active (INFO incidents never degrade) |
+| `DEGRADED` | at least one WARNING incident is active |
+| `ACTION_REQUIRED` | at least one CRITICAL incident is active |
+
+Component status is `HEALTHY`, `DEGRADED`, `UNAVAILABLE` or `UNKNOWN`. `UNKNOWN` means not configured or not yet reported, never "probably fine". Workers are `ONLINE` (heartbeat within two intervals), `STALE` (missed heartbeats but inside `app.workers.offline-threshold`) or `OFFLINE`. The oldest queued Job age is `null` when nothing is queued. Schedulers are one logical row each (not one per replica) with their configured cadence and a stale threshold of `max(3 x cadence, 2 min)`.
+
+### Incident catalog
+
+| Key | Severity | Raised when | Suggested action |
+| --- | --- | --- | --- |
+| `DEPENDENCY:POSTGRES:UNAVAILABLE` | CRITICAL | PostgreSQL probe fails or times out | check the PostgreSQL container and connectivity |
+| `DEPENDENCY:MINIO:UNAVAILABLE` | CRITICAL | MinIO probe fails or times out | check MinIO health and credentials; media import, clips and publishing are blocked |
+| `DEPENDENCY:RABBITMQ:UNAVAILABLE` | INFO | broker unreachable (optional transport) | check the broker only if you rely on it |
+| `WORKERS:NONE_ONLINE` | WARNING, CRITICAL if Jobs are queued | Workers exist but none is ONLINE/STALE | start or restart a Worker |
+| `WORKERS:NONE_REGISTERED` | INFO, WARNING if Jobs are queued | no Worker has ever registered | register a Worker |
+| `WORKERS:PARTIAL` | INFO | some Workers are stale or were seen offline within 24 h | check the listed Workers |
+| `JOBS:BACKLOG` | WARNING over 5 min, CRITICAL over 30 min | oldest queued Job age | confirm Workers support the queued types |
+| `JOBS:LEASE_EXPIRED` | WARNING | Jobs hold an expired lease | recovered on the next claim; confirm a Worker is online |
+| `JOBS:FAILURE_BURST` | WARNING | at least 3 Jobs failed in the last hour | inspect the shared failure category |
+| `SCHEDULER:{name}:STALE` | WARNING, CRITICAL for `publish-schedule-dispatch` | no success within the stale threshold | confirm an API replica is running; check logs |
+| `SCHEDULER:{name}:FAILED` | WARNING | newest completion failed and no recent success | check the failure code and logs |
+| `PUBLISHING:OVERDUE` | WARNING over 5 min, CRITICAL over 30 min | a due schedule has not been dispatched | check the publish scheduler and a PUBLISH_MEDIA Worker |
+| `PUBLISHING:OUTCOME_UNKNOWN` | CRITICAL | a publication outcome is ambiguous | verify on the provider before any retry; the platform never retries it |
+| `PUBLISHING:FAILURE_BURST` | WARNING | at least 3 publications failed in the last hour | inspect the shared category; verify credentials |
+| `PUBLISHING:PROVIDER:{PROVIDER}:FAILING` | WARNING | at least 3 failures with no success since | reconnect or verify the account |
+| `AUTOMATION:ROLLBACK:{id}` | WARNING | a rollback recommendation is OPEN | review it in the Robot's adaptive lifecycle |
+
+### Configuration
+
+All properties live under `app.operations` and are clamped to safe bounds: `probe-timeout` (750 ms, 100 ms to 5 s), `probe-cache-ttl` (10 s, 1 s to 5 min), `backlog-warning` (5 min), `backlog-critical` (30 min), `overdue-warning`, `overdue-critical`, `recent-window` (24 h), `failure-burst` (3), `failure-burst-window` (1 h), `stale-cadence-multiplier` (3), `stale-floor` (2 min), `incident-resolved-retention` (30 d), `scheduler-status-retention` (7 d), `incident-interval-ms` (30 s). Do not raise thresholds to make a page green; fix the cause.
+
+### Procedures
+
+1. `ACTION_REQUIRED`: open the incident, follow its suggested action, then acknowledge it so colleagues know it is being handled. Acknowledging does not clear it; it clears when the condition does.
+2. Dependency verdicts can lag by up to the cache TTL plus the probe bound; use the manual Refresh button, which still reads the cached verdict, and wait one TTL before concluding that a recovery did not register.
+3. After scaling API replicas, restart nginx so it re-resolves the upstream; replicas that were replaced stay visible in `reportingInstances` until the stale window passes.
+4. A resolved incident stays in history for 30 days; a returning condition opens a new incident with a new first-observed time.
+
+### Verified behavior
+
+Acceptance observations (Docker Compose, Phase 17Q, one and four API replicas behind nginx):
+
+- Latency, MinIO healthy: `overview` p50 21.9 ms, p95 27.2 ms, max 51.5 ms over 60 calls; `/api/operations/status` p50 21.6 ms, p95 32.8 ms. After recovery `overview` p50 14.8 ms, p95 26.9 ms, max 29 ms over 100 calls.
+- Latency, MinIO stopped (the 17P gap was about 4.3 s for `/api/operations/status`): 75 `overview` calls one second apart (several cache expiries) gave p50 17.4 ms, p95 768 ms, max 796 ms with none above 1 s; the same 75 `/api/operations/status` calls gave p50 16.3 ms, p95 30.1 ms, max 769 ms with none above 1 s. The few slow calls are exactly the ones that land on an expired entry and wait for the 750 ms probe bound; all other calls read the cached verdict. Targets: under 500 ms normally, under 1 s with MinIO down (investigate above 1.5 s).
+- MinIO outage with the page open: the page showed `DEPENDENCY:MINIO:UNAVAILABLE` (CRITICAL) and `Action required` within one auto-refresh cycle with no reload, and returned to `Healthy` after MinIO was started, with the incident resolved and kept in history. One active row existed for the key throughout.
+- Worker outage: after a hard kill the Worker was reported `STALE` and then `OFFLINE` after 30 s, `WORKERS:NONE_ONLINE` was WARNING with an empty queue and CRITICAL once a Job was queued, and restarting the Worker drained the Job (one attempt) and cleared the incident.
+- Fixtures: a stale hourly scheduler raised `SCHEDULER:adaptive-memory:STALE` and cleared when its timestamps were restored; a QUEUED Job of an unsupported type reported oldest age 600 s (WARNING) then 2400 s (CRITICAL) and cleared when deleted; an ambiguous publication raised `PUBLISHING:OUTCOME_UNKNOWN` with the guidance to verify on the provider; an existing rollback recommendation set to OPEN raised `AUTOMATION:ROLLBACK:{id}` with its subject and cleared when restored. All fixtures were reverted and verified.
+- Four replicas: sixty requests were answered evenly by four instances with one incident-key set, one incident row per key, eleven logical scheduler rows (the fast schedulers reporting from four instances) over the per-instance rows; an acknowledgement posted to one replica was visible on all four, and the incident id, acknowledgement and first-observed time survived `docker compose restart api`.
+- Security: unauthenticated calls returned 401; a MEMBER received 403 on every endpoint and on acknowledge; a POST without a CSRF header or with a forged one returned 403; unknown incident id 404; malformed id 400; an operator of another workspace saw zero Workers, Jobs and publications of this workspace, got 404 for its incident and Job, and its responses never contained this workspace's id. Response bodies contained no URL, signature, password, secret, cookie, session value, JDBC string, stack trace, payload, caption or Persona text.
+- SQL cross-check: Job, Worker, publishing and adaptive-automation counts equal an independent SQL count for every field compared (22 of 22), the scheduler inventory is eleven logical rows, and there are no duplicate active incident keys or lifecycle violations.
+- Logging: no WARN or ERROR line and no stack trace were written during a 75 s MinIO outage, and the API wrote no log line at all in a 60 s idle window.
+- Migration: V44 to V45 on a data-bearing database restored from a V44 dump applied V45 once and left business row counts unchanged; a fresh database applied V1 to V45; both V45 tables, six new indexes and the lifecycle, acknowledgement, severity, state and duration constraints, the one-active-key index and the workspace cascade were verified against the database.
+
+The control plane does not provide PagerDuty, e-mail, SMS or Slack notification, Prometheus or Grafana export, tracing, Kubernetes integration, restart buttons, shell, SQL console, environment or secret viewers, arbitrary Job mutation, blind publication retry or any new adaptive behavior. Phase 17R is not started.

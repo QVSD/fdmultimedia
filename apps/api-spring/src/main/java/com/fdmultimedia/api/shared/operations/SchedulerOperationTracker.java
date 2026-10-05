@@ -6,7 +6,12 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.Set;
 import java.util.function.Supplier;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.event.ContextClosedEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
@@ -21,6 +26,7 @@ public class SchedulerOperationTracker {
     public static final String POST_CHANGE_SAFETY = "post-change-safety";
     public static final String ADAPTIVE_MEMORY = "adaptive-memory";
     public static final String SCHEDULING_RETENTION = "scheduling-decision-retention";
+    public static final String OPERATIONS_INCIDENTS = "operations-incidents";
 
     private static final List<Definition> DEFINITIONS = List.of(
             new Definition(PUBLISH_SCHEDULE, "A", 50, "FOR UPDATE SKIP LOCKED; one schedule per transaction"),
@@ -31,16 +37,41 @@ public class SchedulerOperationTracker {
             new Definition(POST_CHANGE_SAFETY, "A", 100, "per-revision advisory lock and unique recommendation"),
             new Definition(ADAPTIVE_MEMORY, "A", 100, "per-Robot advisory lock and unique source event"),
             new Definition(SCHEDULING_RETENTION, "A", 10_000, "bounded idempotent delete"),
+            new Definition(OPERATIONS_INCIDENTS, "A", 500, "advisory single-flight; unique active incident per workspace and key"),
             new Definition("job-lease-recovery", "A", 0, "on-demand during claim; row locks with SKIP LOCKED"),
             new Definition("spring-session-cleanup", "A", 0, "framework-managed conditional expiry delete"));
 
+    /** Sub-minute schedulers publish only on completion so their rows are not rewritten twice per tick. */
+    private static final Set<String> FAST = Set.of(PUBLISH_SCHEDULE, PUBLICATION_ANALYTICS, ROBOT_AUTOMATION, OPERATIONS_INCIDENTS);
+    private static final Logger log = LoggerFactory.getLogger(SchedulerOperationTracker.class);
+
     private final Clock clock;
+    private final ObjectProvider<SchedulerStatusSink> sinkProvider;
+    private final ApiInstanceIdentity identity;
     private final Map<String, MutableStatus> statuses = new ConcurrentHashMap<>();
     private volatile boolean accepting = true;
 
     public SchedulerOperationTracker(Clock clock) {
+        this(clock, null, null);
+    }
+
+    @Autowired
+    public SchedulerOperationTracker(Clock clock, ObjectProvider<SchedulerStatusSink> sinkProvider, ApiInstanceIdentity identity) {
         this.clock = clock;
+        this.sinkProvider = sinkProvider;
+        this.identity = identity;
         DEFINITIONS.forEach(definition -> statuses.put(definition.name(), new MutableStatus(definition)));
+    }
+
+    /** Publishes this instance's latest status to the shared sink. Observability must never break a scheduler. */
+    private void publish(String name, MutableStatus status) {
+        if (sinkProvider == null || identity == null) return;
+        try {
+            SchedulerStatusSink sink = sinkProvider.getIfAvailable();
+            if (sink != null) sink.record(name, identity.value(), status.snapshot());
+        } catch (RuntimeException ex) {
+            log.debug("Scheduler status publication skipped type={}", ex.getClass().getSimpleName());
+        }
     }
 
     public void run(String name, Supplier<Outcome> operation) {
@@ -48,11 +79,14 @@ public class SchedulerOperationTracker {
         MutableStatus status = require(name);
         Instant started = Instant.now(clock);
         status.started(started);
+        if (!FAST.contains(name)) publish(name, status);
         try {
             Outcome outcome = operation.get();
             status.succeeded(started, Instant.now(clock), outcome == null ? Outcome.NONE : outcome);
+            publish(name, status);
         } catch (RuntimeException | Error failure) {
             status.failed(started, Instant.now(clock), failure.getClass().getSimpleName());
+            publish(name, status);
             throw failure;
         }
     }

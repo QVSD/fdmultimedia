@@ -9,9 +9,11 @@ import { Experiments } from './pages/experiments/experiments';
 import { Jobs } from './pages/jobs/jobs';
 import { Analytics } from './pages/analytics/analytics';
 import { Revenue } from './pages/revenue/revenue';
+import { Operations } from './pages/operations/operations';
 import { Settings } from './pages/settings/settings';
 import { Login } from './pages/login/login';
 import { authGuard, loginGuard } from './core/auth/auth.guard';
+import { operatorGuard } from './core/auth/operator.guard';
 
 export const routes: Routes = [
   { path: 'login', component: Login, canActivate: [loginGuard], title: 'Sign in' },
@@ -24,6 +26,7 @@ export const routes: Routes = [
   { path: 'jobs', component: Jobs, canActivate: [authGuard], title: 'Jobs' },
   { path: 'analytics', component: Analytics, canActivate: [authGuard], title: 'Analytics' },
   { path: 'revenue', component: Revenue, canActivate: [authGuard], title: 'Revenue' },
+  { path: 'operations', component: Operations, canActivate: [operatorGuard], title: 'Operations' },
   { path: 'settings', component: Settings, canActivate: [authGuard], title: 'Settings' },
   { path: '**', redirectTo: '' },
 ];

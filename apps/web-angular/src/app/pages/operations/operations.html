@@ -1,0 +1,375 @@
+<section class="ops" aria-labelledby="ops-title">
+  <header class="ops__header">
+    <div class="ops__title">
+      <h1 id="ops-title">Operations</h1>
+      <p class="ops__lead">Platform health, background work and incidents, built from live state.</p>
+    </div>
+
+    <div class="ops__controls">
+      @if (overview().data; as o) {
+        <p class="ops__overall" role="status" aria-live="polite" aria-atomic="true">
+          <span class="status {{ statusClass(o.overallStatus) }}" data-testid="overall-status">
+            <span class="status__icon" aria-hidden="true">{{ statusIcon(o.overallStatus) }}</span>
+            <span>{{ statusLabel(o.overallStatus) }}</span>
+          </span>
+        </p>
+      }
+      <p class="ops__refreshed" data-testid="last-refreshed">
+        @if (overview().loadedAt !== null) {
+          Last refreshed {{ agoMs(overview().loadedAt) }}
+        } @else if (overview().error) {
+          Not refreshed yet
+        } @else {
+          Loading…
+        }
+      </p>
+      <button type="button" class="ops__button" (click)="refreshAll()" [disabled]="loading()" data-testid="refresh">
+        {{ loading() ? 'Refreshing…' : 'Refresh' }}
+      </button>
+      <label class="ops__toggle">
+        <input
+          type="checkbox"
+          [checked]="autoRefresh()"
+          (change)="toggleAutoRefresh($any($event.target).checked)"
+          data-testid="auto-refresh"
+        />
+        <span>Auto-refresh ({{ refreshSeconds() }} s)</span>
+      </label>
+    </div>
+  </header>
+
+  @if (overview().error) {
+    <p class="ops__banner" role="alert" data-testid="status-unavailable">
+      Status temporarily unavailable.
+      @if (stalenessNote(overview()); as note) {
+        {{ note }}
+      }
+    </p>
+  }
+
+  @if (overview().data; as o) {
+    <div class="ops__grid">
+      <article class="card" aria-labelledby="ops-deps">
+        <h2 id="ops-deps">Dependencies</h2>
+        <ul class="card__list">
+          @for (d of o.dependencies; track d.name) {
+            <li>
+              <span class="card__name">{{ d.name }}</span>
+              <span class="status {{ statusClass(d.status) }}">
+                <span class="status__icon" aria-hidden="true">{{ statusIcon(d.status) }}</span>
+                <span>{{ statusLabel(d.status) }}</span>
+              </span>
+              <span class="card__meta">
+                @if (!d.configured) {
+                  not configured
+                } @else if (d.probeMillis !== null) {
+                  {{ d.probeMillis }} ms · {{ d.detail }}
+                } @else {
+                  {{ d.detail }}
+                }
+              </span>
+            </li>
+          }
+        </ul>
+        <p class="card__foot">
+          API {{ o.api.instance }} · up {{ duration(o.api.uptimeSeconds) }} · readiness {{ o.api.readiness }}
+        </p>
+      </article>
+
+      <article class="card" aria-labelledby="ops-workers">
+        <h2 id="ops-workers">
+          Workers
+          <span class="status {{ statusClass(o.workers.status) }}">
+            <span class="status__icon" aria-hidden="true">{{ statusIcon(o.workers.status) }}</span>
+            <span>{{ statusLabel(o.workers.status) }}</span>
+          </span>
+        </h2>
+        <dl class="stats">
+          <div><dt>Online</dt><dd data-testid="workers-online">{{ o.workers.online }}</dd></div>
+          <div><dt>Stale</dt><dd>{{ o.workers.stale }}</dd></div>
+          <div><dt>Offline</dt><dd>{{ o.workers.offline }}</dd></div>
+          <div><dt>Total</dt><dd>{{ o.workers.total }}</dd></div>
+        </dl>
+        @if (workers().data; as w) {
+          @if (w.workers.items.length > 0) {
+            <div class="table-wrap">
+              <table>
+                <caption class="sr-only">Registered Workers</caption>
+                <thead>
+                  <tr><th scope="col">Worker</th><th scope="col">State</th><th scope="col">Heartbeat</th><th scope="col">Load</th></tr>
+                </thead>
+                <tbody>
+                  @for (row of w.workers.items; track row.id) {
+                    <tr>
+                      <th scope="row">{{ row.name }}</th>
+                      <td><span class="chip {{ workerStateClass(row.state) }}">{{ row.state }}</span></td>
+                      <td>{{ ago(row.lastHeartbeatAt) }}</td>
+                      <td>{{ row.activeJobs }}/{{ row.maxActiveJobs }}</td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+            @if (w.workers.total > w.workers.items.length) {
+              <p class="card__foot">Showing {{ w.workers.items.length }} of {{ w.workers.total }}.</p>
+            }
+          } @else {
+            <p class="card__empty">No Workers are registered.</p>
+          }
+        }
+        @if (workers().error) {
+          <p class="card__error" role="alert">Status temporarily unavailable. {{ stalenessNote(workers()) }}</p>
+        }
+      </article>
+
+      <article class="card" aria-labelledby="ops-jobs">
+        <h2 id="ops-jobs">
+          Jobs
+          <span class="status {{ statusClass(o.jobs.status) }}">
+            <span class="status__icon" aria-hidden="true">{{ statusIcon(o.jobs.status) }}</span>
+            <span>{{ statusLabel(o.jobs.status) }}</span>
+          </span>
+        </h2>
+        <dl class="stats">
+          <div><dt>Queued</dt><dd data-testid="jobs-queued">{{ o.jobs.queued }}</dd></div>
+          <div><dt>Assigned</dt><dd>{{ o.jobs.assigned }}</dd></div>
+          <div><dt>Running</dt><dd>{{ o.jobs.running }}</dd></div>
+          <div><dt>Oldest queued</dt><dd data-testid="jobs-oldest">{{ o.jobs.oldestQueuedAgeSeconds === null ? 'none queued' : duration(o.jobs.oldestQueuedAgeSeconds) }}</dd></div>
+          <div><dt>Failed ({{ o.jobs.recentWindowHours }} h)</dt><dd>{{ o.jobs.failedRecent }}</dd></div>
+          <div><dt>Succeeded ({{ o.jobs.recentWindowHours }} h)</dt><dd>{{ o.jobs.succeededRecent }}</dd></div>
+        </dl>
+        <p class="card__foot">
+          Backlog warns after {{ duration(o.jobs.backlogWarningSeconds) }} and is critical after {{ duration(o.jobs.backlogCriticalSeconds) }}.
+          @if (o.jobs.leaseExpired > 0) { {{ o.jobs.leaseExpired }} expired lease(s). }
+        </p>
+        @if (failedJobs().data; as j) {
+          @if (j.jobs.items.length > 0) {
+            <h3>Recent failed Jobs</h3>
+            <div class="table-wrap">
+              <table>
+                <caption class="sr-only">Failed Jobs</caption>
+                <thead>
+                  <tr><th scope="col">Type</th><th scope="col">Failed</th><th scope="col">Category</th><th scope="col">Attempts</th><th scope="col">Message</th></tr>
+                </thead>
+                <tbody>
+                  @for (row of j.jobs.items; track row.id) {
+                    <tr>
+                      <th scope="row">{{ row.type }}</th>
+                      <td>{{ ago(row.finishedAt) }}</td>
+                      <td>{{ row.failureCategory ?? '—' }}</td>
+                      <td>{{ row.attemptCount }}/{{ row.maxAttempts }} {{ row.retryState === 'EXHAUSTED' ? '(no retries left)' : '' }}</td>
+                      <td class="cell-wrap">{{ row.failureMessage ?? '—' }}</td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+          }
+        }
+        @if (failedJobs().error) {
+          <p class="card__error" role="alert">Status temporarily unavailable. {{ stalenessNote(failedJobs()) }}</p>
+        }
+      </article>
+
+      <article class="card" aria-labelledby="ops-schedulers">
+        <h2 id="ops-schedulers">
+          Schedulers
+          <span class="status {{ statusClass(o.schedulers.status) }}">
+            <span class="status__icon" aria-hidden="true">{{ statusIcon(o.schedulers.status) }}</span>
+            <span>{{ statusLabel(o.schedulers.status) }}</span>
+          </span>
+        </h2>
+        @if (schedulers().data; as s) {
+          <div class="table-wrap">
+            <table>
+              <caption class="sr-only">Background schedulers</caption>
+              <thead>
+                <tr><th scope="col">Scheduler</th><th scope="col">State</th><th scope="col">Cadence</th><th scope="col">Last success</th></tr>
+              </thead>
+              <tbody>
+                @for (row of s.schedulers; track row.name) {
+                  <tr>
+                    <th scope="row">{{ row.name }}</th>
+                    <td>
+                      <span class="chip {{ schedulerStateClass(row.state) }}">{{ row.state }}</span>
+                      @if (row.stale) { <span class="chip status--degraded">STALE</span> }
+                      @if (!row.enabled) { <span class="chip status--unknown">DISABLED</span> }
+                    </td>
+                    <td>{{ cadence(row.cadenceSeconds) }}</td>
+                    <td>{{ ago(row.lastSucceededAt) }}</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        } @else if (!schedulers().error) {
+          <p class="card__empty">Loading…</p>
+        }
+        @if (schedulers().error) {
+          <p class="card__error" role="alert">Status temporarily unavailable. {{ stalenessNote(schedulers()) }}</p>
+        }
+      </article>
+
+      <article class="card" aria-labelledby="ops-publishing">
+        <h2 id="ops-publishing">
+          Publishing
+          <span class="status {{ statusClass(o.publishing.status) }}">
+            <span class="status__icon" aria-hidden="true">{{ statusIcon(o.publishing.status) }}</span>
+            <span>{{ statusLabel(o.publishing.status) }}</span>
+          </span>
+        </h2>
+        <dl class="stats">
+          <div><dt>Due now</dt><dd>{{ o.publishing.scheduledDue }}</dd></div>
+          <div><dt>Overdue</dt><dd>{{ o.publishing.scheduledOverdue }}</dd></div>
+          <div><dt>Publishing</dt><dd>{{ o.publishing.publishing }}</dd></div>
+          <div><dt>Unknown outcome</dt><dd data-testid="publishing-unknown">{{ o.publishing.outcomeUnknown }}</dd></div>
+          <div><dt>Published ({{ o.publishing.recentWindowHours }} h)</dt><dd>{{ o.publishing.publishedRecent }}</dd></div>
+          <div><dt>Failed ({{ o.publishing.recentWindowHours }} h)</dt><dd>{{ o.publishing.failedRecent }}</dd></div>
+        </dl>
+        @if (publishing().data; as p) {
+          @if (p.providers.length > 0) {
+            <ul class="card__list">
+              @for (provider of p.providers; track provider.provider) {
+                <li>
+                  <span class="card__name">{{ provider.provider }}</span>
+                  <span class="status {{ statusClass(provider.status) }}">
+                    <span class="status__icon" aria-hidden="true">{{ statusIcon(provider.status) }}</span>
+                    <span>{{ statusLabel(provider.status) }}</span>
+                  </span>
+                  <span class="card__meta">last success {{ ago(provider.lastSuccessAt) }} · {{ provider.failuresSinceLastSuccess }} failure(s) since</span>
+                </li>
+              }
+            </ul>
+          }
+          @if (p.attention.items.length > 0) {
+            <h3>Needs attention</h3>
+            <div class="table-wrap">
+              <table>
+                <caption class="sr-only">Failed or ambiguous publications</caption>
+                <thead>
+                  <tr><th scope="col">Provider</th><th scope="col">Status</th><th scope="col">Category</th><th scope="col">Guidance</th></tr>
+                </thead>
+                <tbody>
+                  @for (row of p.attention.items; track row.id) {
+                    <tr>
+                      <th scope="row">{{ row.provider }}</th>
+                      <td>{{ row.outcomeUnknown ? 'OUTCOME UNKNOWN' : row.status }}</td>
+                      <td>{{ row.failureCategory ?? '—' }}</td>
+                      <td class="cell-wrap">{{ row.outcomeUnknown ? 'Verify on the provider before any retry.' : 'No automatic retry.' }}</td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+          }
+        }
+        @if (publishing().error) {
+          <p class="card__error" role="alert">Status temporarily unavailable. {{ stalenessNote(publishing()) }}</p>
+        }
+      </article>
+
+      <article class="card" aria-labelledby="ops-automation">
+        <h2 id="ops-automation">
+          Automation
+          <span class="status {{ statusClass(o.automation.status) }}">
+            <span class="status__icon" aria-hidden="true">{{ statusIcon(o.automation.status) }}</span>
+            <span>{{ statusLabel(o.automation.status) }}</span>
+          </span>
+        </h2>
+        <dl class="stats">
+          <div><dt>Auto-propose Robots</dt><dd>{{ o.automation.autoProposeRobots }}</dd></div>
+          <div><dt>Pending proposals</dt><dd>{{ o.automation.pendingProposals }}</dd></div>
+          <div><dt>Active authorizations</dt><dd>{{ o.automation.activeAuthorizations }}</dd></div>
+          <div><dt>Guardrail-blocked</dt><dd>{{ o.automation.guardrailBlocked }}</dd></div>
+          <div><dt>Observing</dt><dd>{{ o.automation.activeSafetyObservations }}</dd></div>
+          <div><dt>Open rollback recommendations</dt><dd data-testid="automation-rollbacks">{{ o.automation.openRollbackRecommendations }}</dd></div>
+          <div><dt>Memory-suppressed</dt><dd>{{ o.automation.memorySuppressedTransitions }}</dd></div>
+        </dl>
+      </article>
+    </div>
+  } @else if (!overview().error) {
+    <p class="ops__loading" role="status">Loading operations status…</p>
+  }
+
+  <section class="incidents" aria-labelledby="ops-incidents">
+    <h2 id="ops-incidents">
+      Incidents
+      @if (overview().data; as o) {
+        <span class="incidents__count" data-testid="incident-count">{{ o.incidents.active }} active · {{ o.incidents.unacknowledged }} unacknowledged</span>
+      }
+    </h2>
+
+    @if (incidents().data; as view) {
+      @if (view.incidents.items.length === 0) {
+        <p class="card__empty" data-testid="no-incidents">No active incidents.</p>
+      } @else {
+        <div class="incidents__layout">
+          <ul class="incidents__list">
+            @for (incident of view.incidents.items; track incident.id) {
+              <li>
+                <button
+                  type="button"
+                  class="incident"
+                  [class.incident--selected]="selectedIncident()?.id === incident.id"
+                  [attr.aria-pressed]="selectedIncident()?.id === incident.id"
+                  (click)="selectIncident(incident)"
+                >
+                  <span class="sev sev--{{ incident.severity.toLowerCase() }}">
+                    <span aria-hidden="true">{{ severityIcon(incident.severity) }}</span>
+                    {{ severityLabel(incident.severity) }}
+                  </span>
+                  <span class="incident__title">{{ incident.title }}</span>
+                  <span class="incident__meta">
+                    {{ incident.key }} · since {{ ago(incident.firstObservedAt) }}
+                    @if (incident.acknowledged) { · acknowledged }
+                  </span>
+                </button>
+              </li>
+            }
+          </ul>
+
+          @if (selectedIncident(); as selected) {
+            <article class="incident-detail" aria-labelledby="incident-detail-title" data-testid="incident-detail">
+              <h3 id="incident-detail-title">{{ selected.title }}</h3>
+              <dl class="detail">
+                <div><dt>Severity</dt><dd>{{ severityLabel(selected.severity) }}</dd></div>
+                <div><dt>Key</dt><dd><code>{{ selected.key }}</code></dd></div>
+                <div><dt>First observed</dt><dd>{{ selected.firstObservedAt | date: 'medium' }}</dd></div>
+                <div><dt>Last observed</dt><dd>{{ selected.lastObservedAt | date: 'medium' }}</dd></div>
+                @if (selected.detail) {
+                  <div><dt>Evidence</dt><dd><code>{{ selected.detail }}</code></dd></div>
+                }
+                <div class="detail__wide"><dt>Suggested action</dt><dd data-testid="suggested-action">{{ selected.suggestedAction }}</dd></div>
+              </dl>
+              <div class="incident-detail__actions">
+                @if (incidentLink(selected); as link) {
+                  <a class="ops__button ops__button--link" [routerLink]="link">{{ linkLabel(selected) }}</a>
+                }
+                @if (selected.acknowledged) {
+                  <span class="chip status--unknown">Acknowledged {{ ago(selected.acknowledgedAt) }}</span>
+                } @else {
+                  <button
+                    type="button"
+                    class="ops__button"
+                    (click)="acknowledge(selected)"
+                    [disabled]="!selected.persisted || acknowledging() !== null"
+                    data-testid="acknowledge"
+                  >
+                    {{ acknowledging() === selected.id ? 'Acknowledging…' : 'Acknowledge' }}
+                  </button>
+                }
+              </div>
+              <p class="card__foot">Acknowledging records that someone has seen this incident. It does not resolve it; it clears when the condition does.</p>
+              @if (acknowledgeError(); as message) {
+                <p class="card__error" role="alert">{{ message }}</p>
+              }
+            </article>
+          }
+        </div>
+      }
+    }
+    @if (incidents().error) {
+      <p class="card__error" role="alert">Status temporarily unavailable. {{ stalenessNote(incidents()) }}</p>
+    }
+  </section>
+</section>
