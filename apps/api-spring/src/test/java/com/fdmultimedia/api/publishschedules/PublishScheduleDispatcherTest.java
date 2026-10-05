@@ -1,5 +1,7 @@
 package com.fdmultimedia.api.publishschedules;
 
+import com.fdmultimedia.api.shared.operations.SchedulerOperationTracker;
+import java.time.Clock;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -12,7 +14,8 @@ class PublishScheduleDispatcherTest {
 
     private final PublishScheduleDispatchService dispatchService = mock(PublishScheduleDispatchService.class);
     private final PublishScheduleProperties properties = new PublishScheduleProperties();
-    private final PublishScheduleDispatcher dispatcher = new PublishScheduleDispatcher(dispatchService, properties);
+    private final PublishScheduleDispatcher dispatcher = new PublishScheduleDispatcher(
+            dispatchService, properties, new SchedulerOperationTracker(Clock.systemUTC()));
 
     @Test
     void pollAndDispatchStopsAtBatchSizeEvenWhenMoreMightBeDue() {

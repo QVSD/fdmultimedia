@@ -3,7 +3,10 @@ package com.fdmultimedia.api.assets;
 import jakarta.annotation.PostConstruct;
 import java.net.URI;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
@@ -26,6 +29,7 @@ import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignReques
 @Service
 public class ObjectStorageService {
 
+    private static final Logger log = LoggerFactory.getLogger(ObjectStorageService.class);
     private final StorageProperties properties;
     private final Clock clock;
     private final S3Client s3Client;
@@ -40,6 +44,26 @@ public class ObjectStorageService {
 
     @PostConstruct
     void ensureBucketExists() {
+        try {
+            ensureBucketAvailable();
+        } catch (RuntimeException ex) {
+            // Object storage is intentionally not a core readiness dependency.
+            // Media operations retry this bounded check after MinIO recovers.
+            log.warn("Object storage unavailable during startup; media operations will retry lazily type={}",
+                    ex.getClass().getSimpleName());
+        }
+    }
+
+    public boolean isAvailable() {
+        try {
+            s3Client.headBucket(HeadBucketRequest.builder().bucket(properties.getBucket()).build());
+            return true;
+        } catch (RuntimeException ex) {
+            return false;
+        }
+    }
+
+    private void ensureBucketAvailable() {
         try {
             s3Client.headBucket(HeadBucketRequest.builder().bucket(properties.getBucket()).build());
         } catch (NoSuchBucketException ex) {
@@ -57,6 +81,7 @@ public class ObjectStorageService {
     }
 
     public StorageAccess presignedPut(String key) {
+        ensureBucketAvailable();
         PutObjectRequest request = PutObjectRequest.builder()
                 .bucket(properties.getBucket())
                 .key(key)
@@ -74,6 +99,7 @@ public class ObjectStorageService {
     }
 
     public StorageAccess presignedGet(String key) {
+        ensureBucketAvailable();
         GetObjectRequest request = GetObjectRequest.builder()
                 .bucket(properties.getBucket())
                 .key(key)
@@ -93,6 +119,7 @@ public class ObjectStorageService {
      * to the storage endpoint.
      */
     public ResponseInputStream<GetObjectResponse> getObjectStream(String key) {
+        ensureBucketAvailable();
         return s3Client.getObject(GetObjectRequest.builder()
                 .bucket(properties.getBucket())
                 .key(key)
@@ -100,6 +127,7 @@ public class ObjectStorageService {
     }
 
     public long objectSize(String key) {
+        ensureBucketAvailable();
         return s3Client.headObject(HeadObjectRequest.builder()
                         .bucket(properties.getBucket())
                         .key(key)
@@ -113,6 +141,9 @@ public class ObjectStorageService {
                 .region(Region.of(properties.getRegion()))
                 .credentialsProvider(credentials(properties))
                 .serviceConfiguration(S3Configuration.builder().pathStyleAccessEnabled(true).build())
+                .overrideConfiguration(builder -> builder
+                        .apiCallAttemptTimeout(Duration.ofSeconds(5))
+                        .apiCallTimeout(Duration.ofSeconds(10)))
                 .build();
     }
 

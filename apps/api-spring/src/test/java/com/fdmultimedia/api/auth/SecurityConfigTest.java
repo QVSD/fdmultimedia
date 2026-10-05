@@ -38,6 +38,27 @@ class SecurityConfigTest {
     }
 
     @Test
+    void actuatorProbesArePublicButAggregateHealthIsProtected() throws Exception {
+        mockMvc.perform(get("/api/actuator/health/liveness")).andExpect(status().isOk());
+        mockMvc.perform(get("/api/actuator/health/readiness")).andExpect(status().isOk());
+        mockMvc.perform(get("/api/actuator/health")).andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void operationsEndpointRequiresAuthentication() throws Exception {
+        mockMvc.perform(get("/api/operations/status")).andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void unauthenticatedRequestsNeverPersistASavedRequest() throws Exception {
+        var result = mockMvc.perform(get("/api/workspaces")).andExpect(status().isUnauthorized()).andReturn();
+        var session = result.getRequest().getSession(false);
+        // A saved request would be written to the shared JDBC session store for every anonymous request.
+        org.assertj.core.api.Assertions.assertThat(session == null ? null : session.getAttribute("SPRING_SECURITY_SAVED_REQUEST")).isNull();
+        org.assertj.core.api.Assertions.assertThat(result.getResponse().getHeaders("Set-Cookie")).noneMatch(c -> c.contains("SESSION"));
+    }
+
+    @Test
     void applicationApiRejectsUnauthenticatedUsers() throws Exception {
         mockMvc.perform(get("/api/workspaces"))
                 .andExpect(status().isUnauthorized());
@@ -188,6 +209,12 @@ class SecurityConfigTest {
 
     @RestController
     static final class ProtectedPostController {
+
+        @org.springframework.web.bind.annotation.GetMapping({
+                "/api/actuator/health/liveness", "/api/actuator/health/readiness"})
+        java.util.Map<String, String> probe() {
+            return java.util.Map.of("status", "UP");
+        }
 
         @PostMapping("/api/protected-post")
         @ResponseStatus(HttpStatus.NO_CONTENT)

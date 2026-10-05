@@ -59,6 +59,21 @@ class AuthControllerTest {
     }
 
     @Test
+    void loginRotatesAnExistingAnonymousSessionId() {
+        AppUser appUser = new AppUser("owner@example.com", "$2a$10$hash", "Owner");
+        AuthenticatedUser principal = new AuthenticatedUser(appUser);
+        var authentication = new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities());
+        when(authenticationManager.authenticate(any())).thenReturn(authentication);
+        when(authService.sessionFor(principal)).thenReturn(sessionResponse(appUser.getId(), "owner@example.com", "Owner"));
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        String before = request.getSession(true).getId();
+
+        controller.login(new LoginRequest("owner@example.com", "secret"), request);
+
+        assertThat(request.getSession(false).getId()).isNotEqualTo(before);
+    }
+
+    @Test
     void loginFailsWithGenericMessageForInvalidCredentials() {
         when(authenticationManager.authenticate(any()))
                 .thenThrow(new BadCredentialsException("raw provider detail"));

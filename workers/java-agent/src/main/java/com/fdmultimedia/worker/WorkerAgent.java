@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -108,6 +109,7 @@ public final class WorkerAgent {
             System.err.println("Instagram publishing driving enabled on this worker (no credential is ever held here)");
         }
         AtomicInteger activeJobs = new AtomicInteger(0);
+        AtomicBoolean acceptingWork = new AtomicBoolean(true);
         WorkerTelemetryCollector telemetryCollector = new WorkerTelemetryCollector();
 
         while (!Thread.currentThread().isInterrupted()) {
@@ -123,9 +125,18 @@ public final class WorkerAgent {
         ExecutorService executor = Executors.newFixedThreadPool(2);
         CountDownLatch shutdown = new CountDownLatch(1);
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            executor.shutdownNow();
+            acceptingWork.set(false);
+            executor.shutdown();
+            try {
+                if (!executor.awaitTermination(config.shutdownGracePeriod().toMillis(), TimeUnit.MILLISECONDS)) {
+                    executor.shutdownNow();
+                }
+            } catch (InterruptedException ex) {
+                Thread.currentThread().interrupt();
+                executor.shutdownNow();
+            }
             shutdown.countDown();
-        }));
+        }, "fdm-worker-shutdown"));
         executor.submit(() -> heartbeatLoop(
                 client,
                 machineIdentifier,
@@ -133,8 +144,9 @@ public final class WorkerAgent {
                 telemetryCollector,
                 activeJobs,
                 supportedJobTypes,
-                supportedHighlightAnalyzers));
-        executor.submit(() -> jobLoop(client, machineIdentifier, config, systemTestExecutor, importMediaExecutor, inspectMediaExecutor, clipExecutor, analyzeHighlightsExecutor, transcribeMediaExecutor, publishMediaExecutor, generateSocialCopyExecutor, generateCampaignPlanExecutor, generateCoordinatedSocialCopyExecutor, supportedJobTypes, supportedHighlightAnalyzers, supportedPublishingProviders, activeJobs));
+                supportedHighlightAnalyzers,
+                acceptingWork));
+        executor.submit(() -> jobLoop(client, machineIdentifier, config, systemTestExecutor, importMediaExecutor, inspectMediaExecutor, clipExecutor, analyzeHighlightsExecutor, transcribeMediaExecutor, publishMediaExecutor, generateSocialCopyExecutor, generateCampaignPlanExecutor, generateCoordinatedSocialCopyExecutor, supportedJobTypes, supportedHighlightAnalyzers, supportedPublishingProviders, activeJobs, acceptingWork));
         shutdown.await();
     }
 
@@ -145,8 +157,9 @@ public final class WorkerAgent {
             WorkerTelemetryCollector telemetryCollector,
             AtomicInteger activeJobs,
             List<String> supportedJobTypes,
-            List<String> supportedHighlightAnalyzers) {
-        while (!Thread.currentThread().isInterrupted()) {
+            List<String> supportedHighlightAnalyzers,
+            AtomicBoolean acceptingWork) {
+        while (acceptingWork.get() && !Thread.currentThread().isInterrupted()) {
             try {
                 WorkerTelemetry telemetry = null;
                 try {
@@ -180,8 +193,9 @@ public final class WorkerAgent {
             List<String> supportedJobTypes,
             List<String> supportedHighlightAnalyzers,
             List<String> supportedPublishingProviders,
-            AtomicInteger activeJobs) {
-        while (!Thread.currentThread().isInterrupted()) {
+            AtomicInteger activeJobs,
+            AtomicBoolean acceptingWork) {
+        while (acceptingWork.get() && !Thread.currentThread().isInterrupted()) {
             try {
                 if (activeJobs.get() >= config.maxActiveJobs()) {
                     sleep(config.jobPollInterval());
@@ -191,6 +205,11 @@ public final class WorkerAgent {
                 if (!job.available()) {
                     sleep(config.jobPollInterval());
                     continue;
+                }
+                if (!acceptingWork.get()) {
+                    // Leave the freshly claimed job untouched; its bounded DB
+                    // lease makes it recoverable by another Worker.
+                    break;
                 }
                 activeJobs.incrementAndGet();
                 try {
@@ -243,8 +262,7 @@ public final class WorkerAgent {
             } else if ("GENERATE_COORDINATED_SOCIAL_COPY".equals(job.type())) {
                 executeGenerateCoordinatedSocialCopyJob(client, machineIdentifier, generateCoordinatedSocialCopyExecutor, job);
             } else if ("SYSTEM_TEST".equals(job.type())) {
-                Map<String, Object> result = systemTestExecutor.execute(job, workerName);
-                client.complete(job.jobId(), machineIdentifier, result);
+                executeSystemTestJob(client, machineIdentifier, workerName, systemTestExecutor, job);
             } else {
                 client.fail(job.jobId(), machineIdentifier, "UNSUPPORTED_JOB_TYPE", "Worker does not support " + job.type(), true);
             }
@@ -257,6 +275,25 @@ public final class WorkerAgent {
             } catch (Exception reportFailure) {
                 System.err.println("Worker failed to report job failure: " + reportFailure.getMessage());
             }
+        }
+    }
+
+    private static void executeSystemTestJob(
+            WorkerAgentClient client,
+            String machineIdentifier,
+            String workerName,
+            SystemTestExecutor systemTestExecutor,
+            ClaimedJob job) throws Exception {
+        AtomicBoolean running = new AtomicBoolean(true);
+        Thread renewer = new Thread(() -> leaseRenewLoop(client, machineIdentifier, job, running), "fdm-job-lease-renewer");
+        renewer.setDaemon(true);
+        renewer.start();
+        try {
+            Map<String, Object> result = systemTestExecutor.execute(job, workerName);
+            client.complete(job.jobId(), machineIdentifier, result);
+        } finally {
+            running.set(false);
+            renewer.interrupt();
         }
     }
 

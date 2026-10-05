@@ -30,6 +30,7 @@ class WorkerAgentConfigTest {
         assertEquals(Path.of("worker-id.txt"), config.identityFile());
         assertEquals(Duration.ofSeconds(5), config.heartbeatInterval());
         assertEquals(Duration.ofSeconds(2), config.jobPollInterval());
+        assertEquals(Duration.ofSeconds(25), config.shutdownGracePeriod());
         assertEquals(false, config.instagramPublishingEnabled());
     }
 
@@ -96,6 +97,16 @@ class WorkerAgentConfigTest {
         assertThrows(IllegalArgumentException.class, () -> WorkerAgentConfig.from(Map.of(
                 "FDM_WORKER_TOKEN", "credential.secret",
                 "FDM_WORKER_JOB_POLL_SECONDS", "0")));
+    }
+
+    @Test
+    void validatesBoundedShutdownGrace() {
+        assertThrows(IllegalArgumentException.class, () -> WorkerAgentConfig.from(Map.of(
+                "FDM_WORKER_TOKEN", "credential.secret",
+                "FDM_WORKER_SHUTDOWN_GRACE_SECONDS", "0")));
+        assertThrows(IllegalArgumentException.class, () -> WorkerAgentConfig.from(Map.of(
+                "FDM_WORKER_TOKEN", "credential.secret",
+                "FDM_WORKER_SHUTDOWN_GRACE_SECONDS", "301")));
     }
 
     @Test

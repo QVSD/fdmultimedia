@@ -18,8 +18,8 @@ class ActuatorHealthDetailsConfigurationTest {
     }
 
     @Test
-    void devConfigurationExplicitlyExposesHealthDetails() throws IOException {
-        assertThat(loadProperty("application-dev.yml", SHOW_DETAILS)).isEqualTo("always");
+    void devConfigurationExposesDetailsOnlyToAuthorizedUsers() throws IOException {
+        assertThat(loadProperty("application-dev.yml", SHOW_DETAILS)).isEqualTo("when-authorized");
     }
 
     @Test

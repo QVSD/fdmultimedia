@@ -188,7 +188,8 @@ class AdaptiveMemoryServicesTest {
         AdaptiveMemoryProjectionService projectionMock = mock(AdaptiveMemoryProjectionService.class);
         when(projectionMock.reconcileRobot(r1)).thenThrow(new IllegalStateException("boom"));
         when(projectionMock.reconcileRobot(r2)).thenReturn(3);
-        new AdaptiveMemoryReconciler(stub, projectionMock, clock).reconcile();
+        new AdaptiveMemoryReconciler(stub, projectionMock, clock,
+                new com.fdmultimedia.api.shared.operations.SchedulerOperationTracker(clock)).reconcile();
         verify(projectionMock).reconcileRobot(r1);
         verify(projectionMock).reconcileRobot(r2);
         assertThat(AdaptiveMemoryReconciler.BATCH_LIMIT).isEqualTo(100);

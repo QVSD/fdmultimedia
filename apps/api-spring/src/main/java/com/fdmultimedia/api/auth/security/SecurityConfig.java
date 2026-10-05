@@ -12,6 +12,7 @@ import org.springframework.security.config.annotation.web.configurers.AbstractHt
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.savedrequest.NullRequestCache;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
@@ -27,6 +28,9 @@ public class SecurityConfig {
         CsrfTokenRequestAttributeHandler csrfTokenRequestHandler = new CsrfTokenRequestAttributeHandler();
 
         http
+                // JSON API only: never persist a saved request. With shared JDBC sessions the default request cache would
+                // create a database session row for every unauthenticated request.
+                .requestCache(cache -> cache.requestCache(new NullRequestCache()))
                 .httpBasic(AbstractHttpConfigurer::disable)
                 .formLogin(AbstractHttpConfigurer::disable)
                 .logout(AbstractHttpConfigurer::disable)
@@ -35,7 +39,10 @@ public class SecurityConfig {
                         .csrfTokenRequestHandler(csrfTokenRequestHandler)
                         .ignoringRequestMatchers("/api/auth/login", "/api/worker-agent/**"))
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers(HttpMethod.GET, "/api/health", "/api/actuator/health").permitAll()
+                        .requestMatchers(HttpMethod.GET,
+                                "/api/health",
+                                "/api/actuator/health/liveness",
+                                "/api/actuator/health/readiness").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/auth/login").permitAll()
                         // Meta's servers must be able to fetch publish media over the public
                         // internet; they cannot present a session cookie or CSRF token. Every
@@ -47,6 +54,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/assets/**").hasRole("USER")
                         .requestMatchers("/api/jobs/**").hasRole("USER")
                         .requestMatchers("/api/workers/**").hasRole("USER")
+                        .requestMatchers("/api/operations/**").hasRole("USER")
                         .requestMatchers("/api/scheduling/**").hasRole("USER")
                         .requestMatchers("/api/social-accounts/**").hasRole("USER")
                         .requestMatchers("/api/publications/**").hasRole("USER")

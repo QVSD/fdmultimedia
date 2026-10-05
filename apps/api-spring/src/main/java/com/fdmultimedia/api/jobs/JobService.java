@@ -96,7 +96,7 @@ public class JobService {
     @Transactional
     public JobSummary createForWorkspace(Workspace workspace, JobCreateRequest request) {
         Map<String, Object> payload = validatePayload(request.type(), request.payload());
-        Instant now = Instant.now(clock);
+        Instant now = databaseNow();
         Job job = jobs.save(new Job(
                 workspace,
                 request.type(),
@@ -143,7 +143,7 @@ public class JobService {
     public WorkerJobClaimResponse claim(WorkerPrincipal principal, WorkerJobClaimRequest request) {
         Worker worker = requireOnlineWorker(principal, request.machineIdentifier());
         WorkerEligibility eligibility = eligibilityService.eligibleCapabilities(request);
-        Instant now = Instant.now(clock);
+        Instant now = databaseNow();
         recoverExpiredLeases(worker.getWorkspace(), now);
         List<Job> candidates = jobs.findQueuedCandidatesForUpdate(
                         worker.getWorkspace().getId(),
@@ -173,7 +173,7 @@ public class JobService {
         Worker worker = requireOnlineWorker(principal, request.machineIdentifier());
         Job job = requireJobForWorkerWorkspace(worker, jobId);
         try {
-            Instant now = Instant.now(clock);
+            Instant now = databaseNow();
             job.start(worker, now, now.plus(properties.getLeaseDuration()));
             return toSummary(job);
         } catch (IllegalStateException ex) {
@@ -186,7 +186,7 @@ public class JobService {
         Worker worker = requireOnlineWorker(principal, request.machineIdentifier());
         Job job = requireJobForWorkerWorkspace(worker, jobId);
         try {
-            Instant now = Instant.now(clock);
+            Instant now = databaseNow();
             completeOwnedJob(job, worker, sanitizeResult(request.result()), now);
             return toSummary(job);
         } catch (IllegalStateException ex) {
@@ -199,7 +199,7 @@ public class JobService {
         Worker worker = requireOnlineWorker(principal, request.machineIdentifier());
         Job job = requireJobForWorkerWorkspace(worker, jobId);
         try {
-            Instant now = Instant.now(clock);
+            Instant now = databaseNow();
             failOwnedJob(
                     job,
                     worker,
@@ -243,7 +243,7 @@ public class JobService {
         Worker worker = requireOnlineWorker(principal, request.machineIdentifier());
         Job job = requireJobForWorkerWorkspace(worker, jobId);
         try {
-            Instant now = Instant.now(clock);
+            Instant now = databaseNow();
             job.renewLease(worker, now, now.plus(properties.getLeaseDuration()));
             return toSummary(job);
         } catch (IllegalStateException ex) {
@@ -252,7 +252,7 @@ public class JobService {
     }
 
     private void recoverExpiredLeases(Workspace workspace, Instant now) {
-        jobs.findExpiredLeasesForUpdate(workspace.getId(), now)
+        jobs.findExpiredLeasesForUpdate(workspace.getId())
                 .forEach(job -> {
                     JobExecutionSnapshot snapshot = JobExecutionSnapshot.from(job);
                     job.recoverExpiredLease(now);
@@ -264,6 +264,11 @@ public class JobService {
                     reconcileRecoveredTranscription(job, now);
                     reconcileRecoveredPublication(job, now);
                 });
+    }
+
+    private Instant databaseNow() {
+        Instant value = jobs.currentDatabaseTime();
+        return value == null ? Instant.now(clock) : value;
     }
 
     private void reconcileRecoveredImportAsset(Job job, Instant now) {

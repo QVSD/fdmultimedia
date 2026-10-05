@@ -9,13 +9,16 @@ import com.fdmultimedia.api.optimization.AutonomousProposalModels.Evaluation;
 import com.fdmultimedia.api.robotchanges.*;
 import com.fdmultimedia.api.robotchanges.RobotAdaptivePolicyModels.ProposalAutomationMode;
 import java.util.*;
+import java.time.Clock;
+import com.fdmultimedia.api.shared.operations.SchedulerOperationTracker;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.domain.Pageable;
 
 class AutonomousProposalReconcilerTest {
     private final RobotAdaptivePolicyRepository policies=mock(RobotAdaptivePolicyRepository.class);
     private final AutonomousProposalService service=mock(AutonomousProposalService.class);
-    private final AutonomousProposalReconciler reconciler=new AutonomousProposalReconciler(policies,service);
+    private final AutonomousProposalReconciler reconciler=new AutonomousProposalReconciler(
+            policies,service,new SchedulerOperationTracker(Clock.systemUTC()));
 
     @Test void reviewEventUsesBoundedAutonomousOrchestration(){
         UUID robotId=UUID.randomUUID();when(service.evaluateAndCreate(robotId,"REVIEW_CREATED"))

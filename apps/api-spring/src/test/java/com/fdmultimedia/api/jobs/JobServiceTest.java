@@ -217,7 +217,7 @@ class JobServiceTest {
     @Test
     void workerClaimsNextQueuedJobAtomicallyThroughRepositoryLock() {
         Job job = job();
-        when(jobs.findExpiredLeasesForUpdate(workspace.getId(), NOW)).thenReturn(List.of());
+        when(jobs.findExpiredLeasesForUpdate(workspace.getId())).thenReturn(List.of());
         when(jobs.findQueuedCandidatesForUpdate(workspace.getId(), List.of("SYSTEM_TEST"), List.of("DETERMINISTIC_V1"), List.of("TEST"), 25))
                 .thenReturn(List.of(job));
 
@@ -240,7 +240,7 @@ class JobServiceTest {
 
     @Test
     void claimReportsNoJobsAvailable() {
-        when(jobs.findExpiredLeasesForUpdate(workspace.getId(), NOW)).thenReturn(List.of());
+        when(jobs.findExpiredLeasesForUpdate(workspace.getId())).thenReturn(List.of());
         when(jobs.findQueuedCandidatesForUpdate(workspace.getId(), List.of("SYSTEM_TEST"), List.of("DETERMINISTIC_V1"), List.of("TEST"), 25))
                 .thenReturn(List.of());
 
@@ -257,7 +257,7 @@ class JobServiceTest {
                 Map.of("assetId", UUID.randomUUID().toString()),
                 3,
                 NOW);
-        when(jobs.findExpiredLeasesForUpdate(workspace.getId(), NOW)).thenReturn(List.of());
+        when(jobs.findExpiredLeasesForUpdate(workspace.getId())).thenReturn(List.of());
         when(jobs.findQueuedCandidatesForUpdate(workspace.getId(), List.of("SYSTEM_TEST", "IMPORT_MEDIA"), List.of("DETERMINISTIC_V1"), List.of("TEST"), 25))
                 .thenReturn(List.of(job));
 
@@ -281,7 +281,7 @@ class JobServiceTest {
                         "transcriptId", UUID.randomUUID().toString()),
                 3,
                 NOW);
-        when(jobs.findExpiredLeasesForUpdate(workspace.getId(), NOW)).thenReturn(List.of());
+        when(jobs.findExpiredLeasesForUpdate(workspace.getId())).thenReturn(List.of());
         when(jobs.findQueuedCandidatesForUpdate(
                 workspace.getId(),
                 List.of("ANALYZE_HIGHLIGHTS"),
@@ -309,7 +309,7 @@ class JobServiceTest {
 
     @Test
     void legacyWorkersDefaultToSystemTestOnly() {
-        when(jobs.findExpiredLeasesForUpdate(workspace.getId(), NOW)).thenReturn(List.of());
+        when(jobs.findExpiredLeasesForUpdate(workspace.getId())).thenReturn(List.of());
         when(jobs.findQueuedCandidatesForUpdate(workspace.getId(), List.of("SYSTEM_TEST"), List.of("DETERMINISTIC_V1"), List.of("TEST"), 25))
                 .thenReturn(List.of());
 
@@ -330,7 +330,7 @@ class JobServiceTest {
                 List.of("DETERMINISTIC_V1"),
                 1);
         Job job = job();
-        when(jobs.findExpiredLeasesForUpdate(workspace.getId(), NOW)).thenReturn(List.of());
+        when(jobs.findExpiredLeasesForUpdate(workspace.getId())).thenReturn(List.of());
         when(jobs.findQueuedCandidatesForUpdate(workspace.getId(), List.of("SYSTEM_TEST"), List.of("DETERMINISTIC_V1"), List.of("TEST"), 25))
                 .thenReturn(List.of(job));
 
@@ -355,7 +355,7 @@ class JobServiceTest {
                 List.of("DETERMINISTIC_V1"),
                 1);
         Job job = job();
-        when(jobs.findExpiredLeasesForUpdate(workspace.getId(), NOW)).thenReturn(List.of());
+        when(jobs.findExpiredLeasesForUpdate(workspace.getId())).thenReturn(List.of());
         when(jobs.findQueuedCandidatesForUpdate(workspace.getId(), List.of("SYSTEM_TEST"), List.of("DETERMINISTIC_V1"), List.of("TEST"), 25))
                 .thenReturn(List.of(job));
 
@@ -438,7 +438,7 @@ class JobServiceTest {
     void expiredLeaseRecoversBeforeClaim() {
         Job expired = job();
         expired.claim(worker, NOW.minusSeconds(60), NOW.minusSeconds(30));
-        when(jobs.findExpiredLeasesForUpdate(workspace.getId(), NOW)).thenReturn(List.of(expired));
+        when(jobs.findExpiredLeasesForUpdate(workspace.getId())).thenReturn(List.of(expired));
         when(jobs.findQueuedCandidatesForUpdate(workspace.getId(), List.of("SYSTEM_TEST"), List.of("DETERMINISTIC_V1"), List.of("TEST"), 25))
                 .thenReturn(List.of());
 
@@ -461,7 +461,7 @@ class JobServiceTest {
         asset.attachImportJob(expired, NOW);
         asset.markImporting(NOW);
         expired.claim(worker, NOW.minusSeconds(60), NOW.minusSeconds(30));
-        when(jobs.findExpiredLeasesForUpdate(workspace.getId(), NOW)).thenReturn(List.of(expired));
+        when(jobs.findExpiredLeasesForUpdate(workspace.getId())).thenReturn(List.of(expired));
         when(jobs.findQueuedCandidatesForUpdate(workspace.getId(), List.of("IMPORT_MEDIA"), List.of("DETERMINISTIC_V1"), List.of("TEST"), 25))
                 .thenReturn(List.of());
         when(assets.findByImportJobId(expired.getId())).thenReturn(Optional.of(asset));
@@ -480,7 +480,7 @@ class JobServiceTest {
         Job expired = new Job(workspace, JobType.PUBLISH_MEDIA, publishPayload(), 3, NOW);
         com.fdmultimedia.api.publishing.Publication publication = publicationFor(expired);
         expired.claim(worker, NOW.minusSeconds(60), NOW.minusSeconds(30));
-        when(jobs.findExpiredLeasesForUpdate(workspace.getId(), NOW)).thenReturn(List.of(expired));
+        when(jobs.findExpiredLeasesForUpdate(workspace.getId())).thenReturn(List.of(expired));
         when(jobs.findQueuedCandidatesForUpdate(workspace.getId(), List.of("SYSTEM_TEST"), List.of("DETERMINISTIC_V1"), List.of("TEST"), 25))
                 .thenReturn(List.of());
         when(publications.findByJobId(expired.getId())).thenReturn(Optional.of(publication));
@@ -496,7 +496,7 @@ class JobServiceTest {
         Job expired = new Job(workspace, JobType.PUBLISH_MEDIA, publishPayload(), 1, NOW);
         com.fdmultimedia.api.publishing.Publication publication = publicationFor(expired);
         expired.claim(worker, NOW.minusSeconds(60), NOW.minusSeconds(30));
-        when(jobs.findExpiredLeasesForUpdate(workspace.getId(), NOW)).thenReturn(List.of(expired));
+        when(jobs.findExpiredLeasesForUpdate(workspace.getId())).thenReturn(List.of(expired));
         when(jobs.findQueuedCandidatesForUpdate(workspace.getId(), List.of("SYSTEM_TEST"), List.of("DETERMINISTIC_V1"), List.of("TEST"), 25))
                 .thenReturn(List.of());
         when(publications.findByJobId(expired.getId())).thenReturn(Optional.of(publication));

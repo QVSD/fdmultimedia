@@ -1,5 +1,6 @@
 package com.fdmultimedia.api.adaptivememory;
 
+import com.fdmultimedia.api.shared.operations.SchedulerOperationTracker;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -26,9 +27,11 @@ public class AdaptiveMemoryReconciler {
     private final AdaptiveMemoryStore store;
     private final AdaptiveMemoryProjectionService projection;
     private final Clock clock;
+    private final SchedulerOperationTracker operations;
 
-    public AdaptiveMemoryReconciler(AdaptiveMemoryStore store, AdaptiveMemoryProjectionService projection, Clock clock) {
-        this.store = store; this.projection = projection; this.clock = clock;
+    public AdaptiveMemoryReconciler(AdaptiveMemoryStore store, AdaptiveMemoryProjectionService projection, Clock clock,
+            SchedulerOperationTracker operations) {
+        this.store = store; this.projection = projection; this.clock = clock; this.operations = operations;
     }
 
     @EventListener(ApplicationReadyEvent.class)
@@ -37,6 +40,10 @@ public class AdaptiveMemoryReconciler {
     @Scheduled(fixedDelayString = "${app.adaptive-memory.reconcile-interval-ms:3600000}",
             initialDelayString = "${app.adaptive-memory.reconcile-initial-delay-ms:300000}")
     public void reconcile() {
+        operations.run(SchedulerOperationTracker.ADAPTIVE_MEMORY, this::reconcileBatch);
+    }
+
+    private SchedulerOperationTracker.Outcome reconcileBatch() {
         List<UUID> robots = store.robotsNeedingReconciliation(Instant.now(clock).minus(STALE_AFTER), BATCH_LIMIT);
         int changed = 0;
         for (UUID robotId : robots) {
@@ -47,5 +54,6 @@ public class AdaptiveMemoryReconciler {
             }
         }
         if (changed > 0) log.info("Adaptive memory pass reconciled {} Robot(s), {} change(s)", robots.size(), changed);
+        return new SchedulerOperationTracker.Outcome(robots.size(), changed);
     }
 }

@@ -92,15 +92,17 @@ public class PublicationAnalyticsService {
         return store.history(workspaceId, publicationId, 1).stream().findFirst().orElse(null);
     }
 
-    public void collectDueBatch() {
+    public int collectDueBatch() {
         if (!properties.isEnabled()) {
-            return;
+            return 0;
         }
+        int processed = 0;
         for (int i = 0; i < properties.getBatchSize(); i++) {
             var claim = store.claimDue(Instant.now(clock));
             if (claim.isEmpty()) {
-                return;
+                return processed;
             }
+            processed++;
             try {
                 collect(claim.get());
             } catch (RuntimeException ex) {
@@ -108,6 +110,7 @@ public class PublicationAnalyticsService {
                 log.warn("Analytics collection failed for publication {}: {}", claim.get().publicationId(), ex.getClass().getSimpleName());
             }
         }
+        return processed;
     }
 
     private void collect(AnalyticsClaim claim) {

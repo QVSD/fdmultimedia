@@ -17,6 +17,20 @@ public interface JobRepository extends JpaRepository<Job, UUID> {
             SELECT COUNT(*) FILTER (WHERE status = 'QUEUED') AS queued,
                    COUNT(*) FILTER (WHERE status = 'ASSIGNED') AS assigned,
                    COUNT(*) FILTER (WHERE status = 'RUNNING') AS running,
+                   COUNT(*) FILTER (WHERE status = 'SUCCEEDED') AS succeeded,
+                   COUNT(*) FILTER (WHERE status = 'FAILED') AS failed,
+                   COUNT(*) FILTER (WHERE status = 'CANCELLED') AS cancelled
+            FROM jobs WHERE workspace_id = :workspaceId
+            """, nativeQuery = true)
+    OperationalJobCountsView operationalCounts(@Param("workspaceId") UUID workspaceId);
+
+    @Query(value = "SELECT CURRENT_TIMESTAMP", nativeQuery = true)
+    Instant currentDatabaseTime();
+
+    @Query(value = """
+            SELECT COUNT(*) FILTER (WHERE status = 'QUEUED') AS queued,
+                   COUNT(*) FILTER (WHERE status = 'ASSIGNED') AS assigned,
+                   COUNT(*) FILTER (WHERE status = 'RUNNING') AS running,
                    COUNT(*) FILTER (WHERE status = 'SUCCEEDED' AND finished_at >= :since) AS succeeded,
                    COUNT(*) FILTER (WHERE status = 'FAILED' AND finished_at >= :since) AS failed,
                    MIN(queued_at) FILTER (WHERE status = 'QUEUED') AS "oldestQueuedAt"
@@ -95,10 +109,10 @@ public interface JobRepository extends JpaRepository<Job, UUID> {
                     FROM jobs
                     WHERE workspace_id = :workspaceId
                       AND status IN ('ASSIGNED', 'RUNNING')
-                      AND lease_expires_at <= :now
+                      AND lease_expires_at <= CURRENT_TIMESTAMP
                     ORDER BY lease_expires_at ASC
                     FOR UPDATE SKIP LOCKED
                     """,
             nativeQuery = true)
-    List<Job> findExpiredLeasesForUpdate(@Param("workspaceId") UUID workspaceId, @Param("now") Instant now);
+    List<Job> findExpiredLeasesForUpdate(@Param("workspaceId") UUID workspaceId);
 }

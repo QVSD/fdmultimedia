@@ -27,6 +27,7 @@ record WorkerAgentConfig(
         Path identityFile,
         Duration heartbeatInterval,
         Duration jobPollInterval,
+        Duration shutdownGracePeriod,
         boolean instagramPublishingEnabled) {
 
     static WorkerAgentConfig fromEnvironment() {
@@ -83,6 +84,12 @@ record WorkerAgentConfig(
         if (jobPollInterval.isNegative() || jobPollInterval.isZero()) {
             throw new IllegalArgumentException("FDM_WORKER_JOB_POLL_SECONDS must be greater than zero");
         }
+        Duration shutdownGracePeriod = Duration.ofSeconds(
+                Long.parseLong(environment.getOrDefault("FDM_WORKER_SHUTDOWN_GRACE_SECONDS", "25")));
+        if (shutdownGracePeriod.isNegative() || shutdownGracePeriod.isZero()
+                || shutdownGracePeriod.compareTo(Duration.ofMinutes(5)) > 0) {
+            throw new IllegalArgumentException("FDM_WORKER_SHUTDOWN_GRACE_SECONDS must be between 1 and 300");
+        }
         // Never technically requires credentials or local tooling (all
         // Instagram HTTP calls happen backend-side) but is opt-in anyway: this
         // machine never sees a token, but it DOES trigger real, external,
@@ -112,6 +119,7 @@ record WorkerAgentConfig(
                 identityFile,
                 heartbeatInterval,
                 jobPollInterval,
+                shutdownGracePeriod,
                 instagramPublishingEnabled);
     }
 

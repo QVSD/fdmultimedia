@@ -1,5 +1,6 @@
 package com.fdmultimedia.api.robots;
 
+import com.fdmultimedia.api.shared.operations.SchedulerOperationTracker;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -30,28 +31,32 @@ public class RobotAutomationScheduler {
     private final RobotRunOrchestrator orchestrator;
     private final RobotRunRepository runs;
     private final RobotProperties properties;
+    private final SchedulerOperationTracker operations;
 
     public RobotAutomationScheduler(
             RobotAutomationDispatchService dispatchService,
             RobotRunOrchestrator orchestrator,
             RobotRunRepository runs,
-            RobotProperties properties) {
+            RobotProperties properties,
+            SchedulerOperationTracker operations) {
         this.dispatchService = dispatchService;
         this.orchestrator = orchestrator;
         this.runs = runs;
         this.properties = properties;
+        this.operations = operations;
     }
 
     @Scheduled(fixedDelayString = "${app.robots.poll-interval-ms:15000}")
     public void poll() {
-        if (!properties.isAutomationEnabled()) {
-            return;
-        }
-        startDueRuns();
-        reconcileActiveRuns();
+        operations.run(SchedulerOperationTracker.ROBOT_AUTOMATION, () -> {
+            if (!properties.isAutomationEnabled()) return SchedulerOperationTracker.Outcome.NONE;
+            int started = startDueRuns();
+            int reconciled = reconcileActiveRuns();
+            return new SchedulerOperationTracker.Outcome(started + reconciled, started + reconciled);
+        });
     }
 
-    private void startDueRuns() {
+    private int startDueRuns() {
         int started = 0;
         int batchSize = Math.max(1, properties.getDispatchBatchSize());
         while (started < batchSize) {
@@ -67,16 +72,21 @@ public class RobotAutomationScheduler {
             }
             started++;
         }
+        return started;
     }
 
-    private void reconcileActiveRuns() {
+    private int reconcileActiveRuns() {
         int limit = Math.max(1, properties.getReconciliationBatchSize());
-        for (java.util.UUID runId : runs.findNonTerminalIds(limit)) {
+        var ids = runs.findNonTerminalIds(limit);
+        int reconciled = 0;
+        for (java.util.UUID runId : ids) {
             try {
                 orchestrator.reconcileOne(runId);
+                reconciled++;
             } catch (RuntimeException ex) {
                 log.error("Failed to reconcile robot run {}", runId, ex);
             }
         }
+        return reconciled;
     }
 }

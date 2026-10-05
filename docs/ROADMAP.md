@@ -468,3 +468,11 @@ V3 adds deterministic transcript-semantic reranking over V2 windows, immutable t
 - `GET /api/robots/{id}/adaptive-lifecycle` is workspace-scoped, bounded and side-effect-free. It exposes ordered reasons, evidence and memory summaries, next action, and explicit human-versus-existing-automation ownership; it has no command or generic status mutation API.
 - The Robot detail page adds a responsive, accessible eight-stage lifecycle timeline. Existing mutation paths, approvals, authorizations, guardrails, Apply and rollback remain authoritative and unchanged.
 - No V44 migration or lifecycle snapshot table is added because the state is reconstructable from durable source facts. Dedicated lifecycle history/reconciliation, automatic rollback, broader factors and Phase 17P remain out of scope.
+
+### Phase 17P — Production readiness, reliability and recovery (implemented)
+
+- V44 adds PostgreSQL-backed Spring Session with secure session-id rotation, shared replica authentication, framework expiry cleanup and deliberate session invalidation during restore. Existing business-domain history remains unchanged.
+- Separate liveness/readiness probes, bounded database/storage timeouts, graceful API/Worker shutdown, retry-safe nginx failover and database-time Job leases make dependency outages, replica loss and Worker crashes observable and recoverable.
+- A workspace-scoped operations endpoint inventories ten scheduled/on-demand operations, their class-A multi-replica safety mechanism, batch bounds and per-instance execution status, plus dependency, Worker and Job summaries.
+- Versioned PostgreSQL backup/restore scripts and `docs/OPERATIONS.md` define recovery verification. MinIO remains private and requires an independent object-backup policy; sessions are never restored.
+- No scheduler redesign, Kubernetes manifests, full observability platform, automatic disaster-recovery promotion, multi-region deployment or Phase 17Q work is included.

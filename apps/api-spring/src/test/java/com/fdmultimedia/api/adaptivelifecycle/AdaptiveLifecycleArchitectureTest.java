@@ -46,9 +46,14 @@ class AdaptiveLifecycleArchitectureTest {
                 .doesNotContain("Repository").doesNotContain("Service");
     }
 
-    @Test void noMigrationWasAddedForAReconstructableReadModel() throws IOException {
+    @Test void noMigrationPersistsTheReconstructableReadModel() throws IOException {
         try (Stream<Path> migrations = Files.list(Path.of("src/main/resources/db/migration"))) {
-            assertThat(migrations.map(p -> p.getFileName().toString())).noneMatch(n -> n.startsWith("V44__"));
+            for (Path migration : migrations.filter(p -> p.toString().endsWith(".sql")).toList()) {
+                String sql = read(migration).toLowerCase();
+                assertThat(sql).as(migration.getFileName().toString())
+                        .doesNotContain("adaptive_lifecycle")
+                        .doesNotContain("robot_adaptive_lifecycle");
+            }
         }
     }
 }

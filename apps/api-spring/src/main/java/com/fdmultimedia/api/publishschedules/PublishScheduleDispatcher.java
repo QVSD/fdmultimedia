@@ -1,5 +1,6 @@
 package com.fdmultimedia.api.publishschedules;
 
+import com.fdmultimedia.api.shared.operations.SchedulerOperationTracker;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -32,16 +33,23 @@ public class PublishScheduleDispatcher {
 
     private final PublishScheduleDispatchService dispatchService;
     private final PublishScheduleProperties properties;
+    private final SchedulerOperationTracker operations;
 
-    public PublishScheduleDispatcher(PublishScheduleDispatchService dispatchService, PublishScheduleProperties properties) {
+    public PublishScheduleDispatcher(PublishScheduleDispatchService dispatchService, PublishScheduleProperties properties,
+            SchedulerOperationTracker operations) {
         this.dispatchService = dispatchService;
         this.properties = properties;
+        this.operations = operations;
     }
 
     @Scheduled(fixedDelayString = "${app.publishing.schedule.poll-interval-ms:15000}")
     public void pollAndDispatch() {
+        operations.run(SchedulerOperationTracker.PUBLISH_SCHEDULE, this::dispatchBatch);
+    }
+
+    private SchedulerOperationTracker.Outcome dispatchBatch() {
         if (!properties.isEnabled()) {
-            return;
+            return SchedulerOperationTracker.Outcome.NONE;
         }
         int processed = 0;
         int batchSize = Math.max(1, properties.getDispatchBatchSize());
@@ -58,5 +66,6 @@ public class PublishScheduleDispatcher {
             }
             processed++;
         }
+        return new SchedulerOperationTracker.Outcome(processed, processed);
     }
 }

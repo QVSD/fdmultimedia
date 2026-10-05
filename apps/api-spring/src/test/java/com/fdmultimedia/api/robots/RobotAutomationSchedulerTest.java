@@ -1,5 +1,7 @@
 package com.fdmultimedia.api.robots;
 
+import com.fdmultimedia.api.shared.operations.SchedulerOperationTracker;
+import java.time.Clock;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -17,7 +19,8 @@ class RobotAutomationSchedulerTest {
     private final RobotRunOrchestrator orchestrator = mock(RobotRunOrchestrator.class);
     private final RobotRunRepository runs = mock(RobotRunRepository.class);
     private final RobotProperties properties = new RobotProperties();
-    private final RobotAutomationScheduler scheduler = new RobotAutomationScheduler(dispatchService, orchestrator, runs, properties);
+    private final RobotAutomationScheduler scheduler = new RobotAutomationScheduler(
+            dispatchService, orchestrator, runs, properties, new SchedulerOperationTracker(Clock.systemUTC()));
 
     @Test
     void pollDoesNothingWhenAutomationDisabled() {

@@ -6,6 +6,7 @@ import com.fdmultimedia.api.auth.security.AuthenticatedUser;
 import com.fdmultimedia.api.users.EmailNormalizer;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import jakarta.servlet.http.HttpSession;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -57,7 +58,13 @@ public class AuthController {
             SecurityContext context = SecurityContextHolder.createEmptyContext();
             context.setAuthentication(authentication);
             SecurityContextHolder.setContext(context);
-            servletRequest.getSession(true).setAttribute(
+            HttpSession session = servletRequest.getSession(false);
+            if (session == null) {
+                session = servletRequest.getSession(true);
+            } else {
+                servletRequest.changeSessionId();
+            }
+            session.setAttribute(
                     HttpSessionSecurityContextRepository.SPRING_SECURITY_CONTEXT_KEY,
                     context);
 

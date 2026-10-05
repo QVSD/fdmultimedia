@@ -3,6 +3,7 @@ package com.fdmultimedia.api.optimization;
 import com.fdmultimedia.api.analytics.CampaignPerformanceReviewCreatedEvent;
 import com.fdmultimedia.api.robotchanges.*;
 import com.fdmultimedia.api.robotchanges.RobotAdaptivePolicyModels.ProposalAutomationMode;
+import com.fdmultimedia.api.shared.operations.SchedulerOperationTracker;
 import java.util.*;
 import org.slf4j.*;
 import org.hibernate.exception.ConstraintViolationException;
@@ -16,21 +17,26 @@ public class AutonomousProposalReconciler {
     public static final int BATCH_LIMIT=100;
     private static final Logger log=LoggerFactory.getLogger(AutonomousProposalReconciler.class);
     private final RobotAdaptivePolicyRepository policies;private final AutonomousProposalService service;
-    public AutonomousProposalReconciler(RobotAdaptivePolicyRepository policies,AutonomousProposalService service){this.policies=policies;this.service=service;}
+    private final SchedulerOperationTracker operations;
+    public AutonomousProposalReconciler(RobotAdaptivePolicyRepository policies,AutonomousProposalService service,
+            SchedulerOperationTracker operations){this.policies=policies;this.service=service;this.operations=operations;}
 
     @TransactionalEventListener(phase=TransactionPhase.AFTER_COMMIT)
     public void afterReview(CampaignPerformanceReviewCreatedEvent event){evaluate(event.robotId(),"REVIEW_CREATED");}
 
     @Scheduled(fixedDelayString="${app.autonomous-proposals.reconcile-interval-ms:3600000}",
             initialDelayString="${app.autonomous-proposals.reconcile-initial-delay-ms:60000}")
-    public void reconcile(){List<RobotAdaptivePolicy> rows=policies.findByEnabledTrueAndProposalAutomationModeOrderByUpdatedAtAsc(
+    public void reconcile(){operations.run(SchedulerOperationTracker.AUTONOMOUS_PROPOSALS,this::reconcileBatch);}
+    private SchedulerOperationTracker.Outcome reconcileBatch(){List<RobotAdaptivePolicy> rows=policies.findByEnabledTrueAndProposalAutomationModeOrderByUpdatedAtAsc(
                 ProposalAutomationMode.AUTO_PROPOSE,PageRequest.of(0,BATCH_LIMIT));
-        for(RobotAdaptivePolicy policy:rows)evaluate(policy.getRobotId(),"RECONCILIATION");}
+        long results=rows.stream().filter(policy->evaluate(policy.getRobotId(),"RECONCILIATION")).count();
+        return new SchedulerOperationTracker.Outcome(rows.size(),results);}
 
-    private void evaluate(java.util.UUID robotId,String trigger){try{var result=service.evaluateAndCreate(robotId,trigger);
-        log.info("Autonomous proposal evaluation robotId={} eligible={} reasons={} proposalId={}",robotId,result.eligible(),result.reasons(),result.existingProposalId());}
+    private boolean evaluate(java.util.UUID robotId,String trigger){try{var result=service.evaluateAndCreate(robotId,trigger);
+        log.info("Autonomous proposal evaluation robotId={} eligible={} reasons={} proposalId={}",robotId,result.eligible(),result.reasons(),result.existingProposalId());
+        return result.existingProposalId()!=null;}
         catch(RuntimeException ex){log.warn("Autonomous proposal evaluation failed robotId={} type={} code={} site={}",robotId,
-                ex.getClass().getSimpleName(),failureCode(ex),failureSite(ex));}}
+                ex.getClass().getSimpleName(),failureCode(ex),failureSite(ex));return false;}}
 
     static String failureCode(Throwable failure){
         Throwable deepest=failure;

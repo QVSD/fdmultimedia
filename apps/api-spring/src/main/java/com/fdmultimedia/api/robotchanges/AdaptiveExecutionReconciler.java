@@ -1,5 +1,6 @@
 package com.fdmultimedia.api.robotchanges;
 
+import com.fdmultimedia.api.shared.operations.SchedulerOperationTracker;
 import com.fdmultimedia.api.robotchanges.AdaptiveExecutionModels.AttemptResult;
 import com.fdmultimedia.api.robotchanges.AdaptiveExecutionModels.AttemptTrigger;
 import java.util.List;
@@ -25,9 +26,11 @@ public class AdaptiveExecutionReconciler {
 
     private final RobotAdaptiveExecutionAuthorizationRepository authorizations;
     private final AdaptiveExecutionExecutor executor;
+    private final SchedulerOperationTracker operations;
 
-    public AdaptiveExecutionReconciler(RobotAdaptiveExecutionAuthorizationRepository authorizations, AdaptiveExecutionExecutor executor) {
-        this.authorizations = authorizations; this.executor = executor;
+    public AdaptiveExecutionReconciler(RobotAdaptiveExecutionAuthorizationRepository authorizations,
+            AdaptiveExecutionExecutor executor, SchedulerOperationTracker operations) {
+        this.authorizations = authorizations; this.executor = executor; this.operations = operations;
     }
 
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
@@ -38,16 +41,23 @@ public class AdaptiveExecutionReconciler {
     @Scheduled(fixedDelayString = "${app.adaptive-execution.reconcile-interval-ms:900000}",
             initialDelayString = "${app.adaptive-execution.reconcile-initial-delay-ms:60000}")
     public void reconcile() {
-        List<UUID> ids = authorizations.findActiveIdsForReconciliation(PageRequest.of(0, BATCH_LIMIT));
-        for (UUID id : ids) run(id, AttemptTrigger.RECONCILIATION);
+        operations.run(SchedulerOperationTracker.ADAPTIVE_EXECUTION, this::reconcileBatch);
     }
 
-    private void run(UUID authorizationId, AttemptTrigger trigger) {
+    private SchedulerOperationTracker.Outcome reconcileBatch() {
+        List<UUID> ids = authorizations.findActiveIdsForReconciliation(PageRequest.of(0, BATCH_LIMIT));
+        long results = ids.stream().filter(id -> run(id, AttemptTrigger.RECONCILIATION)).count();
+        return new SchedulerOperationTracker.Outcome(ids.size(), results);
+    }
+
+    private boolean run(UUID authorizationId, AttemptTrigger trigger) {
         try {
             AttemptResult result = executor.attempt(authorizationId, trigger);
             if (result != null) log.info("Adaptive execution attempt authorizationId={} trigger={} result={}", authorizationId, trigger, result);
+            return result != null;
         } catch (RuntimeException ex) {
             log.warn("Adaptive execution attempt failed authorizationId={} type={}", authorizationId, ex.getClass().getSimpleName());
+            return false;
         }
     }
 }
