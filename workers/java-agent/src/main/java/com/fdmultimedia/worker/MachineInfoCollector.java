@@ -5,7 +5,20 @@ import java.lang.management.ManagementFactory;
 
 final class MachineInfoCollector {
 
-    private static final String AGENT_VERSION = "fdm-worker-java/0.1.0";
+    private static final String AGENT_VERSION = "fdm-worker-java/" + releaseVersion();
+
+    /** The release version is filtered into worker-version.properties at build time so it can never drift from the pom. */
+    static String releaseVersion() {
+        try (java.io.InputStream in = MachineInfoCollector.class.getResourceAsStream("/worker-version.properties")) {
+            if (in == null) return "unknown";
+            java.util.Properties properties = new java.util.Properties();
+            properties.load(in);
+            String version = properties.getProperty("version", "unknown").trim();
+            return version.startsWith("${") ? "unknown" : version;
+        } catch (java.io.IOException ex) {
+            return "unknown";
+        }
+    }
 
     MachineInfo collect(String machineIdentifier, String workerName) {
         java.lang.management.OperatingSystemMXBean mxBean = ManagementFactory.getOperatingSystemMXBean();

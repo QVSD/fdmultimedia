@@ -2,6 +2,7 @@
 .env
 .env.*
 !.env.example
+!.env.pilot.example
 
 # Java / Maven
 target/
@@ -31,3 +32,7 @@ docker-compose.override.yml
 backups/
 *.dump
 *.backup
+
+# Pilot deployment secrets and generated configuration (never commit)
+.env.pilot
+secrets/

@@ -20,6 +20,7 @@ import { ContentSuggestionsService } from '../../core/content-suggestions/conten
 import { ContentSuggestionSummary, SuggestionLanguage, SuggestionTone } from '../../core/content-suggestions/content-suggestion.models';
 import { PersonasService } from '../../core/personas/personas.service';
 import { PersonaSummary } from '../../core/personas/persona.models';
+import { localDateTimeToInstant } from '../../core/scheduling/local-instant';
 
 type LoadState = 'loading' | 'ready' | 'error';
 
@@ -1245,17 +1246,8 @@ export class Content implements OnInit, OnDestroy {
       });
   }
 
-  /** datetime-local values have no timezone; the browser's Date parses them as
-   *  local time, and toISOString() converts that to an unambiguous UTC instant. */
   private toIsoInstant(localDateTime: string): string | null {
-    if (!localDateTime) {
-      return null;
-    }
-    const parsed = new Date(localDateTime);
-    if (Number.isNaN(parsed.getTime())) {
-      return null;
-    }
-    return parsed.toISOString();
+    return localDateTimeToInstant(localDateTime);
   }
 
   protected upcomingSchedules(): PublishScheduleSummary[] {

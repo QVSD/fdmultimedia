@@ -44,7 +44,7 @@ function overview(overrides: Partial<OpsOverview> = {}): OpsOverview {
     engineVersion: 'OPERATIONS_OVERVIEW_V1',
     observedAt: NOW,
     overallStatus: 'HEALTHY',
-    api: { status: 'HEALTHY', instance: 'api-1', uptimeSeconds: 3700, liveness: 'UP', readiness: 'UP' },
+    api: { status: 'HEALTHY', instance: 'api-1', uptimeSeconds: 3700, liveness: 'UP', readiness: 'UP', version: '0.1.0-rc1', commit: 'abc123def456', builtAt: NOW },
     dependencies: [
       { name: 'POSTGRES', status: 'HEALTHY', detail: 'UP', configured: true, observedAt: NOW, ageSeconds: 1, cached: false, probeMillis: 2 },
       { name: 'MINIO', status: 'HEALTHY', detail: 'UP', configured: true, observedAt: NOW, ageSeconds: 1, cached: false, probeMillis: 4 },

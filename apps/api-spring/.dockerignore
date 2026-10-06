@@ -1,6 +1,12 @@
 target
-.mvn
+.mvn/wrapper/maven-wrapper.jar
 mvnw
 mvnw.cmd
 *.iml
 .idea
+.git
+.env
+.env.*
+*.log
+*.dump
+*.jar

@@ -160,7 +160,7 @@
                       {{ scheduleStatusLabel(schedule.status) }}
                     </span>
                     <span class="content__badge">
-                      {{ schedule.platform }}{{ schedule.platform === 'TEST' ? ' (non-real)' : '' }}
+                      {{ schedule.platform }}{{ schedule.platform === 'TEST' ? ' (non-real)' : ' (LIVE)' }}
                     </span>
                     <span class="content__muted">{{ schedule.draftTitle || schedule.mediaAssetFilename || 'Untitled draft' }}</span>
                     <span class="content__muted">{{ schedule.socialAccountDisplayName }}</span>
@@ -486,7 +486,7 @@
                                   {{ publicationStatusLabel(publication.status) }}
                                 </span>
                                 <span class="content__badge">
-                                  {{ publication.platform }}{{ publication.platform === 'TEST' ? ' (non-real)' : '' }}
+                                  {{ publication.platform }}{{ publication.platform === 'TEST' ? ' (non-real)' : ' (LIVE)' }}
                                 </span>
                                 <span class="content__muted">{{ publication.socialAccountDisplayName }}</span>
                                 <span class="content__muted">{{ publication.createdAt | date:'medium' }}</span>
@@ -1013,7 +1013,7 @@
                                 {{ publicationStatusLabel(publication.status) }}
                               </span>
                               <span class="content__badge">
-                                {{ publication.platform }}{{ publication.platform === 'TEST' ? ' (non-real)' : '' }}
+                                {{ publication.platform }}{{ publication.platform === 'TEST' ? ' (non-real)' : ' (LIVE)' }}
                               </span>
                               <span class="content__muted">{{ publication.socialAccountDisplayName }}</span>
                               <span class="content__muted">{{ publication.createdAt | date:'medium' }}</span>

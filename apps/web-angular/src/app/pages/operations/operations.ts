@@ -17,6 +17,7 @@ import {
   SchedulerState,
   WorkerState,
 } from '../../core/operations/operations.models';
+import { environment } from '../../../environments/environment';
 import { OperationsService } from '../../core/operations/operations.service';
 
 export interface Panel<T> {
@@ -66,6 +67,21 @@ export class Operations implements OnInit, OnDestroy {
   protected readonly schedulers = signal<Panel<OpsSchedulersView>>(emptyPanel());
   protected readonly publishing = signal<Panel<OpsPublishingView>>(emptyPanel());
   protected readonly incidents = signal<Panel<OpsIncidentsView>>(emptyPanel());
+
+  protected readonly webVersion = environment.version;
+
+  /** Distinct Worker release versions among registered Workers that were seen recently (offline history is ignored). */
+  protected readonly workerVersions = computed(() => {
+    const rows = this.workers().data?.workers.items ?? [];
+    return [...new Set(rows.filter((w) => w.state !== 'OFFLINE' && w.agentVersion).map((w) => (w.agentVersion as string).replace(/^fdm-worker-java\//, '')))];
+  });
+
+  /** True when every reporting component is built from the same release as this page. */
+  protected readonly versionsConsistent = computed(() => {
+    const api = this.overview().data?.api.version;
+    if (!api) return true;
+    return api === this.webVersion && this.workerVersions().every((v) => v === api);
+  });
 
   protected readonly loading = signal(false);
   protected readonly autoRefresh = signal(true);

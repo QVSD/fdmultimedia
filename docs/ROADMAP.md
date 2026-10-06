@@ -484,3 +484,12 @@ V3 adds deterministic transcript-semantic reranking over V2 windows, immutable t
 - Dependency probes are parallel, bounded (750 ms) and cached (10 s, single-flight), which also fixes the 17P `/api/operations/status` latency with MinIO down.
 - Each incident carries a deterministic suggested action. There is no job retry, no blind publication retry, no restart button, no shell/SQL/secret viewer and no external notification or metrics system.
 - Phase 17R is not started.
+
+### Phase 17R — Production pilot and release candidate v0.1.0-rc1 (implemented)
+
+- Feature freeze: no product feature and no migration (Flyway stays V45). The work is configuration, deployment, security hardening, documentation and proof.
+- `prod` profile fails closed on missing or placeholder configuration, forces secure cookies, adds an Origin check and generic errors; a single idempotent first-run provisioning path creates the first owner, workspace and Worker credential.
+- `docker-compose.pilot.yml` with TLS and loopback edge modes, versioned non-root read-only images, a Worker image with FFmpeg and Whisper, MinIO built from pinned source, a least-privilege storage key and a login rate limit.
+- Release versioning (API, Worker, web) surfaced on the Operations page; `docs/CONFIGURATION.md`, `docs/PILOT_CHECKLIST.md`, `docs/DATA_AND_PRIVACY.md`, `docs/releases/v0.1.0-rc1.md`, operations runbook for upgrade, rollback, backup and restore.
+- Acceptance on a fresh database and bucket with a real video: import, inspection, Whisper transcription, V3 highlights, diversity selection, clip, vertical, draft, Persona, Robot, scheduling and a TEST publication, then incident, Worker, job-recovery, API-restart and rolling-restart drills, a backup restored into a second environment, and a clean-checkout install.
+- Real Instagram/TikTok publishing, Ollama and a public certificate were not exercised. Phase 17S is not started.

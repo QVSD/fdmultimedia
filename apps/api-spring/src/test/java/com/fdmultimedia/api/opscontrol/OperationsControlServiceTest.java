@@ -32,13 +32,19 @@ class OperationsControlServiceTest {
     private OperationsControlService service;
     private DependencyHealthService.ProbeResult minio = new DependencyHealthService.ProbeResult(ComponentStatus.HEALTHY, "UP");
 
+    private static com.fdmultimedia.api.shared.operations.ReleaseInfo release() {
+        @SuppressWarnings("unchecked")
+        org.springframework.beans.factory.ObjectProvider<org.springframework.boot.info.BuildProperties> none = org.mockito.Mockito.mock(org.springframework.beans.factory.ObjectProvider.class);
+        return new com.fdmultimedia.api.shared.operations.ReleaseInfo(none, "0123456789abcdef");
+    }
+
     private OperationsControlService build() {
         DependencyHealthService.Probe postgres = probe("POSTGRES", () -> new DependencyHealthService.ProbeResult(ComponentStatus.HEALTHY, "UP"));
         DependencyHealthService.Probe storage = probe("MINIO", () -> minio);
         dependencies = new DependencyHealthService(List.of(postgres, storage), properties, Clock.systemUTC());
         var snapshots = new OpsSnapshotService(store, dependencies, properties, new WorkerProperties(), tracker,
                 new SchedulerCadencePolicy(new MockEnvironment()), clock);
-        service = new OperationsControlService(snapshots, new OpsIncidentService(store, clock), store, properties, tracker, new ApiInstanceIdentity(), clock);
+        service = new OperationsControlService(snapshots, new OpsIncidentService(store, clock), store, properties, tracker, new ApiInstanceIdentity(), release(), clock);
         return service;
     }
 
@@ -67,6 +73,7 @@ class OperationsControlServiceTest {
         healthyFleet();
         Overview o = build().overview(WS);
         assertThat(o.engineVersion()).isEqualTo("OPERATIONS_OVERVIEW_V1");
+        assertThat(o.api().commit()).isEqualTo("0123456789ab");
         assertThat(o.overallStatus()).isEqualTo(OverallStatus.HEALTHY);
         assertThat(o.topIncidents()).isEmpty();
         assertThat(o.workers().online()).isEqualTo(1);

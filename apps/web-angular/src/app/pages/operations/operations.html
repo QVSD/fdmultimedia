@@ -74,6 +74,11 @@
         <p class="card__foot">
           API {{ o.api.instance }} · up {{ duration(o.api.uptimeSeconds) }} · readiness {{ o.api.readiness }}
         </p>
+        <p class="card__foot" data-testid="release-versions">
+          Release: API {{ o.api.version }} ({{ o.api.commit }}) · Web {{ webVersion }}
+          @if (workerVersions().length > 0) { · Workers {{ workerVersions().join(', ') }} }
+          @if (!versionsConsistent()) { <strong> · Versions differ: finish the rollout.</strong> }
+        </p>
       </article>
 
       <article class="card" aria-labelledby="ops-workers">

@@ -1,0 +1,15 @@
+.git
+.claude
+.env
+.env.*
+!.env.example
+!.env.pilot.example
+secrets
+backups
+*.dump
+*.log
+*.pem
+**/node_modules
+**/target
+**/dist
+**/.angular

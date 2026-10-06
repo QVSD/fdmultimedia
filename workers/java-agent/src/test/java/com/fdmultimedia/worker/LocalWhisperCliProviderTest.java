@@ -104,6 +104,50 @@ class LocalWhisperCliProviderTest {
         assertFalse(ex.getMessage().isBlank());
     }
 
+    @Test
+    void clampsWhisperWindowsThatRunPastTheEndOfTheMedia() throws Exception {
+        LocalWhisperCliProvider provider = new LocalWhisperCliProvider("whisper", "base", Duration.ofSeconds(1));
+        // Real openai-whisper output for a 52.2 s video: the final window ends at 60.0 s.
+        TranscriptionResult result = provider.parse("""
+                {"language":"en","segments":[
+                  {"start":0.0,"end":10.0,"text":" First line.","avg_logprob":-0.5},
+                  {"start":20.0,"end":44.0,"text":" Second line.","avg_logprob":-0.5},
+                  {"start":50.0,"end":60.0,"text":" Last line.","avg_logprob":-0.7}]}
+                """, authorization(52_209, 10, 100, 1_000));
+
+        assertEquals(3, result.segments().size());
+        assertEquals(52_209L, result.segments().get(2).endMs());
+        assertEquals(50_000L, result.segments().get(2).startMs());
+        assertTrue(result.segments().stream().allMatch(segment -> segment.endMs() <= 52_209L && segment.endMs() > segment.startMs()));
+    }
+
+    @Test
+    void dropsSegmentsThatStartAfterTheMediaEndsAndFailsWhenNothingRemains() throws Exception {
+        LocalWhisperCliProvider provider = new LocalWhisperCliProvider("whisper", "base", Duration.ofSeconds(1));
+        TranscriptionResult result = provider.parse("""
+                {"language":"en","segments":[
+                  {"start":0.0,"end":5.0,"text":" Kept."},
+                  {"start":60.0,"end":70.0,"text":" Beyond the end."}]}
+                """, authorization(52_209, 10, 100, 1_000));
+        assertEquals(1, result.segments().size());
+
+        ImportFailureException ex = assertThrows(ImportFailureException.class, () -> provider.parse("""
+                {"language":"en","segments":[{"start":60.0,"end":70.0,"text":" Only beyond the end."}]}
+                """, authorization(52_209, 10, 100, 1_000)));
+        assertEquals("TRANSCRIPTION_EMPTY", ex.code());
+    }
+
+    @Test
+    void clampsWhisperCppOffsetsToo() throws Exception {
+        LocalWhisperCliProvider provider = new LocalWhisperCliProvider("whisper-cli", "ggml-base.bin", Duration.ofSeconds(1));
+        TranscriptionResult result = provider.parse("""
+                {"result":{"language":"en"},"transcription":[
+                  {"offsets":{"from":0,"to":4000},"text":" One."},
+                  {"offsets":{"from":50000,"to":61000},"text":" Two."}]}
+                """, authorization(52_209, 10, 100, 1_000));
+        assertEquals(52_209L, result.segments().get(1).endMs());
+    }
+
     private TranscriptionAuthorization authorization(long durationMs, int maxSegments, int maxSegmentText, int maxTotalText) {
         return new TranscriptionAuthorization(
                 UUID.randomUUID(),

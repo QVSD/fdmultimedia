@@ -429,7 +429,7 @@ cd workers/java-agent
 ../../apps/api-spring/mvnw -f pom.xml package
 FDM_API_BASE_URL=http://localhost:8080/api \
 FDM_WORKER_TOKEN=11111111-1111-4111-8111-111111111111.dev_worker_secret_change_me \
-java -jar target/worker-agent-0.1.0-SNAPSHOT.jar
+java -jar target/worker-agent-0.1.0-rc1.jar
 ```
 
 On Windows PowerShell, run Maven through `apps\api-spring\mvnw.cmd` and set
@@ -829,3 +829,15 @@ Phase 17Q adds a bounded, read-mostly **Operations** page for workspace operator
 `OPERATIONS_INCIDENTS_V1` derives incidents with stable keys such as `DEPENDENCY:MINIO:UNAVAILABLE`, `WORKERS:NONE_ONLINE`, `JOBS:BACKLOG`, `SCHEDULER:publish-schedule-dispatch:STALE`, `PUBLISHING:OUTCOME_UNKNOWN` and `AUTOMATION:ROLLBACK:{recommendationId}`. One active row exists per workspace and key, first-observed time survives restarts, a condition that clears resolves its incident automatically, and an acknowledgement means "an operator has seen this", not "fixed". Each incident carries a deterministic suggested action. V45 adds `operations_scheduler_status` (each replica's latest scheduler outcome, aggregated into one logical row) and `operations_incidents`; no business table changes. Thresholds (backlog warn 5 min / critical 30 min, probe timeout, cache TTL, stale multiplier) are bounded `app.operations.*` properties. The Angular page refreshes every 15 to 30 seconds while visible, pauses while the tab is hidden, backs off while the overview is failing, shows `Status temporarily unavailable` per panel and the age of stale data, and is usable at 375 px.
 
 The 17P gap where `/api/operations/status` took about 4.3 s with MinIO down is fixed: storage state now comes from the same bounded cached probe (p50 about 15 to 22 ms normally; with MinIO down a refresh that lands on an expired cache entry waits for the 750 ms probe bound, so the worst of 75 consecutive calls was about 0.8 s and none exceeded 1 s). See [docs/OPERATIONS.md](docs/OPERATIONS.md#operations-control-plane) for the incident catalog and runbook. Phase 17R is not started.
+
+## v0.1.0-rc1: production pilot
+
+The repository now ships a release candidate for a controlled production pilot. Start with [docs/PILOT_CHECKLIST.md](docs/PILOT_CHECKLIST.md); the deployment is `docker-compose.pilot.yml` with `.env.pilot` and `secrets/` created by `scripts/pilot-init.sh`, configured as described in [docs/CONFIGURATION.md](docs/CONFIGURATION.md), operated with [docs/OPERATIONS.md](docs/OPERATIONS.md), and described honestly in [docs/releases/v0.1.0-rc1.md](docs/releases/v0.1.0-rc1.md) and [docs/DATA_AND_PRIVACY.md](docs/DATA_AND_PRIVACY.md).
+
+```
+scripts/pilot-init.sh localhost loopback        # evaluate on one machine (plain HTTP on localhost); use <your-host> for TLS
+export FDM_BUILD_COMMIT=$(git rev-parse HEAD)
+docker compose --env-file .env.pilot -f docker-compose.pilot.yml up -d --build
+```
+
+The first owner and workspace are created at first start from `FDM_OWNER_*` and `secrets/owner_password`; there are no default accounts or tokens. The `prod` profile fails closed on missing or placeholder configuration, sets `Secure` cookies and an Origin check, and the edge nginx adds TLS, HSTS, a strict CSP, a login rate limit and a storage proxy for presigned media. Application containers run non-root with read-only filesystems; the Worker image carries FFmpeg and Whisper. Phase 17R added no feature and no migration (Flyway stays V45). Phase 17S is not started.

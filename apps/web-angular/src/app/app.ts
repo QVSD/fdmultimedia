@@ -1,6 +1,7 @@
 import { Component, computed, inject } from '@angular/core';
 import { Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { AuthService } from './core/auth/auth.service';
+import { environment } from '../environments/environment';
 import { isOperator } from './core/auth/operator.guard';
 
 interface NavItem {
@@ -18,6 +19,7 @@ export class App {
   private readonly auth = inject(AuthService);
   private readonly router = inject(Router);
 
+  protected readonly version = environment.version;
   protected readonly user = this.auth.currentUser;
   protected readonly workspace = this.auth.currentWorkspace;
 

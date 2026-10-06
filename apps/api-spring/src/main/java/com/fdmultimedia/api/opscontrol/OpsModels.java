@@ -27,7 +27,8 @@ public final class OpsModels {
     public record Dependency(String name, ComponentStatus status, String detail, boolean configured, Instant observedAt,
             long ageSeconds, boolean cached, Long probeMillis) {}
 
-    public record ApiSection(ComponentStatus status, String instance, long uptimeSeconds, String liveness, String readiness) {}
+    public record ApiSection(ComponentStatus status, String instance, long uptimeSeconds, String liveness, String readiness,
+            String version, String commit, Instant builtAt) {}
 
     // ---- workers ----
 

@@ -68,6 +68,24 @@ server:
 spring.lifecycle.timeout-per-shutdown-phase: 30s
 
 app:
+  # Canonical external origin of the application (scheme://host[:port], no path). Required in the prod profile; used to reject
+  # state-changing browser requests that claim a different Origin.
+  public-origin: ${APP_PUBLIC_ORIGIN:}
+  # First-run provisioning (all profiles except dev). Idempotent; see docs/CONFIGURATION.md.
+  provisioning:
+    owner-email: ${FDM_OWNER_EMAIL:}
+    owner-display-name: ${FDM_OWNER_NAME:}
+    owner-password: ${FDM_OWNER_PASSWORD:}
+    owner-password-file: ${FDM_OWNER_PASSWORD_FILE:}
+    workspace-name: ${FDM_WORKSPACE_NAME:}
+    workspace-slug: ${FDM_WORKSPACE_SLUG:}
+    worker-credential-id: ${FDM_WORKER_CREDENTIAL_ID:}
+    worker-credential-name: ${FDM_WORKER_CREDENTIAL_NAME:}
+    worker-credential-secret: ${FDM_WORKER_CREDENTIAL_SECRET:}
+    worker-credential-secret-file: ${FDM_WORKER_CREDENTIAL_SECRET_FILE:}
+  release:
+    # Set by the image build (--build-arg APP_BUILD_COMMIT); "unknown" for a plain local build.
+    commit: ${APP_BUILD_COMMIT:unknown}
   workers:
     heartbeat-interval: ${WORKER_HEARTBEAT_INTERVAL:10s}
     offline-threshold: ${WORKER_OFFLINE_THRESHOLD:30s}

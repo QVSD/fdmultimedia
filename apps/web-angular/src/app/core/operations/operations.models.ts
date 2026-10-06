@@ -22,6 +22,9 @@ export interface OpsApiSection {
   uptimeSeconds: number;
   liveness: string;
   readiness: string;
+  version: string;
+  commit: string;
+  builtAt: string | null;
 }
 
 export interface OpsWorkersSection {

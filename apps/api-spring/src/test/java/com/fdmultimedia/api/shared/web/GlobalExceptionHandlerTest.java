@@ -30,8 +30,28 @@ class GlobalExceptionHandlerTest {
                 .andExpect(content().string(not(containsString("database password"))));
     }
 
+    @Test
+    void unknownPathsWrongMethodsAndUnreadableBodiesAreClientErrorsNotServerFaults() throws Exception {
+        mockMvc.perform(get("/api/does-not-exist")).andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value("Not Found"));
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete("/api/failing"))
+                .andExpect(status().isMethodNotAllowed());
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/echo")
+                        .contentType("application/json").content("{not json"))
+                .andExpect(status().isBadRequest()).andExpect(content().string(not(containsString("not json"))));
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/echo")
+                        .contentType("text/plain").content("x"))
+                .andExpect(status().isUnsupportedMediaType());
+    }
+
     @RestController
     static class FailingController {
+
+        @org.springframework.web.bind.annotation.PostMapping(value = "/api/echo", consumes = "application/json")
+        java.util.Map<String, String> echo(@org.springframework.web.bind.annotation.RequestBody java.util.Map<String, String> body) {
+            return body;
+        }
+
 
         @GetMapping("/api/failing")
         void failing() throws ServletException {

@@ -142,6 +142,19 @@ final class LocalWhisperCliProvider implements TranscriptionProvider {
             for (JsonNode node : segmentsNode) {
                 long startMs = millis(node, "start");
                 long endMs = millis(node, "end");
+                // Whisper works in fixed windows, so its last segment can end past the real end of the media (observed: a 52.2 s
+                // video produced a segment ending at 60.0 s) and can even start after it. The API rightly rejects segments beyond the
+                // asset duration, so the provider output is normalised to the media here instead of failing the whole transcription.
+                long durationMs = authorization.sourceDurationMs();
+                if (durationMs > 0) {
+                    if (startMs >= durationMs) {
+                        continue;
+                    }
+                    endMs = Math.min(endMs, durationMs);
+                }
+                if (endMs <= startMs) {
+                    continue;
+                }
                 String text = text(node, "text");
                 if (text == null) {
                     text = "";
@@ -179,6 +192,16 @@ final class LocalWhisperCliProvider implements TranscriptionProvider {
             }
             long startMs = offsets.path("from").longValue();
             long endMs = offsets.path("to").longValue();
+            long durationMs = authorization.sourceDurationMs();
+            if (durationMs > 0) {
+                if (startMs >= durationMs) {
+                    continue;
+                }
+                endMs = Math.min(endMs, durationMs);
+            }
+            if (endMs <= startMs) {
+                continue;
+            }
             String segmentText = text(node, "text");
             if (segmentText == null) {
                 segmentText = "";

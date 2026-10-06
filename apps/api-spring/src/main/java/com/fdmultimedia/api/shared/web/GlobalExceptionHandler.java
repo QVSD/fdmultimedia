@@ -48,6 +48,28 @@ public class GlobalExceptionHandler {
         return ResponseEntity.badRequest().body(body);
     }
 
+    /**
+     * Framework-detected client errors (unknown path, wrong method or media type, unreadable body, missing parameter) are 4xx answers,
+     * never logged server faults. The message is the status text only: nothing from the request is echoed back.
+     */
+    @ExceptionHandler({
+            org.springframework.web.servlet.resource.NoResourceFoundException.class,
+            org.springframework.web.servlet.NoHandlerFoundException.class,
+            org.springframework.web.HttpRequestMethodNotSupportedException.class,
+            org.springframework.web.HttpMediaTypeNotSupportedException.class,
+            org.springframework.web.HttpMediaTypeNotAcceptableException.class,
+            org.springframework.web.bind.MissingServletRequestParameterException.class,
+            org.springframework.web.bind.ServletRequestBindingException.class,
+            org.springframework.http.converter.HttpMessageNotReadableException.class})
+    public ResponseEntity<ApiError> handleClientError(Exception ex, HttpServletRequest request) {
+        HttpStatus status = ex instanceof org.springframework.web.ErrorResponse response
+                ? HttpStatus.valueOf(response.getStatusCode().value())
+                : HttpStatus.BAD_REQUEST;
+        log.debug("Client error {} for {} type={}", status.value(), request.getRequestURI(), ex.getClass().getSimpleName());
+        ApiError body = ApiError.of(status.value(), status.getReasonPhrase(), status.getReasonPhrase(), request.getRequestURI());
+        return ResponseEntity.status(status).body(body);
+    }
+
     @ExceptionHandler(ResponseStatusException.class)
     public ResponseEntity<ApiError> handleResponseStatus(ResponseStatusException ex, HttpServletRequest request) {
         HttpStatus status = HttpStatus.valueOf(ex.getStatusCode().value());

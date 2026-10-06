@@ -204,3 +204,65 @@ Acceptance observations (Docker Compose, Phase 17Q, one and four API replicas be
 - Migration: V44 to V45 on a data-bearing database restored from a V44 dump applied V45 once and left business row counts unchanged; a fresh database applied V1 to V45; both V45 tables, six new indexes and the lifecycle, acknowledgement, severity, state and duration constraints, the one-active-key index and the workspace cascade were verified against the database.
 
 The control plane does not provide PagerDuty, e-mail, SMS or Slack notification, Prometheus or Grafana export, tracing, Kubernetes integration, restart buttons, shell, SQL console, environment or secret viewers, arbitrary Job mutation, blind publication retry or any new adaptive behavior. Phase 17R is not started.
+
+## Pilot Deployment (v0.1.0-rc1)
+
+The pilot stack is `docker-compose.pilot.yml` (project name `fdmpilot`), configured by `.env.pilot` and `secrets/` (see `docs/CONFIGURATION.md`; checklist in `docs/PILOT_CHECKLIST.md`). It is independent of the development stack. Replace the compose invocation prefix below with `docker compose --env-file .env.pilot -f docker-compose.pilot.yml`.
+
+| Task | Command |
+| --- | --- |
+| Create configuration and secrets | `scripts/pilot-init.sh <host>` (or `<host> loopback`) |
+| Build immutable images (`fdm/*:0.1.0-rc1`) | `... build` (export `FDM_BUILD_COMMIT=$(git rev-parse HEAD)` first) |
+| Start / status / stop | `... up -d` / `... ps` / `... down` (never `down -v` unless you mean to delete the data) |
+| Two API replicas | `... up -d --scale api=2` (nginx re-resolves replica addresses every 5 seconds; no nginx restart is needed) |
+| Rolling API restart | `docker restart <api container>` one at a time, waiting for health between them |
+| Logs | `... logs -f api worker nginx` |
+| A second environment on the same host (for example a restore rehearsal) | add `-p <other project name>` to every command and use different ports and a different `PILOT_SECRETS_DIR` (the default project name `fdmpilot` owns the default volumes) |
+
+The edge nginx is the only published component (plus MinIO's S3 port on the loopback interface). The stack refuses to start without its secrets, and the API refuses to start with development placeholders (`docs/CONFIGURATION.md`, "Fail-closed startup").
+
+### Release upgrade, failure and rollback
+
+1. **Back up first** (below): PostgreSQL dump and a copy of the bucket, both from the same moment, plus `.env.pilot` and `secrets/` kept separately.
+2. Record the running release (`Operations` page, "Release" line) and the new release.
+3. `git fetch && git checkout <release tag>`, export `FDM_BUILD_COMMIT`, `... build`, `... up -d`. Flyway applies new migrations once, under its own lock, even with several replicas.
+4. Verify: `... ps` all healthy, API log `Started ApiSpringApplication` with no `Invalid production configuration`, Operations shows the expected API, Web and Worker versions and `Healthy`, sign in, open Content, run the incident drill from the checklist if the release touched deployment.
+5. **If it fails:** stop rolling forward, leave the database and volumes untouched, read `... logs api` and the Operations page, and decide. A failed start caused by configuration needs no rollback (fix `.env.pilot`). A bad release is rolled back by checking out the previous tag and rebuilding.
+
+**Is application rollback safe after a migration?** Flyway records every applied migration. An older application that does not contain a migration already applied to the database refuses to start (Flyway's validation fails on an applied but unresolved migration). Therefore:
+
+- `v0.1.0-rc1` to the Phase 17Q commit `10a6f10` (the previous release): **safe.** v0.1.0-rc1 adds no migration; the latest migration is V45 in both.
+- Anything older than Phase 17Q (it has no V45): **not safe on the same database.** Restore the pre-upgrade backup into a fresh database and start the old release against it.
+- A future release that adds a migration: roll back by restoring the pre-upgrade backup of both PostgreSQL and the bucket; there are no down-migrations and none should be improvised.
+
+Restoring PostgreSQL without the matching bucket (or the reverse) leaves rows pointing at missing objects or objects with no rows. Restore both from the same backup point.
+
+### Pilot backup and restore
+
+Back up PostgreSQL with the 17P script and the bucket with a MinIO client run inside the Docker network (the root credentials are in `.env.pilot`):
+
+```
+scripts/backup-postgres.ps1 -OutputDirectory backups -Container fdmpilot-postgres-1 -Database <POSTGRES_DB> -DatabaseUser <POSTGRES_USER>
+docker run --rm --network fdmpilot_default -v <backup dir>:/backup --env-file <file with MINIO_ROOT_USER/PASSWORD> --entrypoint sh fdm/minio:2025-10-15 \
+  -c 'mc alias set src http://minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" && mc mirror src/<bucket> /backup/<bucket>'
+```
+
+To restore into a second, empty environment (this was rehearsed for the release): start only `postgres` and `minio` of the new environment, restore the dump into a new database name with `scripts/restore-postgres.ps1 -TargetDatabase <new name> -ConfirmTargetDatabase <new name> -Container <postgres container>` (it refuses to overwrite the primary database), set `POSTGRES_DB=<new name>` in that environment's env file, run `minio-init`, mirror the bucket copy back with `mc mirror /backup/<bucket> dst/<bucket>`, then `up -d`. Use the same `secrets/` so the restored owner and Worker credential keep working. Sessions are intentionally not restored: everyone signs in again.
+
+### Logging and retention
+
+Every container writes to stdout and nothing is shipped anywhere. The Docker `json-file` driver does not rotate by default, so configure `max-size` and `max-file` in the Docker daemon (or per service) or forward logs; retention beyond that is the operator's responsibility. Application logs contain events and user e-mail addresses on login and logout, never passwords, tokens, cookies, presigned URLs or media. During a PostgreSQL outage the framework loggers (Hibernate, Hikari, scheduler error handlers) write warnings per failed request or tick; this is expected and ends when the database returns.
+
+### Disk growth
+
+The sources, in the order they grow: the **MinIO volume** (every import, clip and vertical is stored once; the rehearsal's single 52 s, 4 MB source plus its derived clips and verticals came to 10 objects and about 70 MB, so budget several times the size of the originals), **PostgreSQL** (transcripts, analytics and the audit trail grow slowly; a fresh schema is about 70 MB), **container logs** (unbounded unless rotated), **Docker images** (about 5 GB: the Worker image alone is 4 GB with PyTorch and Whisper), and Whisper's model cache (baked into the Worker image, nothing to grow at runtime). The Worker's `/tmp` is a 4 GB tmpfs used for media scratch space, which also bounds the largest media a single Job can process comfortably.
+
+### Capacity guidance (measured, deliberately conservative)
+
+Measured on a 32-core workstation with a 7.5 GB Docker VM, one Worker and two API replicas: idle memory of the whole stack about 1.4 GB (API about 570 MB per replica, Worker about 390 MB); during a 52 s video's vertical render plus transcription the Worker peaked at about 1.5 GB of memory and many cores; the vertical render took 11.7 s and the transcription 6.4 s (Whisper `base`, CPU). API calls answered in a median of 3 to 25 ms. These are single observations on one small video, not benchmarks, and a long video scales with its duration. Plan for 8 GB of RAM for the Docker host with two API replicas and one Worker, at least 4 cores for the Worker, and more memory before raising `WORKER_MAX_ACTIVE_JOBS`. The scheduler defers heavy Jobs when the Worker host reports under 5% available memory (it reads the kernel's `MemAvailable`, not free memory), so a starved host shows up as queued Jobs and an Operations backlog incident rather than as crashes.
+
+### Pilot limitations
+
+If the host or the Docker VM is suspended (laptop sleep), wall-clock time jumps ahead while the schedulers' fixed-delay timers do not. After waking, the Operations page reports the hourly schedulers as stale (`SCHEDULER:<name>:STALE`) until each one runs again; they resolve by themselves within about an hour. Pilot hosts should not sleep.
+
+One PostgreSQL and one MinIO instance (no failover); no self-service users or password reset; no delete function for user data (`docs/DATA_AND_PRIVACY.md`); Ollama and real provider publishing are untested in the release rehearsal (TEST publishing only); source maps are not shipped; a lost `SOCIAL_CREDENTIAL_ENCRYPTION_KEY` requires reconnecting accounts; certificates are the operator's to obtain and renew.

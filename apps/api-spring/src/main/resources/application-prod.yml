@@ -1,27 +1,39 @@
-# Production profile placeholder.
+# Production / pilot profile (Phase 17R). Activate with SPRING_PROFILES_ACTIVE=prod.
 #
-# Phase 1 does not define production infrastructure or secrets management.
-# When production deployment is designed, this file should configure:
-#   - stricter logging (no SQL logging, no framework DEBUG output)
-#   - a real secrets source for DB_*/RABBITMQ_* (not a committed .env file)
-#   - management.endpoint.health.show-details kept at never unless a separate
-#     authenticated operational surface is introduced
-#
-# All connection settings still come from environment variables defined in
-# application.yml; nothing below overrides credentials.
+# Fail-closed: ProductionConfigurationGuard refuses to start when critical configuration is missing or still a development
+# placeholder (it reports variable names, never values). No credential is defaulted here; all of them come from the environment
+# or from *_FILE secret mounts. See docs/CONFIGURATION.md.
+
+server:
+  # nginx is the only supported edge. It sets X-Forwarded-Proto/-For; the API port must never be published directly.
+  forward-headers-strategy: framework
+  error:
+    include-message: never
+    include-binding-errors: never
+    include-stacktrace: never
+    include-exception: never
+  servlet:
+    session:
+      cookie:
+        # Forced on regardless of SESSION_COOKIE_SECURE. Browsers also accept Secure cookies on http://localhost.
+        secure: true
+        http-only: true
+        same-site: lax
+
+spring:
+  jpa:
+    hibernate:
+      # Flyway owns the schema; Hibernate may only validate it.
+      ddl-auto: validate
+    show-sql: false
 
 management:
   endpoint:
     health:
       show-details: never
 
-server:
-  servlet:
-    session:
-      cookie:
-        secure: true
-
 logging:
   level:
     root: INFO
     org.hibernate.SQL: OFF
+    com.fdmultimedia.api: INFO

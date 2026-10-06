@@ -48,7 +48,7 @@ Run against the local Docker stack:
 ```bash
 FDM_API_BASE_URL=http://localhost:8080/api \
 FDM_WORKER_TOKEN=11111111-1111-4111-8111-111111111111.dev_worker_secret_change_me \
-java -jar target/worker-agent-0.1.0-SNAPSHOT.jar
+java -jar target/worker-agent-0.1.0-rc1.jar
 ```
 
 Optional runtime tuning:
@@ -64,7 +64,7 @@ FFMPEG_PATH=ffmpeg \
 TRANSCRIPTION_RUNTIME=WHISPER_CLI \
 TRANSCRIPTION_COMMAND=whisper \
 TRANSCRIPTION_MODEL=base \
-java -jar target/worker-agent-0.1.0-SNAPSHOT.jar
+java -jar target/worker-agent-0.1.0-rc1.jar
 ```
 
 The agent loop is:

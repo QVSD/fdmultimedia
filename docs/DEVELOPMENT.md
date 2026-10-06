@@ -418,7 +418,7 @@ Run it against the Docker stack with the development worker credential from
 ```powershell
 $env:FDM_API_BASE_URL = "http://localhost:8080/api"
 $env:FDM_WORKER_TOKEN = "$env:BOOTSTRAP_WORKER_CREDENTIAL_ID.$env:BOOTSTRAP_WORKER_CREDENTIAL_SECRET"
-java -jar target\worker-agent-0.1.0-SNAPSHOT.jar
+java -jar target\worker-agent-0.1.0-rc1.jar
 ```
 
 Useful worker environment variables:
@@ -1016,3 +1016,7 @@ The complete command/runbook, backup ownership and incident sequence are in `doc
 8. Run the suites: `./mvnw test` (backend), the Worker suite, `ng test --watch=false` and `ng build`. Backend coverage is `OpsRulesTest`, `OpsSanitizerTest`, `DependencyHealthServiceTest`, `OpsIncidentServiceTest`, `OpsIncidentReconcilerTest`, `OperationsControlServiceTest`, `OperationsControlControllerTest`, `OperatorAccessTest`, `SchedulerCadencePolicyTest`, `OpsControlArchitectureTest` and the extended `SchedulerOperationTrackerTest`; frontend coverage is `operations.spec.ts`, `operations.service.spec.ts`, `operator.guard.spec.ts` and `app.spec.ts`.
 
 Flyway is now V45. Do not put cookies, dumps, credentials or runtime logs in the repository. Phase 17R is not started.
+
+## Release candidate notes for developers (Phase 17R)
+
+The development stack is unchanged in behavior (`docker compose up --build -d`, profile `dev`, bootstrap users from `.env`). Differences to know: MinIO is now built from pinned upstream source (`infra/minio`) because the official image is no longer published, so the first build compiles it; the `web` container listens on 8080 (non-root nginx) behind the edge on 8080 as before; the API and Worker jars carry the release version `0.1.0-rc1` (`target/worker-agent-0.1.0-rc1.jar`). The production path is exercised with `docker-compose.pilot.yml`; use `scripts/pilot-init.sh localhost loopback` to create a throwaway pilot configuration on ports 8081/9100. New tests: `release/*Test` (configuration validator, Origin filter, first-run provisioning), `GlobalExceptionHandlerTest` (client errors), `LocalWhisperCliProviderTest` (timestamp clamping), `WorkerTelemetryMemoryTest`, `MachineInfoCollectorTest` and `local-instant.spec.ts` (DST). Flyway stays V45.

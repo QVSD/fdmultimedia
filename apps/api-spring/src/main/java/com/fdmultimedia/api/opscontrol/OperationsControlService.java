@@ -5,6 +5,7 @@ import com.fdmultimedia.api.jobs.JobType;
 import com.fdmultimedia.api.opscontrol.OpsModels.*;
 import com.fdmultimedia.api.opscontrol.OpsSnapshotService.Snapshot;
 import com.fdmultimedia.api.shared.operations.ApiInstanceIdentity;
+import com.fdmultimedia.api.shared.operations.ReleaseInfo;
 import com.fdmultimedia.api.shared.operations.SchedulerOperationTracker;
 import java.lang.management.ManagementFactory;
 import java.time.Clock;
@@ -35,12 +36,13 @@ public class OperationsControlService {
     private final OpsProperties properties;
     private final SchedulerOperationTracker tracker;
     private final ApiInstanceIdentity instance;
+    private final ReleaseInfo release;
     private final Clock clock;
 
     public OperationsControlService(OpsSnapshotService snapshots, OpsIncidentService incidents, OpsStore store, OpsProperties properties,
-            SchedulerOperationTracker tracker, ApiInstanceIdentity instance, Clock clock) {
+            SchedulerOperationTracker tracker, ApiInstanceIdentity instance, ReleaseInfo release, Clock clock) {
         this.snapshots = snapshots; this.incidents = incidents; this.store = store; this.properties = properties;
-        this.tracker = tracker; this.instance = instance; this.clock = clock;
+        this.tracker = tracker; this.instance = instance; this.release = release; this.clock = clock;
     }
 
     public Overview overview(UUID workspaceId) {
@@ -50,7 +52,8 @@ public class OperationsControlService {
         Dependency postgres = s.dependencies().stream().filter(d -> d.name().equals("POSTGRES")).findFirst().orElse(null);
         boolean databaseUp = postgres == null || postgres.status() == ComponentStatus.HEALTHY;
         ApiSection api = new ApiSection(databaseUp && tracker.isAccepting() ? ComponentStatus.HEALTHY : ComponentStatus.DEGRADED,
-                instance.value(), Math.max(0, ManagementFactory.getRuntimeMXBean().getUptime() / 1000), "UP", databaseUp ? "UP" : "DOWN");
+                instance.value(), Math.max(0, ManagementFactory.getRuntimeMXBean().getUptime() / 1000), "UP", databaseUp ? "UP" : "DOWN",
+                release.version(), release.commit(), release.builtAt());
         List<Incident> top = active.stream().sorted(OpsRules.INCIDENT_ORDER).limit(TOP_INCIDENTS).toList();
         return new Overview(OpsModels.OVERVIEW_ENGINE, s.observedAt(), OpsRules.overall(active), api, s.dependencies(), s.workersSection(),
                 s.jobs(), s.schedulersSection(), s.publishing(), s.automation(), incidentsSection, top, REFRESH_HINT_SECONDS);
